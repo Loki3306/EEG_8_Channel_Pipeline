@@ -1,0 +1,61 @@
+{
+  "mode": "shuffle-labels",
+  "device": "cpu",
+  "channels": [
+    0,
+    1
+  ],
+  "epochs": 1,
+  "batch_size": 2,
+  "lr": 0.001,
+  "weight_decay": 0.0001,
+  "patience": 5,
+  "window_seconds": [
+    10
+  ],
+  "sanity": {
+    "zero_eeg": false,
+    "shuffle_labels": true
+  },
+  "mapping_mode": "A-B",
+  "candidates": [
+    {
+      "mapping": {
+        "1": "A",
+        "2": "B"
+      },
+      "window_runs": [
+        {
+          "window_seconds": 10,
+          "overall": {
+            "trial_accuracy": 0.4583333333333333,
+            "balanced_accuracy": 0.46205357142857145,
+            "mean_corr_difference": -0.005154455004725101,
+            "mean_corr_a": 0.014363921152926815,
+            "mean_corr_b": 0.009160803780153205
+          }
+        }
+      ],
+      "best": {
+        "window_seconds": 10,
+        "overall": {
+          "trial_accuracy": 0.4583333333333333,
+          "balanced_accuracy": 0.46205357142857145,
+          "mean_corr_difference": -0.005154455004725101,
+          "mean_corr_a": 0.014363921152926815,
+          "mean_corr_b": 0.009160803780153205
+        }
+      }
+    }
+  ],
+  "best": {
+    "window_seconds": 10,
+    "overall": {
+      "trial_accuracy": 0.4583333333333333,
+      "balanced_accuracy": 0.46205357142857145,
+      "mean_corr_difference": -0.005154455004725101,
+      "mean_corr_a": 0.014363921152926815,
+      "mean_corr_b": 0.009160803780153205
+    }
+  }
+}

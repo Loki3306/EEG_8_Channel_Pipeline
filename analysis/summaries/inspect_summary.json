@@ -1,0 +1,7823 @@
+{
+  "consistency": {
+    "subjects": 18,
+    "trial_counts": [
+      60
+    ],
+    "event_counts": [
+      60
+    ],
+    "eeg_shapes": [
+      [
+        3200,
+        66
+      ]
+    ],
+    "wavA_shapes": [
+      [
+        3200,
+        1
+      ]
+    ],
+    "wavB_shapes": [
+      [
+        3200,
+        1
+      ]
+    ],
+    "fsample_eeg": [
+      64
+    ],
+    "fsample_wavA": [
+      64
+    ],
+    "fsample_wavB": [
+      64
+    ],
+    "channel_counts": [
+      66
+    ],
+    "trial_labels": [
+      1,
+      2
+    ]
+  },
+  "subjects": [
+    {
+      "file": "S1_data_preproc.mat",
+      "top_level_keys": [
+        "data"
+      ],
+      "data_fields": [
+        "dim",
+        "fsample",
+        "event",
+        "eeg",
+        "cfg",
+        "wavA",
+        "wavB"
+      ],
+      "trial_count": 60,
+      "event_count": 60,
+      "eeg_shape": [
+        3200,
+        66
+      ],
+      "wavA_shape": [
+        3200,
+        1
+      ],
+      "wavB_shape": [
+        3200,
+        1
+      ],
+      "eeg_dtype": "float64",
+      "wavA_dtype": "float64",
+      "wavB_dtype": "float64",
+      "fsample": {
+        "eeg": 64,
+        "wavA": 64,
+        "wavB": 64
+      },
+      "channel_count": 66,
+      "channel_names": [
+        "Fp1",
+        "AF7",
+        "AF3",
+        "F1",
+        "F3",
+        "F5",
+        "F7",
+        "FT7",
+        "FC5",
+        "FC3",
+        "FC1",
+        "C1",
+        "C3",
+        "C5",
+        "T7",
+        "TP7",
+        "CP5",
+        "CP3",
+        "CP1",
+        "P1",
+        "P3",
+        "P5",
+        "P7",
+        "P9",
+        "PO7",
+        "PO3",
+        "O1",
+        "Iz",
+        "Oz",
+        "POz",
+        "Pz",
+        "CPz",
+        "Fpz",
+        "Fp2",
+        "AF8",
+        "AF4",
+        "AFz",
+        "Fz",
+        "F2",
+        "F4",
+        "F6",
+        "F8",
+        "FT8",
+        "FC6",
+        "FC4",
+        "FC2",
+        "FCz",
+        "Cz",
+        "C2",
+        "C4",
+        "C6",
+        "T8",
+        "TP8",
+        "CP6",
+        "CP4",
+        "CP2",
+        "P2",
+        "P4",
+        "P6",
+        "P8",
+        "P10",
+        "PO8",
+        "PO4",
+        "O2",
+        "EXG1",
+        "EXG2"
+      ],
+      "trial_labels": [
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "trial_event_samples": [
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "cfg": [
+        {
+          "index": 0,
+          "fields": [
+            "eeg",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_preprocessing",
+          "date": "13-Mar-2018"
+        },
+        {
+          "index": 1,
+          "fields": [
+            "eeg",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_resampledata",
+          "date": "13-Mar-2018"
+        },
+        {
+          "index": 2,
+          "fields": [
+            "eeg",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_preprocessing",
+          "date": "13-Mar-2018"
+        },
+        {
+          "index": 3,
+          "fields": [
+            "eeg",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_preprocessing",
+          "date": "13-Mar-2018"
+        },
+        {
+          "index": 4,
+          "fields": [
+            "eeg",
+            "fcn",
+            "date",
+            "datacfg"
+          ],
+          "fcn": "co_appenddata",
+          "date": "13-Mar-2018"
+        },
+        {
+          "index": 5,
+          "fields": [
+            "eeg",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_denoise",
+          "date": "13-Mar-2018"
+        },
+        {
+          "index": 6,
+          "fields": [
+            "eeg",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_selectdim",
+          "date": "13-Mar-2018"
+        },
+        {
+          "index": 7,
+          "fields": [
+            "eeg",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_preprocessing",
+          "date": "13-Mar-2018"
+        },
+        {
+          "index": 8,
+          "fields": [
+            "eeg",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_selectevent",
+          "date": "13-Mar-2018"
+        },
+        {
+          "index": 9,
+          "fields": [
+            "eeg",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_splitdata",
+          "date": "13-Mar-2018"
+        },
+        {
+          "index": 10,
+          "fields": [
+            "wavA",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_preprocessing",
+          "date": "13-Mar-2018"
+        },
+        {
+          "index": 11,
+          "fields": [
+            "wavA",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_auditoryfilterbank",
+          "date": "13-Mar-2018"
+        },
+        {
+          "index": 12,
+          "fields": [
+            "wavB",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_preprocessing",
+          "date": "13-Mar-2018"
+        },
+        {
+          "index": 13,
+          "fields": [
+            "wavB",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_auditoryfilterbank",
+          "date": "13-Mar-2018"
+        },
+        {
+          "index": 14,
+          "fields": [
+            "wavA",
+            "wavB",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_resampledata",
+          "date": "13-Mar-2018"
+        },
+        {
+          "index": 15,
+          "fields": [
+            "wavA",
+            "wavB",
+            "sum",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_dimaverage",
+          "date": "13-Mar-2018"
+        },
+        {
+          "index": 16,
+          "fields": [
+            "wavA",
+            "wavB",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_squeeze",
+          "date": "13-Mar-2018"
+        },
+        {
+          "index": 17,
+          "fields": [
+            "eeg",
+            "wavA",
+            "wavB",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_selectdim",
+          "date": "13-Mar-2018"
+        },
+        {
+          "index": 18,
+          "fields": [
+            "eeg",
+            "wavA",
+            "wavB",
+            "fcn",
+            "date",
+            "datacfg"
+          ],
+          "fcn": "co_appenddata",
+          "date": "13-Mar-2018"
+        }
+      ]
+    },
+    {
+      "file": "S2_data_preproc.mat",
+      "top_level_keys": [
+        "data"
+      ],
+      "data_fields": [
+        "dim",
+        "fsample",
+        "event",
+        "eeg",
+        "cfg",
+        "wavA",
+        "wavB"
+      ],
+      "trial_count": 60,
+      "event_count": 60,
+      "eeg_shape": [
+        3200,
+        66
+      ],
+      "wavA_shape": [
+        3200,
+        1
+      ],
+      "wavB_shape": [
+        3200,
+        1
+      ],
+      "eeg_dtype": "float64",
+      "wavA_dtype": "float64",
+      "wavB_dtype": "float64",
+      "fsample": {
+        "eeg": 64,
+        "wavA": 64,
+        "wavB": 64
+      },
+      "channel_count": 66,
+      "channel_names": [
+        "Fp1",
+        "AF7",
+        "AF3",
+        "F1",
+        "F3",
+        "F5",
+        "F7",
+        "FT7",
+        "FC5",
+        "FC3",
+        "FC1",
+        "C1",
+        "C3",
+        "C5",
+        "T7",
+        "TP7",
+        "CP5",
+        "CP3",
+        "CP1",
+        "P1",
+        "P3",
+        "P5",
+        "P7",
+        "P9",
+        "PO7",
+        "PO3",
+        "O1",
+        "Iz",
+        "Oz",
+        "POz",
+        "Pz",
+        "CPz",
+        "Fpz",
+        "Fp2",
+        "AF8",
+        "AF4",
+        "AFz",
+        "Fz",
+        "F2",
+        "F4",
+        "F6",
+        "F8",
+        "FT8",
+        "FC6",
+        "FC4",
+        "FC2",
+        "FCz",
+        "Cz",
+        "C2",
+        "C4",
+        "C6",
+        "T8",
+        "TP8",
+        "CP6",
+        "CP4",
+        "CP2",
+        "P2",
+        "P4",
+        "P6",
+        "P8",
+        "P10",
+        "PO8",
+        "PO4",
+        "O2",
+        "EXG1",
+        "EXG2"
+      ],
+      "trial_labels": [
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "trial_event_samples": [
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "cfg": [
+        {
+          "index": 0,
+          "fields": [
+            "eeg",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_preprocessing",
+          "date": "13-Mar-2018"
+        },
+        {
+          "index": 1,
+          "fields": [
+            "eeg",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_resampledata",
+          "date": "13-Mar-2018"
+        },
+        {
+          "index": 2,
+          "fields": [
+            "eeg",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_preprocessing",
+          "date": "13-Mar-2018"
+        },
+        {
+          "index": 3,
+          "fields": [
+            "eeg",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_preprocessing",
+          "date": "13-Mar-2018"
+        },
+        {
+          "index": 4,
+          "fields": [
+            "eeg",
+            "fcn",
+            "date",
+            "datacfg"
+          ],
+          "fcn": "co_appenddata",
+          "date": "13-Mar-2018"
+        },
+        {
+          "index": 5,
+          "fields": [
+            "eeg",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_denoise",
+          "date": "13-Mar-2018"
+        },
+        {
+          "index": 6,
+          "fields": [
+            "eeg",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_selectdim",
+          "date": "13-Mar-2018"
+        },
+        {
+          "index": 7,
+          "fields": [
+            "eeg",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_preprocessing",
+          "date": "13-Mar-2018"
+        },
+        {
+          "index": 8,
+          "fields": [
+            "eeg",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_selectevent",
+          "date": "13-Mar-2018"
+        },
+        {
+          "index": 9,
+          "fields": [
+            "eeg",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_splitdata",
+          "date": "13-Mar-2018"
+        },
+        {
+          "index": 10,
+          "fields": [
+            "wavA",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_preprocessing",
+          "date": "13-Mar-2018"
+        },
+        {
+          "index": 11,
+          "fields": [
+            "wavA",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_auditoryfilterbank",
+          "date": "13-Mar-2018"
+        },
+        {
+          "index": 12,
+          "fields": [
+            "wavB",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_preprocessing",
+          "date": "13-Mar-2018"
+        },
+        {
+          "index": 13,
+          "fields": [
+            "wavB",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_auditoryfilterbank",
+          "date": "13-Mar-2018"
+        },
+        {
+          "index": 14,
+          "fields": [
+            "wavA",
+            "wavB",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_resampledata",
+          "date": "13-Mar-2018"
+        },
+        {
+          "index": 15,
+          "fields": [
+            "wavA",
+            "wavB",
+            "sum",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_dimaverage",
+          "date": "13-Mar-2018"
+        },
+        {
+          "index": 16,
+          "fields": [
+            "wavA",
+            "wavB",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_squeeze",
+          "date": "13-Mar-2018"
+        },
+        {
+          "index": 17,
+          "fields": [
+            "eeg",
+            "wavA",
+            "wavB",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_selectdim",
+          "date": "13-Mar-2018"
+        },
+        {
+          "index": 18,
+          "fields": [
+            "eeg",
+            "wavA",
+            "wavB",
+            "fcn",
+            "date",
+            "datacfg"
+          ],
+          "fcn": "co_appenddata",
+          "date": "13-Mar-2018"
+        }
+      ]
+    },
+    {
+      "file": "S3_data_preproc.mat",
+      "top_level_keys": [
+        "data"
+      ],
+      "data_fields": [
+        "dim",
+        "fsample",
+        "event",
+        "eeg",
+        "cfg",
+        "wavA",
+        "wavB"
+      ],
+      "trial_count": 60,
+      "event_count": 60,
+      "eeg_shape": [
+        3200,
+        66
+      ],
+      "wavA_shape": [
+        3200,
+        1
+      ],
+      "wavB_shape": [
+        3200,
+        1
+      ],
+      "eeg_dtype": "float64",
+      "wavA_dtype": "float64",
+      "wavB_dtype": "float64",
+      "fsample": {
+        "eeg": 64,
+        "wavA": 64,
+        "wavB": 64
+      },
+      "channel_count": 66,
+      "channel_names": [
+        "Fp1",
+        "AF7",
+        "AF3",
+        "F1",
+        "F3",
+        "F5",
+        "F7",
+        "FT7",
+        "FC5",
+        "FC3",
+        "FC1",
+        "C1",
+        "C3",
+        "C5",
+        "T7",
+        "TP7",
+        "CP5",
+        "CP3",
+        "CP1",
+        "P1",
+        "P3",
+        "P5",
+        "P7",
+        "P9",
+        "PO7",
+        "PO3",
+        "O1",
+        "Iz",
+        "Oz",
+        "POz",
+        "Pz",
+        "CPz",
+        "Fpz",
+        "Fp2",
+        "AF8",
+        "AF4",
+        "AFz",
+        "Fz",
+        "F2",
+        "F4",
+        "F6",
+        "F8",
+        "FT8",
+        "FC6",
+        "FC4",
+        "FC2",
+        "FCz",
+        "Cz",
+        "C2",
+        "C4",
+        "C6",
+        "T8",
+        "TP8",
+        "CP6",
+        "CP4",
+        "CP2",
+        "P2",
+        "P4",
+        "P6",
+        "P8",
+        "P10",
+        "PO8",
+        "PO4",
+        "O2",
+        "EXG1",
+        "EXG2"
+      ],
+      "trial_labels": [
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2
+      ],
+      "trial_event_samples": [
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "cfg": [
+        {
+          "index": 0,
+          "fields": [
+            "eeg",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_preprocessing",
+          "date": "13-Mar-2018"
+        },
+        {
+          "index": 1,
+          "fields": [
+            "eeg",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_resampledata",
+          "date": "13-Mar-2018"
+        },
+        {
+          "index": 2,
+          "fields": [
+            "eeg",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_preprocessing",
+          "date": "13-Mar-2018"
+        },
+        {
+          "index": 3,
+          "fields": [
+            "eeg",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_preprocessing",
+          "date": "13-Mar-2018"
+        },
+        {
+          "index": 4,
+          "fields": [
+            "eeg",
+            "fcn",
+            "date",
+            "datacfg"
+          ],
+          "fcn": "co_appenddata",
+          "date": "13-Mar-2018"
+        },
+        {
+          "index": 5,
+          "fields": [
+            "eeg",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_denoise",
+          "date": "13-Mar-2018"
+        },
+        {
+          "index": 6,
+          "fields": [
+            "eeg",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_selectdim",
+          "date": "13-Mar-2018"
+        },
+        {
+          "index": 7,
+          "fields": [
+            "eeg",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_preprocessing",
+          "date": "13-Mar-2018"
+        },
+        {
+          "index": 8,
+          "fields": [
+            "eeg",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_selectevent",
+          "date": "13-Mar-2018"
+        },
+        {
+          "index": 9,
+          "fields": [
+            "eeg",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_splitdata",
+          "date": "13-Mar-2018"
+        },
+        {
+          "index": 10,
+          "fields": [
+            "wavA",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_preprocessing",
+          "date": "13-Mar-2018"
+        },
+        {
+          "index": 11,
+          "fields": [
+            "wavA",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_auditoryfilterbank",
+          "date": "13-Mar-2018"
+        },
+        {
+          "index": 12,
+          "fields": [
+            "wavB",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_preprocessing",
+          "date": "13-Mar-2018"
+        },
+        {
+          "index": 13,
+          "fields": [
+            "wavB",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_auditoryfilterbank",
+          "date": "13-Mar-2018"
+        },
+        {
+          "index": 14,
+          "fields": [
+            "wavA",
+            "wavB",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_resampledata",
+          "date": "13-Mar-2018"
+        },
+        {
+          "index": 15,
+          "fields": [
+            "wavA",
+            "wavB",
+            "sum",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_dimaverage",
+          "date": "13-Mar-2018"
+        },
+        {
+          "index": 16,
+          "fields": [
+            "wavA",
+            "wavB",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_squeeze",
+          "date": "13-Mar-2018"
+        },
+        {
+          "index": 17,
+          "fields": [
+            "eeg",
+            "wavA",
+            "wavB",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_selectdim",
+          "date": "13-Mar-2018"
+        },
+        {
+          "index": 18,
+          "fields": [
+            "eeg",
+            "wavA",
+            "wavB",
+            "fcn",
+            "date",
+            "datacfg"
+          ],
+          "fcn": "co_appenddata",
+          "date": "13-Mar-2018"
+        }
+      ]
+    },
+    {
+      "file": "S4_data_preproc.mat",
+      "top_level_keys": [
+        "data"
+      ],
+      "data_fields": [
+        "dim",
+        "fsample",
+        "event",
+        "eeg",
+        "cfg",
+        "wavA",
+        "wavB"
+      ],
+      "trial_count": 60,
+      "event_count": 60,
+      "eeg_shape": [
+        3200,
+        66
+      ],
+      "wavA_shape": [
+        3200,
+        1
+      ],
+      "wavB_shape": [
+        3200,
+        1
+      ],
+      "eeg_dtype": "float64",
+      "wavA_dtype": "float64",
+      "wavB_dtype": "float64",
+      "fsample": {
+        "eeg": 64,
+        "wavA": 64,
+        "wavB": 64
+      },
+      "channel_count": 66,
+      "channel_names": [
+        "Fp1",
+        "AF7",
+        "AF3",
+        "F1",
+        "F3",
+        "F5",
+        "F7",
+        "FT7",
+        "FC5",
+        "FC3",
+        "FC1",
+        "C1",
+        "C3",
+        "C5",
+        "T7",
+        "TP7",
+        "CP5",
+        "CP3",
+        "CP1",
+        "P1",
+        "P3",
+        "P5",
+        "P7",
+        "P9",
+        "PO7",
+        "PO3",
+        "O1",
+        "Iz",
+        "Oz",
+        "POz",
+        "Pz",
+        "CPz",
+        "Fpz",
+        "Fp2",
+        "AF8",
+        "AF4",
+        "AFz",
+        "Fz",
+        "F2",
+        "F4",
+        "F6",
+        "F8",
+        "FT8",
+        "FC6",
+        "FC4",
+        "FC2",
+        "FCz",
+        "Cz",
+        "C2",
+        "C4",
+        "C6",
+        "T8",
+        "TP8",
+        "CP6",
+        "CP4",
+        "CP2",
+        "P2",
+        "P4",
+        "P6",
+        "P8",
+        "P10",
+        "PO8",
+        "PO4",
+        "O2",
+        "EXG1",
+        "EXG2"
+      ],
+      "trial_labels": [
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2
+      ],
+      "trial_event_samples": [
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "cfg": [
+        {
+          "index": 0,
+          "fields": [
+            "eeg",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_preprocessing",
+          "date": "13-Mar-2018"
+        },
+        {
+          "index": 1,
+          "fields": [
+            "eeg",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_resampledata",
+          "date": "13-Mar-2018"
+        },
+        {
+          "index": 2,
+          "fields": [
+            "eeg",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_preprocessing",
+          "date": "13-Mar-2018"
+        },
+        {
+          "index": 3,
+          "fields": [
+            "eeg",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_preprocessing",
+          "date": "13-Mar-2018"
+        },
+        {
+          "index": 4,
+          "fields": [
+            "eeg",
+            "fcn",
+            "date",
+            "datacfg"
+          ],
+          "fcn": "co_appenddata",
+          "date": "13-Mar-2018"
+        },
+        {
+          "index": 5,
+          "fields": [
+            "eeg",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_denoise",
+          "date": "13-Mar-2018"
+        },
+        {
+          "index": 6,
+          "fields": [
+            "eeg",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_selectdim",
+          "date": "13-Mar-2018"
+        },
+        {
+          "index": 7,
+          "fields": [
+            "eeg",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_preprocessing",
+          "date": "13-Mar-2018"
+        },
+        {
+          "index": 8,
+          "fields": [
+            "eeg",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_selectevent",
+          "date": "13-Mar-2018"
+        },
+        {
+          "index": 9,
+          "fields": [
+            "eeg",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_splitdata",
+          "date": "13-Mar-2018"
+        },
+        {
+          "index": 10,
+          "fields": [
+            "wavA",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_preprocessing",
+          "date": "13-Mar-2018"
+        },
+        {
+          "index": 11,
+          "fields": [
+            "wavA",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_auditoryfilterbank",
+          "date": "13-Mar-2018"
+        },
+        {
+          "index": 12,
+          "fields": [
+            "wavB",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_preprocessing",
+          "date": "13-Mar-2018"
+        },
+        {
+          "index": 13,
+          "fields": [
+            "wavB",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_auditoryfilterbank",
+          "date": "13-Mar-2018"
+        },
+        {
+          "index": 14,
+          "fields": [
+            "wavA",
+            "wavB",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_resampledata",
+          "date": "13-Mar-2018"
+        },
+        {
+          "index": 15,
+          "fields": [
+            "wavA",
+            "wavB",
+            "sum",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_dimaverage",
+          "date": "13-Mar-2018"
+        },
+        {
+          "index": 16,
+          "fields": [
+            "wavA",
+            "wavB",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_squeeze",
+          "date": "13-Mar-2018"
+        },
+        {
+          "index": 17,
+          "fields": [
+            "eeg",
+            "wavA",
+            "wavB",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_selectdim",
+          "date": "13-Mar-2018"
+        },
+        {
+          "index": 18,
+          "fields": [
+            "eeg",
+            "wavA",
+            "wavB",
+            "fcn",
+            "date",
+            "datacfg"
+          ],
+          "fcn": "co_appenddata",
+          "date": "13-Mar-2018"
+        }
+      ]
+    },
+    {
+      "file": "S5_data_preproc.mat",
+      "top_level_keys": [
+        "data"
+      ],
+      "data_fields": [
+        "dim",
+        "fsample",
+        "event",
+        "eeg",
+        "cfg",
+        "wavA",
+        "wavB"
+      ],
+      "trial_count": 60,
+      "event_count": 60,
+      "eeg_shape": [
+        3200,
+        66
+      ],
+      "wavA_shape": [
+        3200,
+        1
+      ],
+      "wavB_shape": [
+        3200,
+        1
+      ],
+      "eeg_dtype": "float64",
+      "wavA_dtype": "float64",
+      "wavB_dtype": "float64",
+      "fsample": {
+        "eeg": 64,
+        "wavA": 64,
+        "wavB": 64
+      },
+      "channel_count": 66,
+      "channel_names": [
+        "Fp1",
+        "AF7",
+        "AF3",
+        "F1",
+        "F3",
+        "F5",
+        "F7",
+        "FT7",
+        "FC5",
+        "FC3",
+        "FC1",
+        "C1",
+        "C3",
+        "C5",
+        "T7",
+        "TP7",
+        "CP5",
+        "CP3",
+        "CP1",
+        "P1",
+        "P3",
+        "P5",
+        "P7",
+        "P9",
+        "PO7",
+        "PO3",
+        "O1",
+        "Iz",
+        "Oz",
+        "POz",
+        "Pz",
+        "CPz",
+        "Fpz",
+        "Fp2",
+        "AF8",
+        "AF4",
+        "AFz",
+        "Fz",
+        "F2",
+        "F4",
+        "F6",
+        "F8",
+        "FT8",
+        "FC6",
+        "FC4",
+        "FC2",
+        "FCz",
+        "Cz",
+        "C2",
+        "C4",
+        "C6",
+        "T8",
+        "TP8",
+        "CP6",
+        "CP4",
+        "CP2",
+        "P2",
+        "P4",
+        "P6",
+        "P8",
+        "P10",
+        "PO8",
+        "PO4",
+        "O2",
+        "EXG1",
+        "EXG2"
+      ],
+      "trial_labels": [
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2
+      ],
+      "trial_event_samples": [
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "cfg": [
+        {
+          "index": 0,
+          "fields": [
+            "eeg",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_preprocessing",
+          "date": "13-Mar-2018"
+        },
+        {
+          "index": 1,
+          "fields": [
+            "eeg",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_resampledata",
+          "date": "13-Mar-2018"
+        },
+        {
+          "index": 2,
+          "fields": [
+            "eeg",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_preprocessing",
+          "date": "13-Mar-2018"
+        },
+        {
+          "index": 3,
+          "fields": [
+            "eeg",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_preprocessing",
+          "date": "13-Mar-2018"
+        },
+        {
+          "index": 4,
+          "fields": [
+            "eeg",
+            "fcn",
+            "date",
+            "datacfg"
+          ],
+          "fcn": "co_appenddata",
+          "date": "13-Mar-2018"
+        },
+        {
+          "index": 5,
+          "fields": [
+            "eeg",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_denoise",
+          "date": "13-Mar-2018"
+        },
+        {
+          "index": 6,
+          "fields": [
+            "eeg",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_selectdim",
+          "date": "13-Mar-2018"
+        },
+        {
+          "index": 7,
+          "fields": [
+            "eeg",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_preprocessing",
+          "date": "13-Mar-2018"
+        },
+        {
+          "index": 8,
+          "fields": [
+            "eeg",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_selectevent",
+          "date": "13-Mar-2018"
+        },
+        {
+          "index": 9,
+          "fields": [
+            "eeg",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_splitdata",
+          "date": "13-Mar-2018"
+        },
+        {
+          "index": 10,
+          "fields": [
+            "wavA",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_preprocessing",
+          "date": "13-Mar-2018"
+        },
+        {
+          "index": 11,
+          "fields": [
+            "wavA",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_auditoryfilterbank",
+          "date": "13-Mar-2018"
+        },
+        {
+          "index": 12,
+          "fields": [
+            "wavB",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_preprocessing",
+          "date": "13-Mar-2018"
+        },
+        {
+          "index": 13,
+          "fields": [
+            "wavB",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_auditoryfilterbank",
+          "date": "13-Mar-2018"
+        },
+        {
+          "index": 14,
+          "fields": [
+            "wavA",
+            "wavB",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_resampledata",
+          "date": "13-Mar-2018"
+        },
+        {
+          "index": 15,
+          "fields": [
+            "wavA",
+            "wavB",
+            "sum",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_dimaverage",
+          "date": "13-Mar-2018"
+        },
+        {
+          "index": 16,
+          "fields": [
+            "wavA",
+            "wavB",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_squeeze",
+          "date": "13-Mar-2018"
+        },
+        {
+          "index": 17,
+          "fields": [
+            "eeg",
+            "wavA",
+            "wavB",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_selectdim",
+          "date": "13-Mar-2018"
+        },
+        {
+          "index": 18,
+          "fields": [
+            "eeg",
+            "wavA",
+            "wavB",
+            "fcn",
+            "date",
+            "datacfg"
+          ],
+          "fcn": "co_appenddata",
+          "date": "13-Mar-2018"
+        }
+      ]
+    },
+    {
+      "file": "S6_data_preproc.mat",
+      "top_level_keys": [
+        "data"
+      ],
+      "data_fields": [
+        "dim",
+        "fsample",
+        "event",
+        "eeg",
+        "cfg",
+        "wavA",
+        "wavB"
+      ],
+      "trial_count": 60,
+      "event_count": 60,
+      "eeg_shape": [
+        3200,
+        66
+      ],
+      "wavA_shape": [
+        3200,
+        1
+      ],
+      "wavB_shape": [
+        3200,
+        1
+      ],
+      "eeg_dtype": "float64",
+      "wavA_dtype": "float64",
+      "wavB_dtype": "float64",
+      "fsample": {
+        "eeg": 64,
+        "wavA": 64,
+        "wavB": 64
+      },
+      "channel_count": 66,
+      "channel_names": [
+        "Fp1",
+        "AF7",
+        "AF3",
+        "F1",
+        "F3",
+        "F5",
+        "F7",
+        "FT7",
+        "FC5",
+        "FC3",
+        "FC1",
+        "C1",
+        "C3",
+        "C5",
+        "T7",
+        "TP7",
+        "CP5",
+        "CP3",
+        "CP1",
+        "P1",
+        "P3",
+        "P5",
+        "P7",
+        "P9",
+        "PO7",
+        "PO3",
+        "O1",
+        "Iz",
+        "Oz",
+        "POz",
+        "Pz",
+        "CPz",
+        "Fpz",
+        "Fp2",
+        "AF8",
+        "AF4",
+        "AFz",
+        "Fz",
+        "F2",
+        "F4",
+        "F6",
+        "F8",
+        "FT8",
+        "FC6",
+        "FC4",
+        "FC2",
+        "FCz",
+        "Cz",
+        "C2",
+        "C4",
+        "C6",
+        "T8",
+        "TP8",
+        "CP6",
+        "CP4",
+        "CP2",
+        "P2",
+        "P4",
+        "P6",
+        "P8",
+        "P10",
+        "PO8",
+        "PO4",
+        "O2",
+        "EXG1",
+        "EXG2"
+      ],
+      "trial_labels": [
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2
+      ],
+      "trial_event_samples": [
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "cfg": [
+        {
+          "index": 0,
+          "fields": [
+            "eeg",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_preprocessing",
+          "date": "13-Mar-2018"
+        },
+        {
+          "index": 1,
+          "fields": [
+            "eeg",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_resampledata",
+          "date": "13-Mar-2018"
+        },
+        {
+          "index": 2,
+          "fields": [
+            "eeg",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_preprocessing",
+          "date": "13-Mar-2018"
+        },
+        {
+          "index": 3,
+          "fields": [
+            "eeg",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_preprocessing",
+          "date": "13-Mar-2018"
+        },
+        {
+          "index": 4,
+          "fields": [
+            "eeg",
+            "fcn",
+            "date",
+            "datacfg"
+          ],
+          "fcn": "co_appenddata",
+          "date": "13-Mar-2018"
+        },
+        {
+          "index": 5,
+          "fields": [
+            "eeg",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_denoise",
+          "date": "13-Mar-2018"
+        },
+        {
+          "index": 6,
+          "fields": [
+            "eeg",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_selectdim",
+          "date": "13-Mar-2018"
+        },
+        {
+          "index": 7,
+          "fields": [
+            "eeg",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_preprocessing",
+          "date": "13-Mar-2018"
+        },
+        {
+          "index": 8,
+          "fields": [
+            "eeg",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_selectevent",
+          "date": "13-Mar-2018"
+        },
+        {
+          "index": 9,
+          "fields": [
+            "eeg",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_splitdata",
+          "date": "13-Mar-2018"
+        },
+        {
+          "index": 10,
+          "fields": [
+            "wavA",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_preprocessing",
+          "date": "13-Mar-2018"
+        },
+        {
+          "index": 11,
+          "fields": [
+            "wavA",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_auditoryfilterbank",
+          "date": "13-Mar-2018"
+        },
+        {
+          "index": 12,
+          "fields": [
+            "wavB",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_preprocessing",
+          "date": "13-Mar-2018"
+        },
+        {
+          "index": 13,
+          "fields": [
+            "wavB",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_auditoryfilterbank",
+          "date": "13-Mar-2018"
+        },
+        {
+          "index": 14,
+          "fields": [
+            "wavA",
+            "wavB",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_resampledata",
+          "date": "13-Mar-2018"
+        },
+        {
+          "index": 15,
+          "fields": [
+            "wavA",
+            "wavB",
+            "sum",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_dimaverage",
+          "date": "13-Mar-2018"
+        },
+        {
+          "index": 16,
+          "fields": [
+            "wavA",
+            "wavB",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_squeeze",
+          "date": "13-Mar-2018"
+        },
+        {
+          "index": 17,
+          "fields": [
+            "eeg",
+            "wavA",
+            "wavB",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_selectdim",
+          "date": "13-Mar-2018"
+        },
+        {
+          "index": 18,
+          "fields": [
+            "eeg",
+            "wavA",
+            "wavB",
+            "fcn",
+            "date",
+            "datacfg"
+          ],
+          "fcn": "co_appenddata",
+          "date": "13-Mar-2018"
+        }
+      ]
+    },
+    {
+      "file": "S7_data_preproc.mat",
+      "top_level_keys": [
+        "data"
+      ],
+      "data_fields": [
+        "dim",
+        "fsample",
+        "event",
+        "eeg",
+        "cfg",
+        "wavA",
+        "wavB"
+      ],
+      "trial_count": 60,
+      "event_count": 60,
+      "eeg_shape": [
+        3200,
+        66
+      ],
+      "wavA_shape": [
+        3200,
+        1
+      ],
+      "wavB_shape": [
+        3200,
+        1
+      ],
+      "eeg_dtype": "float64",
+      "wavA_dtype": "float64",
+      "wavB_dtype": "float64",
+      "fsample": {
+        "eeg": 64,
+        "wavA": 64,
+        "wavB": 64
+      },
+      "channel_count": 66,
+      "channel_names": [
+        "Fp1",
+        "AF7",
+        "AF3",
+        "F1",
+        "F3",
+        "F5",
+        "F7",
+        "FT7",
+        "FC5",
+        "FC3",
+        "FC1",
+        "C1",
+        "C3",
+        "C5",
+        "T7",
+        "TP7",
+        "CP5",
+        "CP3",
+        "CP1",
+        "P1",
+        "P3",
+        "P5",
+        "P7",
+        "P9",
+        "PO7",
+        "PO3",
+        "O1",
+        "Iz",
+        "Oz",
+        "POz",
+        "Pz",
+        "CPz",
+        "Fpz",
+        "Fp2",
+        "AF8",
+        "AF4",
+        "AFz",
+        "Fz",
+        "F2",
+        "F4",
+        "F6",
+        "F8",
+        "FT8",
+        "FC6",
+        "FC4",
+        "FC2",
+        "FCz",
+        "Cz",
+        "C2",
+        "C4",
+        "C6",
+        "T8",
+        "TP8",
+        "CP6",
+        "CP4",
+        "CP2",
+        "P2",
+        "P4",
+        "P6",
+        "P8",
+        "P10",
+        "PO8",
+        "PO4",
+        "O2",
+        "EXG1",
+        "EXG2"
+      ],
+      "trial_labels": [
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "trial_event_samples": [
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "cfg": [
+        {
+          "index": 0,
+          "fields": [
+            "eeg",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_preprocessing",
+          "date": "13-Mar-2018"
+        },
+        {
+          "index": 1,
+          "fields": [
+            "eeg",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_resampledata",
+          "date": "13-Mar-2018"
+        },
+        {
+          "index": 2,
+          "fields": [
+            "eeg",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_preprocessing",
+          "date": "13-Mar-2018"
+        },
+        {
+          "index": 3,
+          "fields": [
+            "eeg",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_preprocessing",
+          "date": "13-Mar-2018"
+        },
+        {
+          "index": 4,
+          "fields": [
+            "eeg",
+            "fcn",
+            "date",
+            "datacfg"
+          ],
+          "fcn": "co_appenddata",
+          "date": "13-Mar-2018"
+        },
+        {
+          "index": 5,
+          "fields": [
+            "eeg",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_denoise",
+          "date": "13-Mar-2018"
+        },
+        {
+          "index": 6,
+          "fields": [
+            "eeg",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_selectdim",
+          "date": "13-Mar-2018"
+        },
+        {
+          "index": 7,
+          "fields": [
+            "eeg",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_preprocessing",
+          "date": "13-Mar-2018"
+        },
+        {
+          "index": 8,
+          "fields": [
+            "eeg",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_selectevent",
+          "date": "13-Mar-2018"
+        },
+        {
+          "index": 9,
+          "fields": [
+            "eeg",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_splitdata",
+          "date": "13-Mar-2018"
+        },
+        {
+          "index": 10,
+          "fields": [
+            "wavA",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_preprocessing",
+          "date": "13-Mar-2018"
+        },
+        {
+          "index": 11,
+          "fields": [
+            "wavA",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_auditoryfilterbank",
+          "date": "13-Mar-2018"
+        },
+        {
+          "index": 12,
+          "fields": [
+            "wavB",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_preprocessing",
+          "date": "13-Mar-2018"
+        },
+        {
+          "index": 13,
+          "fields": [
+            "wavB",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_auditoryfilterbank",
+          "date": "13-Mar-2018"
+        },
+        {
+          "index": 14,
+          "fields": [
+            "wavA",
+            "wavB",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_resampledata",
+          "date": "13-Mar-2018"
+        },
+        {
+          "index": 15,
+          "fields": [
+            "wavA",
+            "wavB",
+            "sum",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_dimaverage",
+          "date": "13-Mar-2018"
+        },
+        {
+          "index": 16,
+          "fields": [
+            "wavA",
+            "wavB",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_squeeze",
+          "date": "13-Mar-2018"
+        },
+        {
+          "index": 17,
+          "fields": [
+            "eeg",
+            "wavA",
+            "wavB",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_selectdim",
+          "date": "13-Mar-2018"
+        },
+        {
+          "index": 18,
+          "fields": [
+            "eeg",
+            "wavA",
+            "wavB",
+            "fcn",
+            "date",
+            "datacfg"
+          ],
+          "fcn": "co_appenddata",
+          "date": "13-Mar-2018"
+        }
+      ]
+    },
+    {
+      "file": "S8_data_preproc.mat",
+      "top_level_keys": [
+        "data"
+      ],
+      "data_fields": [
+        "dim",
+        "fsample",
+        "event",
+        "eeg",
+        "cfg",
+        "wavA",
+        "wavB"
+      ],
+      "trial_count": 60,
+      "event_count": 60,
+      "eeg_shape": [
+        3200,
+        66
+      ],
+      "wavA_shape": [
+        3200,
+        1
+      ],
+      "wavB_shape": [
+        3200,
+        1
+      ],
+      "eeg_dtype": "float64",
+      "wavA_dtype": "float64",
+      "wavB_dtype": "float64",
+      "fsample": {
+        "eeg": 64,
+        "wavA": 64,
+        "wavB": 64
+      },
+      "channel_count": 66,
+      "channel_names": [
+        "Fp1",
+        "AF7",
+        "AF3",
+        "F1",
+        "F3",
+        "F5",
+        "F7",
+        "FT7",
+        "FC5",
+        "FC3",
+        "FC1",
+        "C1",
+        "C3",
+        "C5",
+        "T7",
+        "TP7",
+        "CP5",
+        "CP3",
+        "CP1",
+        "P1",
+        "P3",
+        "P5",
+        "P7",
+        "P9",
+        "PO7",
+        "PO3",
+        "O1",
+        "Iz",
+        "Oz",
+        "POz",
+        "Pz",
+        "CPz",
+        "Fpz",
+        "Fp2",
+        "AF8",
+        "AF4",
+        "AFz",
+        "Fz",
+        "F2",
+        "F4",
+        "F6",
+        "F8",
+        "FT8",
+        "FC6",
+        "FC4",
+        "FC2",
+        "FCz",
+        "Cz",
+        "C2",
+        "C4",
+        "C6",
+        "T8",
+        "TP8",
+        "CP6",
+        "CP4",
+        "CP2",
+        "P2",
+        "P4",
+        "P6",
+        "P8",
+        "P10",
+        "PO8",
+        "PO4",
+        "O2",
+        "EXG1",
+        "EXG2"
+      ],
+      "trial_labels": [
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "trial_event_samples": [
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "cfg": [
+        {
+          "index": 0,
+          "fields": [
+            "eeg",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_preprocessing",
+          "date": "13-Mar-2018"
+        },
+        {
+          "index": 1,
+          "fields": [
+            "eeg",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_resampledata",
+          "date": "13-Mar-2018"
+        },
+        {
+          "index": 2,
+          "fields": [
+            "eeg",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_preprocessing",
+          "date": "13-Mar-2018"
+        },
+        {
+          "index": 3,
+          "fields": [
+            "eeg",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_preprocessing",
+          "date": "13-Mar-2018"
+        },
+        {
+          "index": 4,
+          "fields": [
+            "eeg",
+            "fcn",
+            "date",
+            "datacfg"
+          ],
+          "fcn": "co_appenddata",
+          "date": "13-Mar-2018"
+        },
+        {
+          "index": 5,
+          "fields": [
+            "eeg",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_denoise",
+          "date": "13-Mar-2018"
+        },
+        {
+          "index": 6,
+          "fields": [
+            "eeg",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_selectdim",
+          "date": "13-Mar-2018"
+        },
+        {
+          "index": 7,
+          "fields": [
+            "eeg",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_preprocessing",
+          "date": "13-Mar-2018"
+        },
+        {
+          "index": 8,
+          "fields": [
+            "eeg",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_selectevent",
+          "date": "13-Mar-2018"
+        },
+        {
+          "index": 9,
+          "fields": [
+            "eeg",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_splitdata",
+          "date": "13-Mar-2018"
+        },
+        {
+          "index": 10,
+          "fields": [
+            "wavA",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_preprocessing",
+          "date": "13-Mar-2018"
+        },
+        {
+          "index": 11,
+          "fields": [
+            "wavA",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_auditoryfilterbank",
+          "date": "13-Mar-2018"
+        },
+        {
+          "index": 12,
+          "fields": [
+            "wavB",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_preprocessing",
+          "date": "13-Mar-2018"
+        },
+        {
+          "index": 13,
+          "fields": [
+            "wavB",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_auditoryfilterbank",
+          "date": "13-Mar-2018"
+        },
+        {
+          "index": 14,
+          "fields": [
+            "wavA",
+            "wavB",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_resampledata",
+          "date": "13-Mar-2018"
+        },
+        {
+          "index": 15,
+          "fields": [
+            "wavA",
+            "wavB",
+            "sum",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_dimaverage",
+          "date": "13-Mar-2018"
+        },
+        {
+          "index": 16,
+          "fields": [
+            "wavA",
+            "wavB",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_squeeze",
+          "date": "13-Mar-2018"
+        },
+        {
+          "index": 17,
+          "fields": [
+            "eeg",
+            "wavA",
+            "wavB",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_selectdim",
+          "date": "13-Mar-2018"
+        },
+        {
+          "index": 18,
+          "fields": [
+            "eeg",
+            "wavA",
+            "wavB",
+            "fcn",
+            "date",
+            "datacfg"
+          ],
+          "fcn": "co_appenddata",
+          "date": "13-Mar-2018"
+        }
+      ]
+    },
+    {
+      "file": "S9_data_preproc.mat",
+      "top_level_keys": [
+        "data"
+      ],
+      "data_fields": [
+        "dim",
+        "fsample",
+        "event",
+        "eeg",
+        "cfg",
+        "wavA",
+        "wavB"
+      ],
+      "trial_count": 60,
+      "event_count": 60,
+      "eeg_shape": [
+        3200,
+        66
+      ],
+      "wavA_shape": [
+        3200,
+        1
+      ],
+      "wavB_shape": [
+        3200,
+        1
+      ],
+      "eeg_dtype": "float64",
+      "wavA_dtype": "float64",
+      "wavB_dtype": "float64",
+      "fsample": {
+        "eeg": 64,
+        "wavA": 64,
+        "wavB": 64
+      },
+      "channel_count": 66,
+      "channel_names": [
+        "Fp1",
+        "AF7",
+        "AF3",
+        "F1",
+        "F3",
+        "F5",
+        "F7",
+        "FT7",
+        "FC5",
+        "FC3",
+        "FC1",
+        "C1",
+        "C3",
+        "C5",
+        "T7",
+        "TP7",
+        "CP5",
+        "CP3",
+        "CP1",
+        "P1",
+        "P3",
+        "P5",
+        "P7",
+        "P9",
+        "PO7",
+        "PO3",
+        "O1",
+        "Iz",
+        "Oz",
+        "POz",
+        "Pz",
+        "CPz",
+        "Fpz",
+        "Fp2",
+        "AF8",
+        "AF4",
+        "AFz",
+        "Fz",
+        "F2",
+        "F4",
+        "F6",
+        "F8",
+        "FT8",
+        "FC6",
+        "FC4",
+        "FC2",
+        "FCz",
+        "Cz",
+        "C2",
+        "C4",
+        "C6",
+        "T8",
+        "TP8",
+        "CP6",
+        "CP4",
+        "CP2",
+        "P2",
+        "P4",
+        "P6",
+        "P8",
+        "P10",
+        "PO8",
+        "PO4",
+        "O2",
+        "EXG1",
+        "EXG2"
+      ],
+      "trial_labels": [
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "trial_event_samples": [
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "cfg": [
+        {
+          "index": 0,
+          "fields": [
+            "eeg",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_preprocessing",
+          "date": "13-Mar-2018"
+        },
+        {
+          "index": 1,
+          "fields": [
+            "eeg",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_resampledata",
+          "date": "13-Mar-2018"
+        },
+        {
+          "index": 2,
+          "fields": [
+            "eeg",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_preprocessing",
+          "date": "13-Mar-2018"
+        },
+        {
+          "index": 3,
+          "fields": [
+            "eeg",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_preprocessing",
+          "date": "13-Mar-2018"
+        },
+        {
+          "index": 4,
+          "fields": [
+            "eeg",
+            "fcn",
+            "date",
+            "datacfg"
+          ],
+          "fcn": "co_appenddata",
+          "date": "13-Mar-2018"
+        },
+        {
+          "index": 5,
+          "fields": [
+            "eeg",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_denoise",
+          "date": "13-Mar-2018"
+        },
+        {
+          "index": 6,
+          "fields": [
+            "eeg",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_selectdim",
+          "date": "13-Mar-2018"
+        },
+        {
+          "index": 7,
+          "fields": [
+            "eeg",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_preprocessing",
+          "date": "13-Mar-2018"
+        },
+        {
+          "index": 8,
+          "fields": [
+            "eeg",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_selectevent",
+          "date": "13-Mar-2018"
+        },
+        {
+          "index": 9,
+          "fields": [
+            "eeg",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_splitdata",
+          "date": "13-Mar-2018"
+        },
+        {
+          "index": 10,
+          "fields": [
+            "wavA",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_preprocessing",
+          "date": "13-Mar-2018"
+        },
+        {
+          "index": 11,
+          "fields": [
+            "wavA",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_auditoryfilterbank",
+          "date": "13-Mar-2018"
+        },
+        {
+          "index": 12,
+          "fields": [
+            "wavB",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_preprocessing",
+          "date": "13-Mar-2018"
+        },
+        {
+          "index": 13,
+          "fields": [
+            "wavB",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_auditoryfilterbank",
+          "date": "13-Mar-2018"
+        },
+        {
+          "index": 14,
+          "fields": [
+            "wavA",
+            "wavB",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_resampledata",
+          "date": "13-Mar-2018"
+        },
+        {
+          "index": 15,
+          "fields": [
+            "wavA",
+            "wavB",
+            "sum",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_dimaverage",
+          "date": "13-Mar-2018"
+        },
+        {
+          "index": 16,
+          "fields": [
+            "wavA",
+            "wavB",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_squeeze",
+          "date": "13-Mar-2018"
+        },
+        {
+          "index": 17,
+          "fields": [
+            "eeg",
+            "wavA",
+            "wavB",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_selectdim",
+          "date": "13-Mar-2018"
+        },
+        {
+          "index": 18,
+          "fields": [
+            "eeg",
+            "wavA",
+            "wavB",
+            "fcn",
+            "date",
+            "datacfg"
+          ],
+          "fcn": "co_appenddata",
+          "date": "13-Mar-2018"
+        }
+      ]
+    },
+    {
+      "file": "S10_data_preproc.mat",
+      "top_level_keys": [
+        "data"
+      ],
+      "data_fields": [
+        "dim",
+        "fsample",
+        "event",
+        "eeg",
+        "cfg",
+        "wavA",
+        "wavB"
+      ],
+      "trial_count": 60,
+      "event_count": 60,
+      "eeg_shape": [
+        3200,
+        66
+      ],
+      "wavA_shape": [
+        3200,
+        1
+      ],
+      "wavB_shape": [
+        3200,
+        1
+      ],
+      "eeg_dtype": "float64",
+      "wavA_dtype": "float64",
+      "wavB_dtype": "float64",
+      "fsample": {
+        "eeg": 64,
+        "wavA": 64,
+        "wavB": 64
+      },
+      "channel_count": 66,
+      "channel_names": [
+        "Fp1",
+        "AF7",
+        "AF3",
+        "F1",
+        "F3",
+        "F5",
+        "F7",
+        "FT7",
+        "FC5",
+        "FC3",
+        "FC1",
+        "C1",
+        "C3",
+        "C5",
+        "T7",
+        "TP7",
+        "CP5",
+        "CP3",
+        "CP1",
+        "P1",
+        "P3",
+        "P5",
+        "P7",
+        "P9",
+        "PO7",
+        "PO3",
+        "O1",
+        "Iz",
+        "Oz",
+        "POz",
+        "Pz",
+        "CPz",
+        "Fpz",
+        "Fp2",
+        "AF8",
+        "AF4",
+        "AFz",
+        "Fz",
+        "F2",
+        "F4",
+        "F6",
+        "F8",
+        "FT8",
+        "FC6",
+        "FC4",
+        "FC2",
+        "FCz",
+        "Cz",
+        "C2",
+        "C4",
+        "C6",
+        "T8",
+        "TP8",
+        "CP6",
+        "CP4",
+        "CP2",
+        "P2",
+        "P4",
+        "P6",
+        "P8",
+        "P10",
+        "PO8",
+        "PO4",
+        "O2",
+        "EXG1",
+        "EXG2"
+      ],
+      "trial_labels": [
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "trial_event_samples": [
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "cfg": [
+        {
+          "index": 0,
+          "fields": [
+            "eeg",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_preprocessing",
+          "date": "13-Mar-2018"
+        },
+        {
+          "index": 1,
+          "fields": [
+            "eeg",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_resampledata",
+          "date": "13-Mar-2018"
+        },
+        {
+          "index": 2,
+          "fields": [
+            "eeg",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_preprocessing",
+          "date": "13-Mar-2018"
+        },
+        {
+          "index": 3,
+          "fields": [
+            "eeg",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_preprocessing",
+          "date": "13-Mar-2018"
+        },
+        {
+          "index": 4,
+          "fields": [
+            "eeg",
+            "fcn",
+            "date",
+            "datacfg"
+          ],
+          "fcn": "co_appenddata",
+          "date": "13-Mar-2018"
+        },
+        {
+          "index": 5,
+          "fields": [
+            "eeg",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_denoise",
+          "date": "13-Mar-2018"
+        },
+        {
+          "index": 6,
+          "fields": [
+            "eeg",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_selectdim",
+          "date": "13-Mar-2018"
+        },
+        {
+          "index": 7,
+          "fields": [
+            "eeg",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_preprocessing",
+          "date": "13-Mar-2018"
+        },
+        {
+          "index": 8,
+          "fields": [
+            "eeg",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_selectevent",
+          "date": "13-Mar-2018"
+        },
+        {
+          "index": 9,
+          "fields": [
+            "eeg",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_splitdata",
+          "date": "13-Mar-2018"
+        },
+        {
+          "index": 10,
+          "fields": [
+            "wavA",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_preprocessing",
+          "date": "13-Mar-2018"
+        },
+        {
+          "index": 11,
+          "fields": [
+            "wavA",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_auditoryfilterbank",
+          "date": "13-Mar-2018"
+        },
+        {
+          "index": 12,
+          "fields": [
+            "wavB",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_preprocessing",
+          "date": "13-Mar-2018"
+        },
+        {
+          "index": 13,
+          "fields": [
+            "wavB",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_auditoryfilterbank",
+          "date": "13-Mar-2018"
+        },
+        {
+          "index": 14,
+          "fields": [
+            "wavA",
+            "wavB",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_resampledata",
+          "date": "13-Mar-2018"
+        },
+        {
+          "index": 15,
+          "fields": [
+            "wavA",
+            "wavB",
+            "sum",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_dimaverage",
+          "date": "13-Mar-2018"
+        },
+        {
+          "index": 16,
+          "fields": [
+            "wavA",
+            "wavB",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_squeeze",
+          "date": "13-Mar-2018"
+        },
+        {
+          "index": 17,
+          "fields": [
+            "eeg",
+            "wavA",
+            "wavB",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_selectdim",
+          "date": "13-Mar-2018"
+        },
+        {
+          "index": 18,
+          "fields": [
+            "eeg",
+            "wavA",
+            "wavB",
+            "fcn",
+            "date",
+            "datacfg"
+          ],
+          "fcn": "co_appenddata",
+          "date": "13-Mar-2018"
+        }
+      ]
+    },
+    {
+      "file": "S11_data_preproc.mat",
+      "top_level_keys": [
+        "data"
+      ],
+      "data_fields": [
+        "dim",
+        "fsample",
+        "event",
+        "eeg",
+        "cfg",
+        "wavA",
+        "wavB"
+      ],
+      "trial_count": 60,
+      "event_count": 60,
+      "eeg_shape": [
+        3200,
+        66
+      ],
+      "wavA_shape": [
+        3200,
+        1
+      ],
+      "wavB_shape": [
+        3200,
+        1
+      ],
+      "eeg_dtype": "float64",
+      "wavA_dtype": "float64",
+      "wavB_dtype": "float64",
+      "fsample": {
+        "eeg": 64,
+        "wavA": 64,
+        "wavB": 64
+      },
+      "channel_count": 66,
+      "channel_names": [
+        "Fp1",
+        "AF7",
+        "AF3",
+        "F1",
+        "F3",
+        "F5",
+        "F7",
+        "FT7",
+        "FC5",
+        "FC3",
+        "FC1",
+        "C1",
+        "C3",
+        "C5",
+        "T7",
+        "TP7",
+        "CP5",
+        "CP3",
+        "CP1",
+        "P1",
+        "P3",
+        "P5",
+        "P7",
+        "P9",
+        "PO7",
+        "PO3",
+        "O1",
+        "Iz",
+        "Oz",
+        "POz",
+        "Pz",
+        "CPz",
+        "Fpz",
+        "Fp2",
+        "AF8",
+        "AF4",
+        "AFz",
+        "Fz",
+        "F2",
+        "F4",
+        "F6",
+        "F8",
+        "FT8",
+        "FC6",
+        "FC4",
+        "FC2",
+        "FCz",
+        "Cz",
+        "C2",
+        "C4",
+        "C6",
+        "T8",
+        "TP8",
+        "CP6",
+        "CP4",
+        "CP2",
+        "P2",
+        "P4",
+        "P6",
+        "P8",
+        "P10",
+        "PO8",
+        "PO4",
+        "O2",
+        "EXG1",
+        "EXG2"
+      ],
+      "trial_labels": [
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "trial_event_samples": [
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "cfg": [
+        {
+          "index": 0,
+          "fields": [
+            "eeg",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_preprocessing",
+          "date": "13-Mar-2018"
+        },
+        {
+          "index": 1,
+          "fields": [
+            "eeg",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_resampledata",
+          "date": "13-Mar-2018"
+        },
+        {
+          "index": 2,
+          "fields": [
+            "eeg",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_preprocessing",
+          "date": "13-Mar-2018"
+        },
+        {
+          "index": 3,
+          "fields": [
+            "eeg",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_preprocessing",
+          "date": "13-Mar-2018"
+        },
+        {
+          "index": 4,
+          "fields": [
+            "eeg",
+            "fcn",
+            "date",
+            "datacfg"
+          ],
+          "fcn": "co_appenddata",
+          "date": "13-Mar-2018"
+        },
+        {
+          "index": 5,
+          "fields": [
+            "eeg",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_denoise",
+          "date": "13-Mar-2018"
+        },
+        {
+          "index": 6,
+          "fields": [
+            "eeg",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_selectdim",
+          "date": "13-Mar-2018"
+        },
+        {
+          "index": 7,
+          "fields": [
+            "eeg",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_preprocessing",
+          "date": "13-Mar-2018"
+        },
+        {
+          "index": 8,
+          "fields": [
+            "eeg",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_selectevent",
+          "date": "13-Mar-2018"
+        },
+        {
+          "index": 9,
+          "fields": [
+            "eeg",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_splitdata",
+          "date": "13-Mar-2018"
+        },
+        {
+          "index": 10,
+          "fields": [
+            "wavA",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_preprocessing",
+          "date": "13-Mar-2018"
+        },
+        {
+          "index": 11,
+          "fields": [
+            "wavA",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_auditoryfilterbank",
+          "date": "13-Mar-2018"
+        },
+        {
+          "index": 12,
+          "fields": [
+            "wavB",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_preprocessing",
+          "date": "13-Mar-2018"
+        },
+        {
+          "index": 13,
+          "fields": [
+            "wavB",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_auditoryfilterbank",
+          "date": "13-Mar-2018"
+        },
+        {
+          "index": 14,
+          "fields": [
+            "wavA",
+            "wavB",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_resampledata",
+          "date": "13-Mar-2018"
+        },
+        {
+          "index": 15,
+          "fields": [
+            "wavA",
+            "wavB",
+            "sum",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_dimaverage",
+          "date": "13-Mar-2018"
+        },
+        {
+          "index": 16,
+          "fields": [
+            "wavA",
+            "wavB",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_squeeze",
+          "date": "13-Mar-2018"
+        },
+        {
+          "index": 17,
+          "fields": [
+            "eeg",
+            "wavA",
+            "wavB",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_selectdim",
+          "date": "13-Mar-2018"
+        },
+        {
+          "index": 18,
+          "fields": [
+            "eeg",
+            "wavA",
+            "wavB",
+            "fcn",
+            "date",
+            "datacfg"
+          ],
+          "fcn": "co_appenddata",
+          "date": "13-Mar-2018"
+        }
+      ]
+    },
+    {
+      "file": "S12_data_preproc.mat",
+      "top_level_keys": [
+        "data"
+      ],
+      "data_fields": [
+        "dim",
+        "fsample",
+        "event",
+        "eeg",
+        "cfg",
+        "wavA",
+        "wavB"
+      ],
+      "trial_count": 60,
+      "event_count": 60,
+      "eeg_shape": [
+        3200,
+        66
+      ],
+      "wavA_shape": [
+        3200,
+        1
+      ],
+      "wavB_shape": [
+        3200,
+        1
+      ],
+      "eeg_dtype": "float64",
+      "wavA_dtype": "float64",
+      "wavB_dtype": "float64",
+      "fsample": {
+        "eeg": 64,
+        "wavA": 64,
+        "wavB": 64
+      },
+      "channel_count": 66,
+      "channel_names": [
+        "Fp1",
+        "AF7",
+        "AF3",
+        "F1",
+        "F3",
+        "F5",
+        "F7",
+        "FT7",
+        "FC5",
+        "FC3",
+        "FC1",
+        "C1",
+        "C3",
+        "C5",
+        "T7",
+        "TP7",
+        "CP5",
+        "CP3",
+        "CP1",
+        "P1",
+        "P3",
+        "P5",
+        "P7",
+        "P9",
+        "PO7",
+        "PO3",
+        "O1",
+        "Iz",
+        "Oz",
+        "POz",
+        "Pz",
+        "CPz",
+        "Fpz",
+        "Fp2",
+        "AF8",
+        "AF4",
+        "AFz",
+        "Fz",
+        "F2",
+        "F4",
+        "F6",
+        "F8",
+        "FT8",
+        "FC6",
+        "FC4",
+        "FC2",
+        "FCz",
+        "Cz",
+        "C2",
+        "C4",
+        "C6",
+        "T8",
+        "TP8",
+        "CP6",
+        "CP4",
+        "CP2",
+        "P2",
+        "P4",
+        "P6",
+        "P8",
+        "P10",
+        "PO8",
+        "PO4",
+        "O2",
+        "EXG1",
+        "EXG2"
+      ],
+      "trial_labels": [
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2
+      ],
+      "trial_event_samples": [
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "cfg": [
+        {
+          "index": 0,
+          "fields": [
+            "eeg",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_preprocessing",
+          "date": "13-Mar-2018"
+        },
+        {
+          "index": 1,
+          "fields": [
+            "eeg",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_resampledata",
+          "date": "13-Mar-2018"
+        },
+        {
+          "index": 2,
+          "fields": [
+            "eeg",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_preprocessing",
+          "date": "13-Mar-2018"
+        },
+        {
+          "index": 3,
+          "fields": [
+            "eeg",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_preprocessing",
+          "date": "13-Mar-2018"
+        },
+        {
+          "index": 4,
+          "fields": [
+            "eeg",
+            "fcn",
+            "date",
+            "datacfg"
+          ],
+          "fcn": "co_appenddata",
+          "date": "13-Mar-2018"
+        },
+        {
+          "index": 5,
+          "fields": [
+            "eeg",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_denoise",
+          "date": "13-Mar-2018"
+        },
+        {
+          "index": 6,
+          "fields": [
+            "eeg",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_selectdim",
+          "date": "13-Mar-2018"
+        },
+        {
+          "index": 7,
+          "fields": [
+            "eeg",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_preprocessing",
+          "date": "13-Mar-2018"
+        },
+        {
+          "index": 8,
+          "fields": [
+            "eeg",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_selectevent",
+          "date": "13-Mar-2018"
+        },
+        {
+          "index": 9,
+          "fields": [
+            "eeg",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_splitdata",
+          "date": "13-Mar-2018"
+        },
+        {
+          "index": 10,
+          "fields": [
+            "wavA",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_preprocessing",
+          "date": "13-Mar-2018"
+        },
+        {
+          "index": 11,
+          "fields": [
+            "wavA",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_auditoryfilterbank",
+          "date": "13-Mar-2018"
+        },
+        {
+          "index": 12,
+          "fields": [
+            "wavB",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_preprocessing",
+          "date": "13-Mar-2018"
+        },
+        {
+          "index": 13,
+          "fields": [
+            "wavB",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_auditoryfilterbank",
+          "date": "13-Mar-2018"
+        },
+        {
+          "index": 14,
+          "fields": [
+            "wavA",
+            "wavB",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_resampledata",
+          "date": "13-Mar-2018"
+        },
+        {
+          "index": 15,
+          "fields": [
+            "wavA",
+            "wavB",
+            "sum",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_dimaverage",
+          "date": "13-Mar-2018"
+        },
+        {
+          "index": 16,
+          "fields": [
+            "wavA",
+            "wavB",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_squeeze",
+          "date": "13-Mar-2018"
+        },
+        {
+          "index": 17,
+          "fields": [
+            "eeg",
+            "wavA",
+            "wavB",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_selectdim",
+          "date": "13-Mar-2018"
+        },
+        {
+          "index": 18,
+          "fields": [
+            "eeg",
+            "wavA",
+            "wavB",
+            "fcn",
+            "date",
+            "datacfg"
+          ],
+          "fcn": "co_appenddata",
+          "date": "13-Mar-2018"
+        }
+      ]
+    },
+    {
+      "file": "S13_data_preproc.mat",
+      "top_level_keys": [
+        "data"
+      ],
+      "data_fields": [
+        "dim",
+        "fsample",
+        "event",
+        "eeg",
+        "cfg",
+        "wavA",
+        "wavB"
+      ],
+      "trial_count": 60,
+      "event_count": 60,
+      "eeg_shape": [
+        3200,
+        66
+      ],
+      "wavA_shape": [
+        3200,
+        1
+      ],
+      "wavB_shape": [
+        3200,
+        1
+      ],
+      "eeg_dtype": "float64",
+      "wavA_dtype": "float64",
+      "wavB_dtype": "float64",
+      "fsample": {
+        "eeg": 64,
+        "wavA": 64,
+        "wavB": 64
+      },
+      "channel_count": 66,
+      "channel_names": [
+        "Fp1",
+        "AF7",
+        "AF3",
+        "F1",
+        "F3",
+        "F5",
+        "F7",
+        "FT7",
+        "FC5",
+        "FC3",
+        "FC1",
+        "C1",
+        "C3",
+        "C5",
+        "T7",
+        "TP7",
+        "CP5",
+        "CP3",
+        "CP1",
+        "P1",
+        "P3",
+        "P5",
+        "P7",
+        "P9",
+        "PO7",
+        "PO3",
+        "O1",
+        "Iz",
+        "Oz",
+        "POz",
+        "Pz",
+        "CPz",
+        "Fpz",
+        "Fp2",
+        "AF8",
+        "AF4",
+        "AFz",
+        "Fz",
+        "F2",
+        "F4",
+        "F6",
+        "F8",
+        "FT8",
+        "FC6",
+        "FC4",
+        "FC2",
+        "FCz",
+        "Cz",
+        "C2",
+        "C4",
+        "C6",
+        "T8",
+        "TP8",
+        "CP6",
+        "CP4",
+        "CP2",
+        "P2",
+        "P4",
+        "P6",
+        "P8",
+        "P10",
+        "PO8",
+        "PO4",
+        "O2",
+        "EXG1",
+        "EXG2"
+      ],
+      "trial_labels": [
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "trial_event_samples": [
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "cfg": [
+        {
+          "index": 0,
+          "fields": [
+            "eeg",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_preprocessing",
+          "date": "13-Mar-2018"
+        },
+        {
+          "index": 1,
+          "fields": [
+            "eeg",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_resampledata",
+          "date": "13-Mar-2018"
+        },
+        {
+          "index": 2,
+          "fields": [
+            "eeg",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_preprocessing",
+          "date": "13-Mar-2018"
+        },
+        {
+          "index": 3,
+          "fields": [
+            "eeg",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_preprocessing",
+          "date": "13-Mar-2018"
+        },
+        {
+          "index": 4,
+          "fields": [
+            "eeg",
+            "fcn",
+            "date",
+            "datacfg"
+          ],
+          "fcn": "co_appenddata",
+          "date": "13-Mar-2018"
+        },
+        {
+          "index": 5,
+          "fields": [
+            "eeg",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_denoise",
+          "date": "13-Mar-2018"
+        },
+        {
+          "index": 6,
+          "fields": [
+            "eeg",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_selectdim",
+          "date": "13-Mar-2018"
+        },
+        {
+          "index": 7,
+          "fields": [
+            "eeg",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_preprocessing",
+          "date": "13-Mar-2018"
+        },
+        {
+          "index": 8,
+          "fields": [
+            "eeg",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_selectevent",
+          "date": "13-Mar-2018"
+        },
+        {
+          "index": 9,
+          "fields": [
+            "eeg",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_splitdata",
+          "date": "13-Mar-2018"
+        },
+        {
+          "index": 10,
+          "fields": [
+            "wavA",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_preprocessing",
+          "date": "13-Mar-2018"
+        },
+        {
+          "index": 11,
+          "fields": [
+            "wavA",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_auditoryfilterbank",
+          "date": "13-Mar-2018"
+        },
+        {
+          "index": 12,
+          "fields": [
+            "wavB",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_preprocessing",
+          "date": "13-Mar-2018"
+        },
+        {
+          "index": 13,
+          "fields": [
+            "wavB",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_auditoryfilterbank",
+          "date": "13-Mar-2018"
+        },
+        {
+          "index": 14,
+          "fields": [
+            "wavA",
+            "wavB",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_resampledata",
+          "date": "13-Mar-2018"
+        },
+        {
+          "index": 15,
+          "fields": [
+            "wavA",
+            "wavB",
+            "sum",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_dimaverage",
+          "date": "13-Mar-2018"
+        },
+        {
+          "index": 16,
+          "fields": [
+            "wavA",
+            "wavB",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_squeeze",
+          "date": "13-Mar-2018"
+        },
+        {
+          "index": 17,
+          "fields": [
+            "eeg",
+            "wavA",
+            "wavB",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_selectdim",
+          "date": "14-Mar-2018"
+        },
+        {
+          "index": 18,
+          "fields": [
+            "eeg",
+            "wavA",
+            "wavB",
+            "fcn",
+            "date",
+            "datacfg"
+          ],
+          "fcn": "co_appenddata",
+          "date": "14-Mar-2018"
+        }
+      ]
+    },
+    {
+      "file": "S14_data_preproc.mat",
+      "top_level_keys": [
+        "data"
+      ],
+      "data_fields": [
+        "dim",
+        "fsample",
+        "event",
+        "eeg",
+        "cfg",
+        "wavA",
+        "wavB"
+      ],
+      "trial_count": 60,
+      "event_count": 60,
+      "eeg_shape": [
+        3200,
+        66
+      ],
+      "wavA_shape": [
+        3200,
+        1
+      ],
+      "wavB_shape": [
+        3200,
+        1
+      ],
+      "eeg_dtype": "float64",
+      "wavA_dtype": "float64",
+      "wavB_dtype": "float64",
+      "fsample": {
+        "eeg": 64,
+        "wavA": 64,
+        "wavB": 64
+      },
+      "channel_count": 66,
+      "channel_names": [
+        "Fp1",
+        "AF7",
+        "AF3",
+        "F1",
+        "F3",
+        "F5",
+        "F7",
+        "FT7",
+        "FC5",
+        "FC3",
+        "FC1",
+        "C1",
+        "C3",
+        "C5",
+        "T7",
+        "TP7",
+        "CP5",
+        "CP3",
+        "CP1",
+        "P1",
+        "P3",
+        "P5",
+        "P7",
+        "P9",
+        "PO7",
+        "PO3",
+        "O1",
+        "Iz",
+        "Oz",
+        "POz",
+        "Pz",
+        "CPz",
+        "Fpz",
+        "Fp2",
+        "AF8",
+        "AF4",
+        "AFz",
+        "Fz",
+        "F2",
+        "F4",
+        "F6",
+        "F8",
+        "FT8",
+        "FC6",
+        "FC4",
+        "FC2",
+        "FCz",
+        "Cz",
+        "C2",
+        "C4",
+        "C6",
+        "T8",
+        "TP8",
+        "CP6",
+        "CP4",
+        "CP2",
+        "P2",
+        "P4",
+        "P6",
+        "P8",
+        "P10",
+        "PO8",
+        "PO4",
+        "O2",
+        "EXG1",
+        "EXG2"
+      ],
+      "trial_labels": [
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "trial_event_samples": [
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "cfg": [
+        {
+          "index": 0,
+          "fields": [
+            "eeg",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_preprocessing",
+          "date": "14-Mar-2018"
+        },
+        {
+          "index": 1,
+          "fields": [
+            "eeg",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_resampledata",
+          "date": "14-Mar-2018"
+        },
+        {
+          "index": 2,
+          "fields": [
+            "eeg",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_preprocessing",
+          "date": "14-Mar-2018"
+        },
+        {
+          "index": 3,
+          "fields": [
+            "eeg",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_preprocessing",
+          "date": "14-Mar-2018"
+        },
+        {
+          "index": 4,
+          "fields": [
+            "eeg",
+            "fcn",
+            "date",
+            "datacfg"
+          ],
+          "fcn": "co_appenddata",
+          "date": "14-Mar-2018"
+        },
+        {
+          "index": 5,
+          "fields": [
+            "eeg",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_denoise",
+          "date": "14-Mar-2018"
+        },
+        {
+          "index": 6,
+          "fields": [
+            "eeg",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_selectdim",
+          "date": "14-Mar-2018"
+        },
+        {
+          "index": 7,
+          "fields": [
+            "eeg",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_preprocessing",
+          "date": "14-Mar-2018"
+        },
+        {
+          "index": 8,
+          "fields": [
+            "eeg",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_selectevent",
+          "date": "14-Mar-2018"
+        },
+        {
+          "index": 9,
+          "fields": [
+            "eeg",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_splitdata",
+          "date": "14-Mar-2018"
+        },
+        {
+          "index": 10,
+          "fields": [
+            "wavA",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_preprocessing",
+          "date": "14-Mar-2018"
+        },
+        {
+          "index": 11,
+          "fields": [
+            "wavA",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_auditoryfilterbank",
+          "date": "14-Mar-2018"
+        },
+        {
+          "index": 12,
+          "fields": [
+            "wavB",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_preprocessing",
+          "date": "14-Mar-2018"
+        },
+        {
+          "index": 13,
+          "fields": [
+            "wavB",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_auditoryfilterbank",
+          "date": "14-Mar-2018"
+        },
+        {
+          "index": 14,
+          "fields": [
+            "wavA",
+            "wavB",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_resampledata",
+          "date": "14-Mar-2018"
+        },
+        {
+          "index": 15,
+          "fields": [
+            "wavA",
+            "wavB",
+            "sum",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_dimaverage",
+          "date": "14-Mar-2018"
+        },
+        {
+          "index": 16,
+          "fields": [
+            "wavA",
+            "wavB",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_squeeze",
+          "date": "14-Mar-2018"
+        },
+        {
+          "index": 17,
+          "fields": [
+            "eeg",
+            "wavA",
+            "wavB",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_selectdim",
+          "date": "14-Mar-2018"
+        },
+        {
+          "index": 18,
+          "fields": [
+            "eeg",
+            "wavA",
+            "wavB",
+            "fcn",
+            "date",
+            "datacfg"
+          ],
+          "fcn": "co_appenddata",
+          "date": "14-Mar-2018"
+        }
+      ]
+    },
+    {
+      "file": "S15_data_preproc.mat",
+      "top_level_keys": [
+        "data"
+      ],
+      "data_fields": [
+        "dim",
+        "fsample",
+        "event",
+        "eeg",
+        "cfg",
+        "wavA",
+        "wavB"
+      ],
+      "trial_count": 60,
+      "event_count": 60,
+      "eeg_shape": [
+        3200,
+        66
+      ],
+      "wavA_shape": [
+        3200,
+        1
+      ],
+      "wavB_shape": [
+        3200,
+        1
+      ],
+      "eeg_dtype": "float64",
+      "wavA_dtype": "float64",
+      "wavB_dtype": "float64",
+      "fsample": {
+        "eeg": 64,
+        "wavA": 64,
+        "wavB": 64
+      },
+      "channel_count": 66,
+      "channel_names": [
+        "Fp1",
+        "AF7",
+        "AF3",
+        "F1",
+        "F3",
+        "F5",
+        "F7",
+        "FT7",
+        "FC5",
+        "FC3",
+        "FC1",
+        "C1",
+        "C3",
+        "C5",
+        "T7",
+        "TP7",
+        "CP5",
+        "CP3",
+        "CP1",
+        "P1",
+        "P3",
+        "P5",
+        "P7",
+        "P9",
+        "PO7",
+        "PO3",
+        "O1",
+        "Iz",
+        "Oz",
+        "POz",
+        "Pz",
+        "CPz",
+        "Fpz",
+        "Fp2",
+        "AF8",
+        "AF4",
+        "AFz",
+        "Fz",
+        "F2",
+        "F4",
+        "F6",
+        "F8",
+        "FT8",
+        "FC6",
+        "FC4",
+        "FC2",
+        "FCz",
+        "Cz",
+        "C2",
+        "C4",
+        "C6",
+        "T8",
+        "TP8",
+        "CP6",
+        "CP4",
+        "CP2",
+        "P2",
+        "P4",
+        "P6",
+        "P8",
+        "P10",
+        "PO8",
+        "PO4",
+        "O2",
+        "EXG1",
+        "EXG2"
+      ],
+      "trial_labels": [
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "trial_event_samples": [
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "cfg": [
+        {
+          "index": 0,
+          "fields": [
+            "eeg",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_preprocessing",
+          "date": "14-Mar-2018"
+        },
+        {
+          "index": 1,
+          "fields": [
+            "eeg",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_resampledata",
+          "date": "14-Mar-2018"
+        },
+        {
+          "index": 2,
+          "fields": [
+            "eeg",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_preprocessing",
+          "date": "14-Mar-2018"
+        },
+        {
+          "index": 3,
+          "fields": [
+            "eeg",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_preprocessing",
+          "date": "14-Mar-2018"
+        },
+        {
+          "index": 4,
+          "fields": [
+            "eeg",
+            "fcn",
+            "date",
+            "datacfg"
+          ],
+          "fcn": "co_appenddata",
+          "date": "14-Mar-2018"
+        },
+        {
+          "index": 5,
+          "fields": [
+            "eeg",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_denoise",
+          "date": "14-Mar-2018"
+        },
+        {
+          "index": 6,
+          "fields": [
+            "eeg",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_selectdim",
+          "date": "14-Mar-2018"
+        },
+        {
+          "index": 7,
+          "fields": [
+            "eeg",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_preprocessing",
+          "date": "14-Mar-2018"
+        },
+        {
+          "index": 8,
+          "fields": [
+            "eeg",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_selectevent",
+          "date": "14-Mar-2018"
+        },
+        {
+          "index": 9,
+          "fields": [
+            "eeg",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_splitdata",
+          "date": "14-Mar-2018"
+        },
+        {
+          "index": 10,
+          "fields": [
+            "wavA",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_preprocessing",
+          "date": "14-Mar-2018"
+        },
+        {
+          "index": 11,
+          "fields": [
+            "wavA",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_auditoryfilterbank",
+          "date": "14-Mar-2018"
+        },
+        {
+          "index": 12,
+          "fields": [
+            "wavB",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_preprocessing",
+          "date": "14-Mar-2018"
+        },
+        {
+          "index": 13,
+          "fields": [
+            "wavB",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_auditoryfilterbank",
+          "date": "14-Mar-2018"
+        },
+        {
+          "index": 14,
+          "fields": [
+            "wavA",
+            "wavB",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_resampledata",
+          "date": "14-Mar-2018"
+        },
+        {
+          "index": 15,
+          "fields": [
+            "wavA",
+            "wavB",
+            "sum",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_dimaverage",
+          "date": "14-Mar-2018"
+        },
+        {
+          "index": 16,
+          "fields": [
+            "wavA",
+            "wavB",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_squeeze",
+          "date": "14-Mar-2018"
+        },
+        {
+          "index": 17,
+          "fields": [
+            "eeg",
+            "wavA",
+            "wavB",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_selectdim",
+          "date": "14-Mar-2018"
+        },
+        {
+          "index": 18,
+          "fields": [
+            "eeg",
+            "wavA",
+            "wavB",
+            "fcn",
+            "date",
+            "datacfg"
+          ],
+          "fcn": "co_appenddata",
+          "date": "14-Mar-2018"
+        }
+      ]
+    },
+    {
+      "file": "S16_data_preproc.mat",
+      "top_level_keys": [
+        "data"
+      ],
+      "data_fields": [
+        "dim",
+        "fsample",
+        "event",
+        "eeg",
+        "cfg",
+        "wavA",
+        "wavB"
+      ],
+      "trial_count": 60,
+      "event_count": 60,
+      "eeg_shape": [
+        3200,
+        66
+      ],
+      "wavA_shape": [
+        3200,
+        1
+      ],
+      "wavB_shape": [
+        3200,
+        1
+      ],
+      "eeg_dtype": "float64",
+      "wavA_dtype": "float64",
+      "wavB_dtype": "float64",
+      "fsample": {
+        "eeg": 64,
+        "wavA": 64,
+        "wavB": 64
+      },
+      "channel_count": 66,
+      "channel_names": [
+        "Fp1",
+        "AF7",
+        "AF3",
+        "F1",
+        "F3",
+        "F5",
+        "F7",
+        "FT7",
+        "FC5",
+        "FC3",
+        "FC1",
+        "C1",
+        "C3",
+        "C5",
+        "T7",
+        "TP7",
+        "CP5",
+        "CP3",
+        "CP1",
+        "P1",
+        "P3",
+        "P5",
+        "P7",
+        "P9",
+        "PO7",
+        "PO3",
+        "O1",
+        "Iz",
+        "Oz",
+        "POz",
+        "Pz",
+        "CPz",
+        "Fpz",
+        "Fp2",
+        "AF8",
+        "AF4",
+        "AFz",
+        "Fz",
+        "F2",
+        "F4",
+        "F6",
+        "F8",
+        "FT8",
+        "FC6",
+        "FC4",
+        "FC2",
+        "FCz",
+        "Cz",
+        "C2",
+        "C4",
+        "C6",
+        "T8",
+        "TP8",
+        "CP6",
+        "CP4",
+        "CP2",
+        "P2",
+        "P4",
+        "P6",
+        "P8",
+        "P10",
+        "PO8",
+        "PO4",
+        "O2",
+        "EXG1",
+        "EXG2"
+      ],
+      "trial_labels": [
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2
+      ],
+      "trial_event_samples": [
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "cfg": [
+        {
+          "index": 0,
+          "fields": [
+            "eeg",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_preprocessing",
+          "date": "14-Mar-2018"
+        },
+        {
+          "index": 1,
+          "fields": [
+            "eeg",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_resampledata",
+          "date": "14-Mar-2018"
+        },
+        {
+          "index": 2,
+          "fields": [
+            "eeg",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_preprocessing",
+          "date": "14-Mar-2018"
+        },
+        {
+          "index": 3,
+          "fields": [
+            "eeg",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_preprocessing",
+          "date": "14-Mar-2018"
+        },
+        {
+          "index": 4,
+          "fields": [
+            "eeg",
+            "fcn",
+            "date",
+            "datacfg"
+          ],
+          "fcn": "co_appenddata",
+          "date": "14-Mar-2018"
+        },
+        {
+          "index": 5,
+          "fields": [
+            "eeg",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_denoise",
+          "date": "14-Mar-2018"
+        },
+        {
+          "index": 6,
+          "fields": [
+            "eeg",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_selectdim",
+          "date": "14-Mar-2018"
+        },
+        {
+          "index": 7,
+          "fields": [
+            "eeg",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_preprocessing",
+          "date": "14-Mar-2018"
+        },
+        {
+          "index": 8,
+          "fields": [
+            "eeg",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_selectevent",
+          "date": "14-Mar-2018"
+        },
+        {
+          "index": 9,
+          "fields": [
+            "eeg",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_splitdata",
+          "date": "14-Mar-2018"
+        },
+        {
+          "index": 10,
+          "fields": [
+            "wavA",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_preprocessing",
+          "date": "14-Mar-2018"
+        },
+        {
+          "index": 11,
+          "fields": [
+            "wavA",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_auditoryfilterbank",
+          "date": "14-Mar-2018"
+        },
+        {
+          "index": 12,
+          "fields": [
+            "wavB",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_preprocessing",
+          "date": "14-Mar-2018"
+        },
+        {
+          "index": 13,
+          "fields": [
+            "wavB",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_auditoryfilterbank",
+          "date": "14-Mar-2018"
+        },
+        {
+          "index": 14,
+          "fields": [
+            "wavA",
+            "wavB",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_resampledata",
+          "date": "14-Mar-2018"
+        },
+        {
+          "index": 15,
+          "fields": [
+            "wavA",
+            "wavB",
+            "sum",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_dimaverage",
+          "date": "14-Mar-2018"
+        },
+        {
+          "index": 16,
+          "fields": [
+            "wavA",
+            "wavB",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_squeeze",
+          "date": "14-Mar-2018"
+        },
+        {
+          "index": 17,
+          "fields": [
+            "eeg",
+            "wavA",
+            "wavB",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_selectdim",
+          "date": "14-Mar-2018"
+        },
+        {
+          "index": 18,
+          "fields": [
+            "eeg",
+            "wavA",
+            "wavB",
+            "fcn",
+            "date",
+            "datacfg"
+          ],
+          "fcn": "co_appenddata",
+          "date": "14-Mar-2018"
+        }
+      ]
+    },
+    {
+      "file": "S17_data_preproc.mat",
+      "top_level_keys": [
+        "data"
+      ],
+      "data_fields": [
+        "dim",
+        "fsample",
+        "event",
+        "eeg",
+        "cfg",
+        "wavA",
+        "wavB"
+      ],
+      "trial_count": 60,
+      "event_count": 60,
+      "eeg_shape": [
+        3200,
+        66
+      ],
+      "wavA_shape": [
+        3200,
+        1
+      ],
+      "wavB_shape": [
+        3200,
+        1
+      ],
+      "eeg_dtype": "float64",
+      "wavA_dtype": "float64",
+      "wavB_dtype": "float64",
+      "fsample": {
+        "eeg": 64,
+        "wavA": 64,
+        "wavB": 64
+      },
+      "channel_count": 66,
+      "channel_names": [
+        "Fp1",
+        "AF7",
+        "AF3",
+        "F1",
+        "F3",
+        "F5",
+        "F7",
+        "FT7",
+        "FC5",
+        "FC3",
+        "FC1",
+        "C1",
+        "C3",
+        "C5",
+        "T7",
+        "TP7",
+        "CP5",
+        "CP3",
+        "CP1",
+        "P1",
+        "P3",
+        "P5",
+        "P7",
+        "P9",
+        "PO7",
+        "PO3",
+        "O1",
+        "Iz",
+        "Oz",
+        "POz",
+        "Pz",
+        "CPz",
+        "Fpz",
+        "Fp2",
+        "AF8",
+        "AF4",
+        "AFz",
+        "Fz",
+        "F2",
+        "F4",
+        "F6",
+        "F8",
+        "FT8",
+        "FC6",
+        "FC4",
+        "FC2",
+        "FCz",
+        "Cz",
+        "C2",
+        "C4",
+        "C6",
+        "T8",
+        "TP8",
+        "CP6",
+        "CP4",
+        "CP2",
+        "P2",
+        "P4",
+        "P6",
+        "P8",
+        "P10",
+        "PO8",
+        "PO4",
+        "O2",
+        "EXG1",
+        "EXG2"
+      ],
+      "trial_labels": [
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2
+      ],
+      "trial_event_samples": [
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "cfg": [
+        {
+          "index": 0,
+          "fields": [
+            "eeg",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_preprocessing",
+          "date": "14-Mar-2018"
+        },
+        {
+          "index": 1,
+          "fields": [
+            "eeg",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_resampledata",
+          "date": "14-Mar-2018"
+        },
+        {
+          "index": 2,
+          "fields": [
+            "eeg",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_preprocessing",
+          "date": "14-Mar-2018"
+        },
+        {
+          "index": 3,
+          "fields": [
+            "eeg",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_preprocessing",
+          "date": "14-Mar-2018"
+        },
+        {
+          "index": 4,
+          "fields": [
+            "eeg",
+            "fcn",
+            "date",
+            "datacfg"
+          ],
+          "fcn": "co_appenddata",
+          "date": "14-Mar-2018"
+        },
+        {
+          "index": 5,
+          "fields": [
+            "eeg",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_denoise",
+          "date": "14-Mar-2018"
+        },
+        {
+          "index": 6,
+          "fields": [
+            "eeg",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_selectdim",
+          "date": "14-Mar-2018"
+        },
+        {
+          "index": 7,
+          "fields": [
+            "eeg",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_preprocessing",
+          "date": "14-Mar-2018"
+        },
+        {
+          "index": 8,
+          "fields": [
+            "eeg",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_selectevent",
+          "date": "14-Mar-2018"
+        },
+        {
+          "index": 9,
+          "fields": [
+            "eeg",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_splitdata",
+          "date": "14-Mar-2018"
+        },
+        {
+          "index": 10,
+          "fields": [
+            "wavA",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_preprocessing",
+          "date": "14-Mar-2018"
+        },
+        {
+          "index": 11,
+          "fields": [
+            "wavA",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_auditoryfilterbank",
+          "date": "14-Mar-2018"
+        },
+        {
+          "index": 12,
+          "fields": [
+            "wavB",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_preprocessing",
+          "date": "14-Mar-2018"
+        },
+        {
+          "index": 13,
+          "fields": [
+            "wavB",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_auditoryfilterbank",
+          "date": "14-Mar-2018"
+        },
+        {
+          "index": 14,
+          "fields": [
+            "wavA",
+            "wavB",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_resampledata",
+          "date": "14-Mar-2018"
+        },
+        {
+          "index": 15,
+          "fields": [
+            "wavA",
+            "wavB",
+            "sum",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_dimaverage",
+          "date": "14-Mar-2018"
+        },
+        {
+          "index": 16,
+          "fields": [
+            "wavA",
+            "wavB",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_squeeze",
+          "date": "14-Mar-2018"
+        },
+        {
+          "index": 17,
+          "fields": [
+            "eeg",
+            "wavA",
+            "wavB",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_selectdim",
+          "date": "14-Mar-2018"
+        },
+        {
+          "index": 18,
+          "fields": [
+            "eeg",
+            "wavA",
+            "wavB",
+            "fcn",
+            "date",
+            "datacfg"
+          ],
+          "fcn": "co_appenddata",
+          "date": "14-Mar-2018"
+        }
+      ]
+    },
+    {
+      "file": "S18_data_preproc.mat",
+      "top_level_keys": [
+        "data"
+      ],
+      "data_fields": [
+        "dim",
+        "fsample",
+        "event",
+        "eeg",
+        "cfg",
+        "wavA",
+        "wavB"
+      ],
+      "trial_count": 60,
+      "event_count": 60,
+      "eeg_shape": [
+        3200,
+        66
+      ],
+      "wavA_shape": [
+        3200,
+        1
+      ],
+      "wavB_shape": [
+        3200,
+        1
+      ],
+      "eeg_dtype": "float64",
+      "wavA_dtype": "float64",
+      "wavB_dtype": "float64",
+      "fsample": {
+        "eeg": 64,
+        "wavA": 64,
+        "wavB": 64
+      },
+      "channel_count": 66,
+      "channel_names": [
+        "Fp1",
+        "AF7",
+        "AF3",
+        "F1",
+        "F3",
+        "F5",
+        "F7",
+        "FT7",
+        "FC5",
+        "FC3",
+        "FC1",
+        "C1",
+        "C3",
+        "C5",
+        "T7",
+        "TP7",
+        "CP5",
+        "CP3",
+        "CP1",
+        "P1",
+        "P3",
+        "P5",
+        "P7",
+        "P9",
+        "PO7",
+        "PO3",
+        "O1",
+        "Iz",
+        "Oz",
+        "POz",
+        "Pz",
+        "CPz",
+        "Fpz",
+        "Fp2",
+        "AF8",
+        "AF4",
+        "AFz",
+        "Fz",
+        "F2",
+        "F4",
+        "F6",
+        "F8",
+        "FT8",
+        "FC6",
+        "FC4",
+        "FC2",
+        "FCz",
+        "Cz",
+        "C2",
+        "C4",
+        "C6",
+        "T8",
+        "TP8",
+        "CP6",
+        "CP4",
+        "CP2",
+        "P2",
+        "P4",
+        "P6",
+        "P8",
+        "P10",
+        "PO8",
+        "PO4",
+        "O2",
+        "EXG1",
+        "EXG2"
+      ],
+      "trial_labels": [
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2
+      ],
+      "trial_event_samples": [
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "cfg": [
+        {
+          "index": 0,
+          "fields": [
+            "eeg",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_preprocessing",
+          "date": "14-Mar-2018"
+        },
+        {
+          "index": 1,
+          "fields": [
+            "eeg",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_resampledata",
+          "date": "14-Mar-2018"
+        },
+        {
+          "index": 2,
+          "fields": [
+            "eeg",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_preprocessing",
+          "date": "14-Mar-2018"
+        },
+        {
+          "index": 3,
+          "fields": [
+            "eeg",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_preprocessing",
+          "date": "14-Mar-2018"
+        },
+        {
+          "index": 4,
+          "fields": [
+            "eeg",
+            "fcn",
+            "date",
+            "datacfg"
+          ],
+          "fcn": "co_appenddata",
+          "date": "14-Mar-2018"
+        },
+        {
+          "index": 5,
+          "fields": [
+            "eeg",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_denoise",
+          "date": "14-Mar-2018"
+        },
+        {
+          "index": 6,
+          "fields": [
+            "eeg",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_selectdim",
+          "date": "14-Mar-2018"
+        },
+        {
+          "index": 7,
+          "fields": [
+            "eeg",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_preprocessing",
+          "date": "14-Mar-2018"
+        },
+        {
+          "index": 8,
+          "fields": [
+            "eeg",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_selectevent",
+          "date": "14-Mar-2018"
+        },
+        {
+          "index": 9,
+          "fields": [
+            "eeg",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_splitdata",
+          "date": "14-Mar-2018"
+        },
+        {
+          "index": 10,
+          "fields": [
+            "wavA",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_preprocessing",
+          "date": "14-Mar-2018"
+        },
+        {
+          "index": 11,
+          "fields": [
+            "wavA",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_auditoryfilterbank",
+          "date": "14-Mar-2018"
+        },
+        {
+          "index": 12,
+          "fields": [
+            "wavB",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_preprocessing",
+          "date": "14-Mar-2018"
+        },
+        {
+          "index": 13,
+          "fields": [
+            "wavB",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_auditoryfilterbank",
+          "date": "14-Mar-2018"
+        },
+        {
+          "index": 14,
+          "fields": [
+            "wavA",
+            "wavB",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_resampledata",
+          "date": "14-Mar-2018"
+        },
+        {
+          "index": 15,
+          "fields": [
+            "wavA",
+            "wavB",
+            "sum",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_dimaverage",
+          "date": "14-Mar-2018"
+        },
+        {
+          "index": 16,
+          "fields": [
+            "wavA",
+            "wavB",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_squeeze",
+          "date": "14-Mar-2018"
+        },
+        {
+          "index": 17,
+          "fields": [
+            "eeg",
+            "wavA",
+            "wavB",
+            "fcn",
+            "date"
+          ],
+          "fcn": "co_selectdim",
+          "date": "14-Mar-2018"
+        },
+        {
+          "index": 18,
+          "fields": [
+            "eeg",
+            "wavA",
+            "wavB",
+            "fcn",
+            "date",
+            "datacfg"
+          ],
+          "fcn": "co_appenddata",
+          "date": "14-Mar-2018"
+        }
+      ]
+    }
+  ]
+}

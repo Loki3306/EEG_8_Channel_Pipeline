@@ -1,0 +1,512 @@
+{
+  "mode": "baseline",
+  "lags": 48,
+  "ridge_lambda": 1.0,
+  "window_seconds": [
+    10
+  ],
+  "window_runs": [
+    {
+      "best": {
+        "mapping": {
+          "1": "A",
+          "2": "B"
+        },
+        "lags": 48,
+        "ridge_lambda": 1.0,
+        "window_seconds": 10,
+        "sanity": {
+          "zero_eeg": false,
+          "shuffle_labels": false
+        },
+        "overall": {
+          "trial_accuracy": 0.5518518518518518,
+          "balanced_accuracy": 0.5531341317858172,
+          "mean_corr_difference": 0.015820777863272153,
+          "mean_corr_a": 0.03981934297590131,
+          "mean_corr_b": 0.0058707398599078435
+        },
+        "per_subject": [
+          {
+            "trial_accuracy": 0.5666666666666667,
+            "balanced_accuracy": 0.5407239819004526,
+            "mean_corr_difference": 0.013410133695298034,
+            "mean_corr_a": 0.05714306839978955,
+            "mean_corr_b": -0.01388049832743329,
+            "held_out_subject": "S1_data_preproc"
+          },
+          {
+            "trial_accuracy": 0.5166666666666667,
+            "balanced_accuracy": 0.5166666666666666,
+            "mean_corr_difference": 0.009628989250905563,
+            "mean_corr_a": 0.041185755710106,
+            "mean_corr_b": 0.023776952729422204,
+            "held_out_subject": "S2_data_preproc"
+          },
+          {
+            "trial_accuracy": 0.5833333333333334,
+            "balanced_accuracy": 0.5647321428571428,
+            "mean_corr_difference": 0.025462141514668534,
+            "mean_corr_a": 0.05265807043732591,
+            "mean_corr_b": -0.009819377072949036,
+            "held_out_subject": "S3_data_preproc"
+          },
+          {
+            "trial_accuracy": 0.5333333333333333,
+            "balanced_accuracy": 0.513888888888889,
+            "mean_corr_difference": 0.0066771655590000065,
+            "mean_corr_a": 0.03283265780128862,
+            "mean_corr_b": 0.0009647891020305043,
+            "held_out_subject": "S4_data_preproc"
+          },
+          {
+            "trial_accuracy": 0.4666666666666667,
+            "balanced_accuracy": 0.47058823529411764,
+            "mean_corr_difference": 0.00023544416603266488,
+            "mean_corr_a": 0.03935510174111549,
+            "mean_corr_b": 0.020821500251717525,
+            "held_out_subject": "S5_data_preproc"
+          },
+          {
+            "trial_accuracy": 0.55,
+            "balanced_accuracy": 0.5491071428571428,
+            "mean_corr_difference": 0.009673518462055657,
+            "mean_corr_a": 0.015178384895610917,
+            "mean_corr_b": -0.0005885792966750697,
+            "held_out_subject": "S6_data_preproc"
+          },
+          {
+            "trial_accuracy": 0.45,
+            "balanced_accuracy": 0.3839712918660287,
+            "mean_corr_difference": 0.01000166119293084,
+            "mean_corr_a": 0.06195687335638321,
+            "mean_corr_b": 0.015053357348528498,
+            "held_out_subject": "S7_data_preproc"
+          },
+          {
+            "trial_accuracy": 0.5166666666666667,
+            "balanced_accuracy": 0.55,
+            "mean_corr_difference": 0.009302632524545138,
+            "mean_corr_a": 0.017859899683697982,
+            "mean_corr_b": -0.0014526097616126853,
+            "held_out_subject": "S8_data_preproc"
+          },
+          {
+            "trial_accuracy": 0.5833333333333334,
+            "balanced_accuracy": 0.6041666666666667,
+            "mean_corr_difference": 0.03219324261771205,
+            "mean_corr_a": 0.030043057290398953,
+            "mean_corr_b": -0.004381498182732482,
+            "held_out_subject": "S9_data_preproc"
+          },
+          {
+            "trial_accuracy": 0.6166666666666667,
+            "balanced_accuracy": 0.6160714285714286,
+            "mean_corr_difference": 0.02079444756734313,
+            "mean_corr_a": 0.015013279393383056,
+            "mean_corr_b": 0.007232646140575714,
+            "held_out_subject": "S10_data_preproc"
+          },
+          {
+            "trial_accuracy": 0.6,
+            "balanced_accuracy": 0.6026785714285714,
+            "mean_corr_difference": 0.01403459794479159,
+            "mean_corr_a": 0.016623239414252516,
+            "mean_corr_b": 0.014332369045580853,
+            "held_out_subject": "S11_data_preproc"
+          },
+          {
+            "trial_accuracy": 0.6166666666666667,
+            "balanced_accuracy": 0.6166666666666667,
+            "mean_corr_difference": 0.02814933555784766,
+            "mean_corr_a": 0.028879171497211094,
+            "mean_corr_b": 0.004645290057487973,
+            "held_out_subject": "S12_data_preproc"
+          },
+          {
+            "trial_accuracy": 0.5333333333333333,
+            "balanced_accuracy": 0.5833333333333334,
+            "mean_corr_difference": 0.002657411539858552,
+            "mean_corr_a": 0.06700066368379923,
+            "mean_corr_b": 0.010292997044473996,
+            "held_out_subject": "S13_data_preproc"
+          },
+          {
+            "trial_accuracy": 0.55,
+            "balanced_accuracy": 0.5499999999999999,
+            "mean_corr_difference": 0.02335607599831333,
+            "mean_corr_a": 0.04096312651577404,
+            "mean_corr_b": -0.009531722169705902,
+            "held_out_subject": "S14_data_preproc"
+          },
+          {
+            "trial_accuracy": 0.6666666666666666,
+            "balanced_accuracy": 0.6561085972850679,
+            "mean_corr_difference": 0.04529438537063493,
+            "mean_corr_a": 0.06107429742713845,
+            "mean_corr_b": 0.020348026084066623,
+            "held_out_subject": "S15_data_preproc"
+          },
+          {
+            "trial_accuracy": 0.4666666666666667,
+            "balanced_accuracy": 0.4666666666666667,
+            "mean_corr_difference": -0.0011405310772265925,
+            "mean_corr_a": 0.046245270076847575,
+            "mean_corr_b": 0.02486406342757475,
+            "held_out_subject": "S16_data_preproc"
+          },
+          {
+            "trial_accuracy": 0.5833333333333334,
+            "balanced_accuracy": 0.5347222222222222,
+            "mean_corr_difference": 0.030333585423803842,
+            "mean_corr_a": 0.06597233976943205,
+            "mean_corr_b": 0.005713131419842925,
+            "held_out_subject": "S17_data_preproc"
+          },
+          {
+            "trial_accuracy": 0.5333333333333333,
+            "balanced_accuracy": 0.5550239234449761,
+            "mean_corr_difference": 0.0047097642303837745,
+            "mean_corr_a": 0.02676391647266884,
+            "mean_corr_b": -0.0027175203618518924,
+            "held_out_subject": "S18_data_preproc"
+          }
+        ]
+      },
+      "candidates": [
+        {
+          "mapping": {
+            "1": "A",
+            "2": "B"
+          },
+          "lags": 48,
+          "ridge_lambda": 1.0,
+          "window_seconds": 10,
+          "sanity": {
+            "zero_eeg": false,
+            "shuffle_labels": false
+          },
+          "overall": {
+            "trial_accuracy": 0.5518518518518518,
+            "balanced_accuracy": 0.5531341317858172,
+            "mean_corr_difference": 0.015820777863272153,
+            "mean_corr_a": 0.03981934297590131,
+            "mean_corr_b": 0.0058707398599078435
+          },
+          "per_subject": [
+            {
+              "trial_accuracy": 0.5666666666666667,
+              "balanced_accuracy": 0.5407239819004526,
+              "mean_corr_difference": 0.013410133695298034,
+              "mean_corr_a": 0.05714306839978955,
+              "mean_corr_b": -0.01388049832743329,
+              "held_out_subject": "S1_data_preproc"
+            },
+            {
+              "trial_accuracy": 0.5166666666666667,
+              "balanced_accuracy": 0.5166666666666666,
+              "mean_corr_difference": 0.009628989250905563,
+              "mean_corr_a": 0.041185755710106,
+              "mean_corr_b": 0.023776952729422204,
+              "held_out_subject": "S2_data_preproc"
+            },
+            {
+              "trial_accuracy": 0.5833333333333334,
+              "balanced_accuracy": 0.5647321428571428,
+              "mean_corr_difference": 0.025462141514668534,
+              "mean_corr_a": 0.05265807043732591,
+              "mean_corr_b": -0.009819377072949036,
+              "held_out_subject": "S3_data_preproc"
+            },
+            {
+              "trial_accuracy": 0.5333333333333333,
+              "balanced_accuracy": 0.513888888888889,
+              "mean_corr_difference": 0.0066771655590000065,
+              "mean_corr_a": 0.03283265780128862,
+              "mean_corr_b": 0.0009647891020305043,
+              "held_out_subject": "S4_data_preproc"
+            },
+            {
+              "trial_accuracy": 0.4666666666666667,
+              "balanced_accuracy": 0.47058823529411764,
+              "mean_corr_difference": 0.00023544416603266488,
+              "mean_corr_a": 0.03935510174111549,
+              "mean_corr_b": 0.020821500251717525,
+              "held_out_subject": "S5_data_preproc"
+            },
+            {
+              "trial_accuracy": 0.55,
+              "balanced_accuracy": 0.5491071428571428,
+              "mean_corr_difference": 0.009673518462055657,
+              "mean_corr_a": 0.015178384895610917,
+              "mean_corr_b": -0.0005885792966750697,
+              "held_out_subject": "S6_data_preproc"
+            },
+            {
+              "trial_accuracy": 0.45,
+              "balanced_accuracy": 0.3839712918660287,
+              "mean_corr_difference": 0.01000166119293084,
+              "mean_corr_a": 0.06195687335638321,
+              "mean_corr_b": 0.015053357348528498,
+              "held_out_subject": "S7_data_preproc"
+            },
+            {
+              "trial_accuracy": 0.5166666666666667,
+              "balanced_accuracy": 0.55,
+              "mean_corr_difference": 0.009302632524545138,
+              "mean_corr_a": 0.017859899683697982,
+              "mean_corr_b": -0.0014526097616126853,
+              "held_out_subject": "S8_data_preproc"
+            },
+            {
+              "trial_accuracy": 0.5833333333333334,
+              "balanced_accuracy": 0.6041666666666667,
+              "mean_corr_difference": 0.03219324261771205,
+              "mean_corr_a": 0.030043057290398953,
+              "mean_corr_b": -0.004381498182732482,
+              "held_out_subject": "S9_data_preproc"
+            },
+            {
+              "trial_accuracy": 0.6166666666666667,
+              "balanced_accuracy": 0.6160714285714286,
+              "mean_corr_difference": 0.02079444756734313,
+              "mean_corr_a": 0.015013279393383056,
+              "mean_corr_b": 0.007232646140575714,
+              "held_out_subject": "S10_data_preproc"
+            },
+            {
+              "trial_accuracy": 0.6,
+              "balanced_accuracy": 0.6026785714285714,
+              "mean_corr_difference": 0.01403459794479159,
+              "mean_corr_a": 0.016623239414252516,
+              "mean_corr_b": 0.014332369045580853,
+              "held_out_subject": "S11_data_preproc"
+            },
+            {
+              "trial_accuracy": 0.6166666666666667,
+              "balanced_accuracy": 0.6166666666666667,
+              "mean_corr_difference": 0.02814933555784766,
+              "mean_corr_a": 0.028879171497211094,
+              "mean_corr_b": 0.004645290057487973,
+              "held_out_subject": "S12_data_preproc"
+            },
+            {
+              "trial_accuracy": 0.5333333333333333,
+              "balanced_accuracy": 0.5833333333333334,
+              "mean_corr_difference": 0.002657411539858552,
+              "mean_corr_a": 0.06700066368379923,
+              "mean_corr_b": 0.010292997044473996,
+              "held_out_subject": "S13_data_preproc"
+            },
+            {
+              "trial_accuracy": 0.55,
+              "balanced_accuracy": 0.5499999999999999,
+              "mean_corr_difference": 0.02335607599831333,
+              "mean_corr_a": 0.04096312651577404,
+              "mean_corr_b": -0.009531722169705902,
+              "held_out_subject": "S14_data_preproc"
+            },
+            {
+              "trial_accuracy": 0.6666666666666666,
+              "balanced_accuracy": 0.6561085972850679,
+              "mean_corr_difference": 0.04529438537063493,
+              "mean_corr_a": 0.06107429742713845,
+              "mean_corr_b": 0.020348026084066623,
+              "held_out_subject": "S15_data_preproc"
+            },
+            {
+              "trial_accuracy": 0.4666666666666667,
+              "balanced_accuracy": 0.4666666666666667,
+              "mean_corr_difference": -0.0011405310772265925,
+              "mean_corr_a": 0.046245270076847575,
+              "mean_corr_b": 0.02486406342757475,
+              "held_out_subject": "S16_data_preproc"
+            },
+            {
+              "trial_accuracy": 0.5833333333333334,
+              "balanced_accuracy": 0.5347222222222222,
+              "mean_corr_difference": 0.030333585423803842,
+              "mean_corr_a": 0.06597233976943205,
+              "mean_corr_b": 0.005713131419842925,
+              "held_out_subject": "S17_data_preproc"
+            },
+            {
+              "trial_accuracy": 0.5333333333333333,
+              "balanced_accuracy": 0.5550239234449761,
+              "mean_corr_difference": 0.0047097642303837745,
+              "mean_corr_a": 0.02676391647266884,
+              "mean_corr_b": -0.0027175203618518924,
+              "held_out_subject": "S18_data_preproc"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "best": {
+    "mapping": {
+      "1": "A",
+      "2": "B"
+    },
+    "lags": 48,
+    "ridge_lambda": 1.0,
+    "window_seconds": 10,
+    "sanity": {
+      "zero_eeg": false,
+      "shuffle_labels": false
+    },
+    "overall": {
+      "trial_accuracy": 0.5518518518518518,
+      "balanced_accuracy": 0.5531341317858172,
+      "mean_corr_difference": 0.015820777863272153,
+      "mean_corr_a": 0.03981934297590131,
+      "mean_corr_b": 0.0058707398599078435
+    },
+    "per_subject": [
+      {
+        "trial_accuracy": 0.5666666666666667,
+        "balanced_accuracy": 0.5407239819004526,
+        "mean_corr_difference": 0.013410133695298034,
+        "mean_corr_a": 0.05714306839978955,
+        "mean_corr_b": -0.01388049832743329,
+        "held_out_subject": "S1_data_preproc"
+      },
+      {
+        "trial_accuracy": 0.5166666666666667,
+        "balanced_accuracy": 0.5166666666666666,
+        "mean_corr_difference": 0.009628989250905563,
+        "mean_corr_a": 0.041185755710106,
+        "mean_corr_b": 0.023776952729422204,
+        "held_out_subject": "S2_data_preproc"
+      },
+      {
+        "trial_accuracy": 0.5833333333333334,
+        "balanced_accuracy": 0.5647321428571428,
+        "mean_corr_difference": 0.025462141514668534,
+        "mean_corr_a": 0.05265807043732591,
+        "mean_corr_b": -0.009819377072949036,
+        "held_out_subject": "S3_data_preproc"
+      },
+      {
+        "trial_accuracy": 0.5333333333333333,
+        "balanced_accuracy": 0.513888888888889,
+        "mean_corr_difference": 0.0066771655590000065,
+        "mean_corr_a": 0.03283265780128862,
+        "mean_corr_b": 0.0009647891020305043,
+        "held_out_subject": "S4_data_preproc"
+      },
+      {
+        "trial_accuracy": 0.4666666666666667,
+        "balanced_accuracy": 0.47058823529411764,
+        "mean_corr_difference": 0.00023544416603266488,
+        "mean_corr_a": 0.03935510174111549,
+        "mean_corr_b": 0.020821500251717525,
+        "held_out_subject": "S5_data_preproc"
+      },
+      {
+        "trial_accuracy": 0.55,
+        "balanced_accuracy": 0.5491071428571428,
+        "mean_corr_difference": 0.009673518462055657,
+        "mean_corr_a": 0.015178384895610917,
+        "mean_corr_b": -0.0005885792966750697,
+        "held_out_subject": "S6_data_preproc"
+      },
+      {
+        "trial_accuracy": 0.45,
+        "balanced_accuracy": 0.3839712918660287,
+        "mean_corr_difference": 0.01000166119293084,
+        "mean_corr_a": 0.06195687335638321,
+        "mean_corr_b": 0.015053357348528498,
+        "held_out_subject": "S7_data_preproc"
+      },
+      {
+        "trial_accuracy": 0.5166666666666667,
+        "balanced_accuracy": 0.55,
+        "mean_corr_difference": 0.009302632524545138,
+        "mean_corr_a": 0.017859899683697982,
+        "mean_corr_b": -0.0014526097616126853,
+        "held_out_subject": "S8_data_preproc"
+      },
+      {
+        "trial_accuracy": 0.5833333333333334,
+        "balanced_accuracy": 0.6041666666666667,
+        "mean_corr_difference": 0.03219324261771205,
+        "mean_corr_a": 0.030043057290398953,
+        "mean_corr_b": -0.004381498182732482,
+        "held_out_subject": "S9_data_preproc"
+      },
+      {
+        "trial_accuracy": 0.6166666666666667,
+        "balanced_accuracy": 0.6160714285714286,
+        "mean_corr_difference": 0.02079444756734313,
+        "mean_corr_a": 0.015013279393383056,
+        "mean_corr_b": 0.007232646140575714,
+        "held_out_subject": "S10_data_preproc"
+      },
+      {
+        "trial_accuracy": 0.6,
+        "balanced_accuracy": 0.6026785714285714,
+        "mean_corr_difference": 0.01403459794479159,
+        "mean_corr_a": 0.016623239414252516,
+        "mean_corr_b": 0.014332369045580853,
+        "held_out_subject": "S11_data_preproc"
+      },
+      {
+        "trial_accuracy": 0.6166666666666667,
+        "balanced_accuracy": 0.6166666666666667,
+        "mean_corr_difference": 0.02814933555784766,
+        "mean_corr_a": 0.028879171497211094,
+        "mean_corr_b": 0.004645290057487973,
+        "held_out_subject": "S12_data_preproc"
+      },
+      {
+        "trial_accuracy": 0.5333333333333333,
+        "balanced_accuracy": 0.5833333333333334,
+        "mean_corr_difference": 0.002657411539858552,
+        "mean_corr_a": 0.06700066368379923,
+        "mean_corr_b": 0.010292997044473996,
+        "held_out_subject": "S13_data_preproc"
+      },
+      {
+        "trial_accuracy": 0.55,
+        "balanced_accuracy": 0.5499999999999999,
+        "mean_corr_difference": 0.02335607599831333,
+        "mean_corr_a": 0.04096312651577404,
+        "mean_corr_b": -0.009531722169705902,
+        "held_out_subject": "S14_data_preproc"
+      },
+      {
+        "trial_accuracy": 0.6666666666666666,
+        "balanced_accuracy": 0.6561085972850679,
+        "mean_corr_difference": 0.04529438537063493,
+        "mean_corr_a": 0.06107429742713845,
+        "mean_corr_b": 0.020348026084066623,
+        "held_out_subject": "S15_data_preproc"
+      },
+      {
+        "trial_accuracy": 0.4666666666666667,
+        "balanced_accuracy": 0.4666666666666667,
+        "mean_corr_difference": -0.0011405310772265925,
+        "mean_corr_a": 0.046245270076847575,
+        "mean_corr_b": 0.02486406342757475,
+        "held_out_subject": "S16_data_preproc"
+      },
+      {
+        "trial_accuracy": 0.5833333333333334,
+        "balanced_accuracy": 0.5347222222222222,
+        "mean_corr_difference": 0.030333585423803842,
+        "mean_corr_a": 0.06597233976943205,
+        "mean_corr_b": 0.005713131419842925,
+        "held_out_subject": "S17_data_preproc"
+      },
+      {
+        "trial_accuracy": 0.5333333333333333,
+        "balanced_accuracy": 0.5550239234449761,
+        "mean_corr_difference": 0.0047097642303837745,
+        "mean_corr_a": 0.02676391647266884,
+        "mean_corr_b": -0.0027175203618518924,
+        "held_out_subject": "S18_data_preproc"
+      }
+    ]
+  }
+}
