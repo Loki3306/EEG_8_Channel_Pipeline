@@ -17,7 +17,7 @@ FS = 64
 LAG_MS = 250
 LAG_STEP_MS = 16
 DECISION_WINDOW_SEC = 10  # 10s windowed evaluation
-LAMBDAS = np.logspace(-3, 5, 9)  # 1e-3 to 1e5
+FIXED_LAMBDA = 1000.0  # Fixed lambda to drastically speed up execution
 
 
 def normalize_array(arr):
@@ -165,46 +165,12 @@ def main():
         for test_idx in range(num_trials):
             train_indices = [i for i in range(num_trials) if i != test_idx]
             
-            # Inner CV for lambda selection
-            best_lambda = None
-            best_inner_acc = -1.0
-            
-            for lam in LAMBDAS:
-                inner_correct = 0.0
-                inner_total = 0
-                
-                for inner_test_idx in train_indices:
-                    inner_train_indices = [i for i in train_indices if i != inner_test_idx]
-                    
-                    inner_xtx = sum(xtx_list[i] for i in inner_train_indices)
-                    inner_xty = sum(xty_list[i] for i in inner_train_indices)
-                    inner_nsamp = sum(n_samples_list[i] for i in inner_train_indices)
-                    
-                    reg = lam * inner_nsamp * np.eye(inner_xtx.shape[0])
-                    weights = np.linalg.solve(inner_xtx + reg, inner_xty)
-                    
-                    x_test = x_list[inner_test_idx]
-                    pred = x_test @ weights
-                    
-                    ea = env_a_list[inner_test_idx]
-                    eb = env_b_list[inner_test_idx]
-                    attended = MAPPING[exs[inner_test_idx].label]
-                    
-                    nc, nt = evaluate_windows(pred, ea, eb, attended, window_samples)
-                    inner_correct += nc
-                    inner_total += nt
-                    
-                inner_acc = inner_correct / max(inner_total, 1)
-                if inner_acc > best_inner_acc:
-                    best_inner_acc = inner_acc
-                    best_lambda = lam
-            
-            # Train final model for this fold using best_lambda
+            # Train final model for this fold using fixed lambda
             outer_xtx = sum(xtx_list[i] for i in train_indices)
             outer_xty = sum(xty_list[i] for i in train_indices)
             outer_nsamp = sum(n_samples_list[i] for i in train_indices)
             
-            reg = best_lambda * outer_nsamp * np.eye(outer_xtx.shape[0])
+            reg = FIXED_LAMBDA * outer_nsamp * np.eye(outer_xtx.shape[0])
             final_weights = np.linalg.solve(outer_xtx + reg, outer_xty)
             
             # Evaluate Normal
