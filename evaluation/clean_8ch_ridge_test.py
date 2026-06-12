@@ -152,10 +152,16 @@ def evaluate_test_set(test_exs, weights, mean_x, std_x, lags, mode="normal"):
             corr_b = np.corrcoef(pred, env_b)[0, 1]
             
         attended = MAPPING[ex.label]
-        if attended == "A" and corr_a > corr_b:
-            n_correct += 1
-        elif attended == "B" and corr_b > corr_a:
-            n_correct += 1
+        if attended == "A":
+            if corr_a > corr_b:
+                n_correct += 1
+            elif corr_a == corr_b:
+                n_correct += 0.5
+        elif attended == "B":
+            if corr_b > corr_a:
+                n_correct += 1
+            elif corr_b == corr_a:
+                n_correct += 0.5
             
     return n_correct / len(test_exs)
 
