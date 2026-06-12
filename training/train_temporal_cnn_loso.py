@@ -359,7 +359,7 @@ class TemporalTrialDataset(Dataset[tuple[torch.Tensor, torch.Tensor]]):
         return torch.from_numpy(eeg.astype(np.float32)), torch.from_numpy(target.astype(np.float32))
 
 
-class ContrastiveTrialDataset(Dataset[tuple[torch.Tensor, torch.Tensor, torch.Tensor]]):
+class ContrastiveTrialDataset(Dataset[tuple[torch.Tensor, torch.Tensor]]):
     def __init__(
         self,
         examples,
@@ -380,7 +380,6 @@ class ContrastiveTrialDataset(Dataset[tuple[torch.Tensor, torch.Tensor, torch.Te
     ) -> None:
         self.examples = examples
         self.mapping = mapping
-        self.opposite_mapping = {label: ("B" if stream == "A" else "A") for label, stream in mapping.items()}
         self.channel_ids = channel_ids
         self.mean = mean
         self.std = std
@@ -390,14 +389,11 @@ class ContrastiveTrialDataset(Dataset[tuple[torch.Tensor, torch.Tensor, torch.Te
         self.target_lowpass_hz = target_lowpass_hz
         self.fs = fs
         self.zero_inputs = zero_inputs
-        self.negative_mode = negative_mode
-        self.negative_min_shift_sec = negative_min_shift_sec
-        self.negative_max_shift_sec = negative_max_shift_sec
 
     def __len__(self) -> int:
         return len(self.examples)
 
-    def __getitem__(self, index: int) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    def __getitem__(self, index: int) -> tuple[torch.Tensor, torch.Tensor]:
         example = self.examples[index]
         eeg = zero_eeg_like(example.eeg, self.channel_ids) if self.zero_inputs else channel_matrix(example.eeg, self.channel_ids)
         if not self.zero_inputs:
@@ -411,39 +407,10 @@ class ContrastiveTrialDataset(Dataset[tuple[torch.Tensor, torch.Tensor, torch.Te
             fs=self.fs,
         )
         
-        # Hard negative sampling based on mode
-        if self.negative_mode == "random":
-            negative = target_envelope(
-                example,
-                self.opposite_mapping,
-                compression=self.target_compression,
-                lowpass_hz=self.target_lowpass_hz,
-                fs=self.fs,
-            )
-        else:
-            # For other modes, use the first available chunk for sampling
-            chunk_len = min(self.fs * 5, len(positive))  # 5s chunk default
-            negative = sample_negative_audio_chunk(
-                positive,
-                self.examples,
-                index,
-                self.mapping,
-                start_sample=0,
-                chunk_length=chunk_len,
-                compression=self.target_compression,
-                lowpass_hz=self.target_lowpass_hz,
-                fs=self.fs,
-                negative_mode=self.negative_mode,
-                negative_min_shift_sec=self.negative_min_shift_sec,
-                negative_max_shift_sec=self.negative_max_shift_sec,
-            )
-        
         positive = standardize_audio(positive, self.target_mean, self.target_std)
-        negative = standardize_audio(negative, self.target_mean, self.target_std)
         return (
             torch.from_numpy(eeg.astype(np.float32)),
             torch.from_numpy(positive.astype(np.float32)),
-            torch.from_numpy(negative.astype(np.float32)),
         )
 
 
@@ -745,29 +712,22 @@ def train_contrastive_fold(
         running_loss = 0.0
         batch_count = 0
 
-        for eeg, audio_pos, audio_neg in loader:
+        for eeg, audio_pos in loader:
             eeg = eeg.to(device)
             audio_pos = audio_pos.to(device)
-            audio_neg = audio_neg.to(device)
 
             max_start = max(eeg.shape[1] - chunk_samples, 0)
             starts = torch.randint(0, max_start + 1, (eeg.shape[0],), device=device)
-            shifts = sample_shift_samples(chunk_samples, lag_ms=lag_ms, lag_step_ms=lag_step_ms, fs=fs, batch_size=eeg.shape[0], device=device)
-            neg_starts = torch.clamp(starts + shifts, max=max_start)
 
             eeg_chunk = slice_batch_3d(eeg, starts, chunk_samples)
             pos_chunk = slice_batch_2d(audio_pos, starts, chunk_samples).unsqueeze(-1)
-            neg_shifted_chunk = slice_batch_2d(audio_neg, neg_starts, chunk_samples).unsqueeze(-1)
-            neg_aligned_chunk = slice_batch_2d(audio_neg, starts, chunk_samples).unsqueeze(-1)
 
             optimizer.zero_grad(set_to_none=True)
             eeg_embedding = model.encode_eeg(eeg_chunk)
             pos_embedding = model.encode_audio(pos_chunk)
-            neg_shifted_embedding = model.encode_audio(neg_shifted_chunk)
-            neg_aligned_embedding = model.encode_audio(neg_aligned_chunk)
             
-            # Pool contains: pos (aligned), neg_shifted (shifted unattended), neg_aligned (aligned unattended)
-            audio_pool = torch.cat([pos_embedding, neg_shifted_embedding, neg_aligned_embedding], dim=0)
+            # Batch-wise InfoNCE: the pool is just the positive embeddings from the batch
+            audio_pool = pos_embedding
             logits = cosine_similarity_matrix(eeg_embedding, audio_pool) / max(float(temperature), 1e-6)
             loss = F.cross_entropy(logits, torch.arange(eeg_embedding.shape[0], device=device))
             loss.backward()
