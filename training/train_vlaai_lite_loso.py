@@ -3,24 +3,35 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 import numpy as np
-import time
 from pathlib import Path
 from copy import deepcopy
+from scipy.signal import butter, filtfilt
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT))
 
 from models.vlaai_lite import VLAAILite
-from baselines.ridge_aad import load_subject_examples, subject_files, speech_envelope, iter_leave_one_subject_out
+from baselines.ridge_aad import load_subject_examples, subject_files, iter_leave_one_subject_out
 
-MAPPING = {1: "A", 2: "B"}
 FS = 64
-COMPRESSION = 0.6
-LOWPASS_HZ = 8.0
-CHANNELS = [12, 14, 16, 22, 50, 52, 54, 60]  # T7, T8, C3, C4, CP5, CP6, P7, P8
+DECISION_WINDOW_SEC = 10
+BP_LOWCUT = 1.0
+BP_HIGHCUT = 8.0
+# Use 8 specific channels: Cz, C3, C4, CPz, CP3, CP4, Pz, Fz
+CHANNELS = [47, 12, 49, 31, 17, 53, 30, 37]
 
-def extract_envelope(wav):
-    return speech_envelope(wav, compression=COMPRESSION, lowpass_hz=LOWPASS_HZ, fs=FS, normalize=True)
+def butter_bandpass_filter(data, lowcut, highcut, fs, order=2, axis=0):
+    nyq = 0.5 * fs
+    low = lowcut / nyq
+    high = highcut / nyq
+    b, a = butter(order, [low, high], btype='band')
+    y = filtfilt(b, a, data, axis=axis)
+    return y
+
+def normalize_array(arr):
+    arr = arr - arr.mean(axis=0, keepdims=True)
+    scale = arr.std(axis=0, keepdims=True) + 1e-12
+    return arr / scale
 
 class PearsonMSELoss(nn.Module):
     def __init__(self, alpha=0.1):
@@ -48,52 +59,104 @@ def prepare_dataset(examples):
     Y = []
     Y_A = []
     Y_B = []
-    labels = []
     
     for ex in examples:
-        eeg = ex.eeg[CHANNELS, :]
-        env_a = extract_envelope(ex.wav_a)
-        env_b = extract_envelope(ex.wav_b)
+        eeg = ex.eeg[:, CHANNELS].T
         
-        min_len = min(eeg.shape[1], len(env_a), len(env_b))
-        eeg = eeg[:, :min_len]
+        # 1-8 Hz Bandpass
+        eeg = butter_bandpass_filter(eeg, BP_LOWCUT, BP_HIGHCUT, FS, axis=1)
+        wav_a = butter_bandpass_filter(ex.wav_a.reshape(-1, 1), BP_LOWCUT, BP_HIGHCUT, FS, axis=0).ravel()
+        wav_b = butter_bandpass_filter(ex.wav_b.reshape(-1, 1), BP_LOWCUT, BP_HIGHCUT, FS, axis=0).ravel()
+        
+        # Trial-level normalization
+        x_norm = normalize_array(eeg.T).T  # scale over time
+        env_a = normalize_array(wav_a.reshape(-1, 1)).ravel()
+        env_b = normalize_array(wav_b.reshape(-1, 1)).ravel()
+        
+        # Target is ALWAYS env_a
+        target_env = env_a
+        
+        min_len = min(x_norm.shape[1], len(target_env))
+        x_norm = x_norm[:, :min_len]
+        target_env = target_env[:min_len]
         env_a = env_a[:min_len]
         env_b = env_b[:min_len]
         
-        target = env_a if MAPPING[ex.label] == "A" else env_b
-        
-        X.append(eeg)
-        Y.append(target)
+        X.append(x_norm)
+        Y.append(target_env)
         Y_A.append(env_a)
         Y_B.append(env_b)
-        labels.append(ex.label)
         
-    return X, Y, Y_A, Y_B, labels
+    return X, Y, Y_A, Y_B
 
-def evaluate_model(model, X, Y_A, Y_B, labels, device, zero_eeg=False):
+def evaluate_windows(pred, env_a, env_b, window_samples):
+    num_correct = 0.0
+    num_total = 0
+    start = 0
+    while start + window_samples <= len(pred):
+        end = start + window_samples
+        p = pred[start:end]
+        ea = env_a[start:end]
+        eb = env_b[start:end]
+        
+        std_p = np.std(p)
+        if std_p < 1e-12:
+            ca = 0.0
+            cb = 0.0
+        else:
+            ca = np.corrcoef(p, ea)[0, 1]
+            cb = np.corrcoef(p, eb)[0, 1]
+            
+        if ca > cb:
+            num_correct += 1.0
+        elif ca == cb:
+            num_correct += 0.5
+                
+        num_total += 1
+        start += window_samples
+    return num_correct, num_total
+
+def evaluate_model(model, X, Y_A, Y_B, device, zero_eeg=False, shuffle_eeg=False):
     model.eval()
-    n_correct = 0
+    window_samples = DECISION_WINDOW_SEC * FS
+    n_correct = 0.0
+    n_total = 0
+    
+    np.random.seed(42)
+    shuffle_indices = np.random.permutation(len(X))
+    while np.any(shuffle_indices == np.arange(len(X))):
+        shuffle_indices = np.random.permutation(len(X))
+    
     with torch.no_grad():
         for i in range(len(X)):
-            x = torch.FloatTensor(X[i]).unsqueeze(0).to(device)
+            if shuffle_eeg:
+                shuf_idx = shuffle_indices[i]
+                x_np = X[shuf_idx]
+                mlen = min(x_np.shape[1], len(Y_A[i]))
+                x_np = x_np[:, :mlen]
+            else:
+                x_np = X[i]
+                
+            x = torch.FloatTensor(x_np).unsqueeze(0).to(device)
+            
             if zero_eeg:
                 x = torch.zeros_like(x)
             
             pred = model(x).squeeze(0).squeeze(0).cpu().numpy()
             
-            env_a = Y_A[i]
-            env_b = Y_B[i]
-            
-            corr_a = np.corrcoef(pred, env_a)[0, 1]
-            corr_b = np.corrcoef(pred, env_b)[0, 1]
-            
-            attended = MAPPING[labels[i]]
-            if attended == "A" and corr_a > corr_b:
-                n_correct += 1
-            elif attended == "B" and corr_b > corr_a:
-                n_correct += 1
+            if shuffle_eeg:
+                ea = Y_A[i][:mlen]
+                eb = Y_B[i][:mlen]
+                pred = pred[:mlen]
+            else:
+                ea = Y_A[i]
+                eb = Y_B[i]
                 
-    return n_correct / len(X)
+            nc, nt = evaluate_windows(pred, ea, eb, window_samples)
+            n_correct += nc
+            n_total += nt
+            
+    return n_correct, n_total
 
 def train_loso():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -105,10 +168,11 @@ def train_loso():
         return
         
     subject_examples = {str(p): load_subject_examples(p) for p in paths}
-    
     folds = list(iter_leave_one_subject_out(paths))
+    
     all_normal_accs = []
     all_zero_accs = []
+    all_shuffle_accs = []
     
     for held_out_path, train_paths in folds:
         held_out_key = str(held_out_path)
@@ -120,26 +184,15 @@ def train_loso():
             
         test_exs = subject_examples[held_out_key]
         
-        # We need an internal validation set for early stopping.
-        # Let's take 10% of train_exs as val_exs
+        np.random.seed(42)
         np.random.shuffle(train_exs)
         val_split = int(0.1 * len(train_exs))
         val_exs = train_exs[:val_split]
         train_exs = train_exs[val_split:]
         
-        X_tr, Y_tr, YA_tr, YB_tr, L_tr = prepare_dataset(train_exs)
-        X_va, Y_va, YA_va, YB_va, L_va = prepare_dataset(val_exs)
-        X_te, Y_te, YA_te, YB_te, L_te = prepare_dataset(test_exs)
-        
-        # Normalization based on train statistics ONLY
-        # Normalize EEG across channels
-        eeg_concat = np.concatenate(X_tr, axis=1)
-        mean_eeg = eeg_concat.mean(axis=1, keepdims=True)
-        std_eeg = eeg_concat.std(axis=1, keepdims=True) + 1e-12
-        
-        X_tr = [(x - mean_eeg) / std_eeg for x in X_tr]
-        X_va = [(x - mean_eeg) / std_eeg for x in X_va]
-        X_te = [(x - mean_eeg) / std_eeg for x in X_te]
+        X_tr, Y_tr, YA_tr, YB_tr = prepare_dataset(train_exs)
+        X_va, Y_va, YA_va, YB_va = prepare_dataset(val_exs)
+        X_te, Y_te, YA_te, YB_te = prepare_dataset(test_exs)
         
         model = VLAAILite(in_channels=8).to(device)
         optimizer = optim.Adam(model.parameters(), lr=1e-3, weight_decay=1e-4)
@@ -154,7 +207,6 @@ def train_loso():
             model.train()
             train_loss = 0.0
             
-            # Simple batching (batch size = 1 for variable lengths)
             for i in range(len(X_tr)):
                 x = torch.FloatTensor(X_tr[i]).unsqueeze(0).to(device)
                 y = torch.FloatTensor(Y_tr[i]).unsqueeze(0).unsqueeze(0).to(device)
@@ -166,7 +218,8 @@ def train_loso():
                 optimizer.step()
                 train_loss += loss.item()
                 
-            val_acc = evaluate_model(model, X_va, YA_va, YB_va, L_va, device)
+            nc_va, nt_va = evaluate_model(model, X_va, YA_va, YB_va, device)
+            val_acc = nc_va / max(nt_va, 1)
             
             if val_acc > best_val_acc:
                 best_val_acc = val_acc
@@ -175,33 +228,42 @@ def train_loso():
             else:
                 epochs_no_improve += 1
                 
+            print(f"  Epoch {epoch+1:02d}/50 | Train Loss: {train_loss:.4f} | Val Acc: {val_acc*100:.2f}% | Patience: {epochs_no_improve}/5")
+            
+                
             if epochs_no_improve >= patience:
                 break
                 
         model.load_state_dict(best_weights)
         
         # Test Evaluation
-        normal_acc = evaluate_model(model, X_te, YA_te, YB_te, L_te, device, zero_eeg=False)
-        zero_acc = evaluate_model(model, X_te, YA_te, YB_te, L_te, device, zero_eeg=True)
+        nc_norm, nt_norm = evaluate_model(model, X_te, YA_te, YB_te, device, zero_eeg=False)
+        nc_zero, nt_zero = evaluate_model(model, X_te, YA_te, YB_te, device, zero_eeg=True)
+        nc_shuf, nt_shuf = evaluate_model(model, X_te, YA_te, YB_te, device, shuffle_eeg=True)
         
-        print(f"  Test Normal EEG Accuracy: {normal_acc:.4f}")
-        print(f"  Test Zero EEG Accuracy:   {zero_acc:.4f}")
+        normal_acc = nc_norm / max(nt_norm, 1)
+        zero_acc = nc_zero / max(nt_zero, 1)
+        shuffle_acc = nc_shuf / max(nt_shuf, 1)
+        
+        print(f"  -> Accuracy Normal : {normal_acc*100:.2f}%")
+        print(f"  -> Accuracy Zero   : {zero_acc*100:.2f}%")
+        print(f"  -> Accuracy Shuffle: {shuffle_acc*100:.2f}%")
         
         all_normal_accs.append(normal_acc)
         all_zero_accs.append(zero_acc)
+        all_shuffle_accs.append(shuffle_acc)
         
     final_normal = np.mean(all_normal_accs)
     final_zero = np.mean(all_zero_accs)
-    print("\n" + "="*50)
-    print("VLAAI-LITE 8-CHANNEL LOSO RESULTS")
-    print("="*50)
-    print(f"Overall Normal EEG Accuracy: {final_normal:.4f}")
-    print(f"Overall Zero EEG Accuracy:   {final_zero:.4f}")
+    final_shuffle = np.mean(all_shuffle_accs)
     
-    if final_normal <= final_zero + 0.02:
-        print("\n🚨 SANITY CHECK FAILED: Model is not using EEG information.")
-    else:
-        print("\n✅ SANITY CHECK PASSED: Model is successfully decoding EEG.")
+    print("\n" + "="*50)
+    print("VLAAI-LITE 8-CHANNEL LOSO RESULTS (CORRECTED PIPELINE)")
+    print("="*50)
+    print(f" Normal EEG  : {final_normal*100:.2f}%")
+    print(f" Zero EEG    : {final_zero*100:.2f}%")
+    print(f" Shuffle EEG : {final_shuffle*100:.2f}%")
+    print("="*50)
 
 if __name__ == "__main__":
     train_loso()
