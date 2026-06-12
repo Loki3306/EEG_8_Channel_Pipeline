@@ -1013,9 +1013,10 @@ def run_evaluation_folds(
         fold_iterator = enumerate(iter_leave_one_subject_out(subject_paths), start=1)
         def iter_fn():
             for fold_index, (held_out, train_paths) in fold_iterator:
-                # Use one subject from train_paths as validation to preserve LOSO
-                val_path = train_paths[-1]
-                real_train_paths = train_paths[:-1]
+                # Pick a validation subject deterministically that rotates with the fold
+                val_idx = fold_index % len(train_paths)
+                val_path = train_paths[val_idx]
+                real_train_paths = train_paths[:val_idx] + train_paths[val_idx + 1:]
                 
                 train_examples = [example for path in real_train_paths for example in subject_examples[path]]
                 val_examples = subject_examples[val_path]
@@ -1134,7 +1135,7 @@ def main() -> None:
     parser.add_argument("--subject-limit", type=int, default=None)
     parser.add_argument("--channel-ids", type=int, nargs="+", default=[0, 1], help="EEG channel indices to use")
     parser.add_argument("--epochs", type=int, default=20)
-    parser.add_argument("--batch-size", type=int, default=4)
+    parser.add_argument("--batch-size", type=int, default=32)
     parser.add_argument("--lr", type=float, default=1e-3)
     parser.add_argument("--weight-decay", type=float, default=1e-4)
     parser.add_argument("--patience", type=int, default=5)
