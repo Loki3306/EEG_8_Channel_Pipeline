@@ -66,23 +66,42 @@ def run_collapse_diagnostic():
     np.random.seed(42)
     indices = np.random.choice(len(X_te), size=10, replace=False)
     
-    preds = []
+    preds_real = []
+    preds_zero = []
     with torch.no_grad():
         for i in indices:
-            x = torch.FloatTensor(X_te[i]).unsqueeze(0).to(device)
-            pred = model(x).squeeze().cpu().numpy()
-            preds.append(pred)
+            x_real = torch.FloatTensor(X_te[i]).unsqueeze(0).to(device)
+            x_zero = torch.zeros_like(x_real)
             
+            pred_r = model(x_real).squeeze().cpu().numpy()
+            pred_z = model(x_zero).squeeze().cpu().numpy()
+            
+            preds_real.append(pred_r)
+            preds_zero.append(pred_z)
+            
+    # Check correlation between real and zero for each trial
+    print("\n[Diagnostic] Correlation between Real EEG output and Zero EEG output per trial:")
+    real_zero_corrs = []
+    for i in range(10):
+        mlen = min(len(preds_real[i]), len(preds_zero[i]))
+        pr = preds_real[i][:mlen]
+        pz = preds_zero[i][:mlen]
+        corr = np.corrcoef(pr, pz)[0, 1]
+        real_zero_corrs.append(corr)
+        print(f"  Trial {i:<2}: {corr:.4f}")
+        
+    print(f"\nMean Real-vs-Zero Correlation: {np.mean(real_zero_corrs):.4f}")
+    
     # Compute cross-correlation matrix
-    print("\n[Diagnostic] Cross-Correlation Matrix between 10 trial outputs:")
+    print("\n[Diagnostic] Cross-Correlation Matrix between 10 REAL trial outputs:")
     
     matrix = np.zeros((10, 10))
     for i in range(10):
         for j in range(10):
             # Trim to min length
-            mlen = min(len(preds[i]), len(preds[j]))
-            p1 = preds[i][:mlen]
-            p2 = preds[j][:mlen]
+            mlen = min(len(preds_real[i]), len(preds_real[j]))
+            p1 = preds_real[i][:mlen]
+            p2 = preds_real[j][:mlen]
             corr = np.corrcoef(p1, p2)[0, 1]
             matrix[i, j] = corr
             
