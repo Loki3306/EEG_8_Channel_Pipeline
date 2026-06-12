@@ -466,6 +466,7 @@ def score_predictions(predictions: list[np.ndarray], examples, *, mapping: dict[
 def train_fold(
     *,
     train_examples,
+    val_examples,
     test_examples,
     mapping: dict[int, str],
     channel_ids: list[int],
@@ -546,7 +547,7 @@ def train_fold(
         model.eval()
         validation_predictions: list[np.ndarray] = []
         with torch.no_grad():
-            for example in test_examples:
+            for example in val_examples:
                 eeg = zero_eeg_like(example.eeg, channel_ids) if zero_inputs else channel_matrix(example.eeg, channel_ids)
                 if not zero_inputs:
                     eeg = standardize_channels(eeg, mean, std)
@@ -554,7 +555,7 @@ def train_fold(
                 prediction = model(eeg_tensor).squeeze(0).detach().cpu().numpy()
                 validation_predictions.append(prediction)
 
-        validation_score = score_predictions(validation_predictions, test_examples, mapping=mapping, window_seconds=10)["trial_accuracy"]
+        validation_score = score_predictions(validation_predictions, val_examples, mapping=mapping, window_seconds=10)["trial_accuracy"]
         notify(f"  Epoch {epoch}/{epochs}: train_loss={train_loss:.4f}, val_accuracy@10s={validation_score:.4f}")
 
         if validation_score > best_score:
@@ -677,7 +678,7 @@ def score_similarity_trials(
 def train_contrastive_fold(
     *,
     train_examples,
-    test_examples,
+    val_examples,
     mapping: dict[int, str],
     channel_ids: list[int],
     target_mean: float,
@@ -757,13 +758,17 @@ def train_contrastive_fold(
 
             eeg_chunk = slice_batch_3d(eeg, starts, chunk_samples)
             pos_chunk = slice_batch_2d(audio_pos, starts, chunk_samples).unsqueeze(-1)
-            neg_chunk = slice_batch_2d(audio_neg, neg_starts, chunk_samples).unsqueeze(-1)
+            neg_shifted_chunk = slice_batch_2d(audio_neg, neg_starts, chunk_samples).unsqueeze(-1)
+            neg_aligned_chunk = slice_batch_2d(audio_neg, starts, chunk_samples).unsqueeze(-1)
 
             optimizer.zero_grad(set_to_none=True)
             eeg_embedding = model.encode_eeg(eeg_chunk)
             pos_embedding = model.encode_audio(pos_chunk)
-            neg_embedding = model.encode_audio(neg_chunk)
-            audio_pool = torch.cat([pos_embedding, neg_embedding], dim=0)
+            neg_shifted_embedding = model.encode_audio(neg_shifted_chunk)
+            neg_aligned_embedding = model.encode_audio(neg_aligned_chunk)
+            
+            # Pool contains: pos (aligned), neg_shifted (shifted unattended), neg_aligned (aligned unattended)
+            audio_pool = torch.cat([pos_embedding, neg_shifted_embedding, neg_aligned_embedding], dim=0)
             logits = cosine_similarity_matrix(eeg_embedding, audio_pool) / max(float(temperature), 1e-6)
             loss = F.cross_entropy(logits, torch.arange(eeg_embedding.shape[0], device=device))
             loss.backward()
@@ -776,7 +781,7 @@ def train_contrastive_fold(
 
         validation_score = score_similarity_trials(
             model,
-            test_examples,
+            val_examples,
             channel_ids=channel_ids,
             eeg_mean=mean,
             eeg_std=std,
@@ -842,7 +847,7 @@ def run_fold(
     if objective == "contrastive":
         model, mean, std, training_info = train_contrastive_fold(
             train_examples=train_examples,
-            test_examples=test_examples,
+            val_examples=val_examples,
             mapping=mapping,
             channel_ids=channel_ids,
             target_mean=target_mean,
@@ -868,6 +873,7 @@ def run_fold(
     else:
         model, mean, std, training_info = train_fold(
             train_examples=train_examples,
+            val_examples=val_examples,
             test_examples=test_examples,
             mapping=mapping,
             channel_ids=channel_ids,
@@ -1043,16 +1049,20 @@ def run_evaluation_folds(
     Returns list of fold results.
     """
     window_runs = []
-    fold_iterator = []
     
     if evaluation_mode == "loso":
         fold_iterator = enumerate(iter_leave_one_subject_out(subject_paths), start=1)
         def iter_fn():
             for fold_index, (held_out, train_paths) in fold_iterator:
-                train_examples = [example for path in train_paths for example in subject_examples[path]]
+                # Use one subject from train_paths as validation to preserve LOSO
+                val_path = train_paths[-1]
+                real_train_paths = train_paths[:-1]
+                
+                train_examples = [example for path in real_train_paths for example in subject_examples[path]]
+                val_examples = subject_examples[val_path]
                 test_examples = subject_examples[held_out]
-                fold_label = f"Fold {fold_index}/{len(subject_paths)}: held out {held_out.stem}"
-                yield fold_index, len(subject_paths), fold_label, train_examples, test_examples
+                fold_label = f"Fold {fold_index}/{len(subject_paths)}: held out {held_out.stem} (val {val_path.stem})"
+                yield fold_index, len(subject_paths), fold_label, train_examples, val_examples, test_examples
     else:  # within-subject
         examples_by_subject = {}
         for path in subject_paths:
@@ -1062,10 +1072,16 @@ def run_evaluation_folds(
         def iter_fn():
             folds = list(iter_within_subject_folds(examples_by_subject, train_ratio=subject_train_ratio))
             for fold_index, (subject_id, train_examples, test_examples) in enumerate(folds, start=1):
+                # Split train into real train and val (e.g. 80/20)
+                split_idx = int(len(train_examples) * 0.8)
+                real_train_examples = train_examples[:split_idx]
+                val_examples = train_examples[split_idx:]
+                if not val_examples:
+                    val_examples = real_train_examples # Fallback if too small
                 fold_label = f"Fold {fold_index}/{len(folds)}: within {subject_id}"
-                yield fold_index, len(folds), fold_label, train_examples, test_examples
+                yield fold_index, len(folds), fold_label, real_train_examples, val_examples, test_examples
     
-    for fold_index, num_folds, fold_label, train_examples, test_examples in iter_fn():
+    for fold_index, num_folds, fold_label, train_examples, val_examples, test_examples in iter_fn():
         notify_fn(f"{fold_label}")
         setattr(run_fold, "robust", args.robust_norm)
 
@@ -1115,6 +1131,7 @@ def run_evaluation_folds(
 
         fold_result = run_fold(
             train_examples=train_examples,
+            val_examples=val_examples,
             test_examples=test_examples,
             mapping=mapping,
             channel_ids=args.channel_ids,
