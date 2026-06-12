@@ -870,7 +870,6 @@ def run_fold(
             weight_decay=weight_decay,
             patience=patience,
             zero_inputs=zero_inputs,
-            shuffle_labels=shuffle_labels,
             model_type=model_type,
         )
 
