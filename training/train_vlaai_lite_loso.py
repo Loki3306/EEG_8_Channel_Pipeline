@@ -116,7 +116,7 @@ def evaluate_windows(pred, env_a, env_b, window_samples):
         start += window_samples
     return num_correct, num_total
 
-def evaluate_model(model, X, Y_A, Y_B, device, zero_eeg=False, shuffle_eeg=False):
+def evaluate_model(model, X, Y_A, Y_B, device, zero_eeg=False, shuffle_eeg=False, random_eeg=False):
     model.eval()
     window_samples = DECISION_WINDOW_SEC * FS
     n_correct = 0.0
@@ -141,6 +141,8 @@ def evaluate_model(model, X, Y_A, Y_B, device, zero_eeg=False, shuffle_eeg=False
             
             if zero_eeg:
                 x = torch.zeros_like(x)
+            elif random_eeg:
+                x = torch.randn_like(x)
             
             pred = model(x).squeeze(0).squeeze(0).cpu().numpy()
             
@@ -171,7 +173,7 @@ def train_loso():
     folds = list(iter_leave_one_subject_out(paths))
     
     all_normal_accs = []
-    all_zero_accs = []
+    all_random_accs = []
     all_shuffle_accs = []
     
     for held_out_path, train_paths in folds:
@@ -238,30 +240,30 @@ def train_loso():
         
         # Test Evaluation
         nc_norm, nt_norm = evaluate_model(model, X_te, YA_te, YB_te, device, zero_eeg=False)
-        nc_zero, nt_zero = evaluate_model(model, X_te, YA_te, YB_te, device, zero_eeg=True)
+        nc_rand, nt_rand = evaluate_model(model, X_te, YA_te, YB_te, device, random_eeg=True)
         nc_shuf, nt_shuf = evaluate_model(model, X_te, YA_te, YB_te, device, shuffle_eeg=True)
         
         normal_acc = nc_norm / max(nt_norm, 1)
-        zero_acc = nc_zero / max(nt_zero, 1)
+        rand_acc = nc_rand / max(nt_rand, 1)
         shuffle_acc = nc_shuf / max(nt_shuf, 1)
         
         print(f"  -> Accuracy Normal : {normal_acc*100:.2f}%")
-        print(f"  -> Accuracy Zero   : {zero_acc*100:.2f}%")
+        print(f"  -> Accuracy Random : {rand_acc*100:.2f}%")
         print(f"  -> Accuracy Shuffle: {shuffle_acc*100:.2f}%")
         
         all_normal_accs.append(normal_acc)
-        all_zero_accs.append(zero_acc)
+        all_random_accs.append(rand_acc)
         all_shuffle_accs.append(shuffle_acc)
         
     final_normal = np.mean(all_normal_accs)
-    final_zero = np.mean(all_zero_accs)
+    final_random = np.mean(all_random_accs)
     final_shuffle = np.mean(all_shuffle_accs)
     
     print("\n" + "="*50)
     print("VLAAI-LITE 8-CHANNEL LOSO RESULTS (CORRECTED PIPELINE)")
     print("="*50)
     print(f" Normal EEG  : {final_normal*100:.2f}%")
-    print(f" Zero EEG    : {final_zero*100:.2f}%")
+    print(f" Random EEG  : {final_random*100:.2f}%")
     print(f" Shuffle EEG : {final_shuffle*100:.2f}%")
     print("="*50)
 
