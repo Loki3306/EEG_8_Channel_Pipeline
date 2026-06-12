@@ -16,14 +16,14 @@ MAPPING = {1: "A", 2: "B"}
 FS = 64
 LAG_MS = 250
 LAG_STEP_MS = 16
-RIDGE_LAMBDA = 1.0
+DECISION_WINDOW_SEC = 10  # 10s windowed evaluation
+LAMBDAS = np.logspace(-3, 5, 9)  # 1e-3 to 1e5
 
 
-def normalize_envelope(wav):
-    wav = wav.ravel().astype(float)
-    wav = wav - wav.mean()
-    scale = wav.std() + 1e-12
-    return wav / scale
+def normalize_array(arr):
+    arr = arr - arr.mean(axis=0, keepdims=True)
+    scale = arr.std(axis=0, keepdims=True) + 1e-12
+    return arr / scale
 
 
 def create_lagged_matrix(eeg, lags):
@@ -31,7 +31,6 @@ def create_lagged_matrix(eeg, lags):
     samples = eeg.shape[1]
     channels = eeg.shape[0]
     
-    # Pre-allocate blocks
     blocks = []
     for lag in lags:
         if lag == 0:
@@ -52,111 +51,50 @@ def get_lag_offsets(lag_ms, lag_step_ms, fs):
     return sorted(set(offsets))
 
 
-def fit_ridge_model(train_exs, lags):
-    """Computes Ridge weights using the exact normal equation."""
-    # First pass: find feature means and stds for standardization
-    sum_x = None
-    sum_sq_x = None
-    total_samples = 0
-    
-    for ex in train_exs:
-        eeg = ex.eeg[CHANNELS, :]
-        x = create_lagged_matrix(eeg, lags)
-        if sum_x is None:
-            sum_x = np.zeros(x.shape[1])
-            sum_sq_x = np.zeros(x.shape[1])
-            
-        sum_x += x.sum(axis=0)
-        sum_sq_x += np.square(x).sum(axis=0)
-        total_samples += x.shape[0]
-        
-    mean_x = sum_x / total_samples
-    var_x = (sum_sq_x / total_samples) - np.square(mean_x)
-    std_x = np.sqrt(np.maximum(var_x, 1e-12))
-    
-    # Second pass: compute X^T X and X^T Y
-    xtx = np.zeros((len(mean_x), len(mean_x)))
-    xty = np.zeros(len(mean_x))
-    
-    for ex in train_exs:
-        eeg = ex.eeg[CHANNELS, :]
-        x = create_lagged_matrix(eeg, lags)
-        x = (x - mean_x) / std_x
-        
-        env_a = normalize_envelope(ex.wav_a)
-        env_b = normalize_envelope(ex.wav_b)
-        
-        target_env = env_a if MAPPING[ex.label] == "A" else env_b
-        
-        mlen = min(x.shape[0], len(target_env))
-        x = x[:mlen]
-        y = target_env[:mlen]
-        
-        xtx += x.T @ x
-        xty += x.T @ y
-        
-    # Solve Ridge
-    reg_matrix = RIDGE_LAMBDA * total_samples * np.eye(xtx.shape[0])
-    weights = np.linalg.solve(xtx + reg_matrix, xty)
-    
-    return weights, mean_x, std_x
-
-
-def evaluate_trial(ex, shuffled_ex, weights, mean_x, std_x, lags, mode="normal"):
+def evaluate_windows(pred, env_a, env_b, attended_stream, window_samples):
     """
-    Evaluates accuracy for a single trial.
-    modes: 'normal', 'zero', 'shuffle'
-    Returns score: 1.0 (correct), 0.5 (tie), 0.0 (incorrect)
+    Splits prediction and targets into windows and computes accuracy.
+    Returns: (num_correct, num_total)
     """
-    if mode == "shuffle":
-        # Use EEG from a different trial within the same subject
-        eeg = shuffled_ex.eeg[CHANNELS, :]
-    else:
-        eeg = ex.eeg[CHANNELS, :]
+    num_correct = 0.0
+    num_total = 0
+    
+    start = 0
+    while start + window_samples <= len(pred):
+        end = start + window_samples
         
-    if mode == "zero":
-        eeg = np.zeros_like(eeg)
+        p = pred[start:end]
+        ea = env_a[start:end]
+        eb = env_b[start:end]
         
-    x = create_lagged_matrix(eeg, lags)
-    x = (x - mean_x) / std_x
-    
-    pred = x @ weights
-    
-    env_a = normalize_envelope(ex.wav_a)
-    env_b = normalize_envelope(ex.wav_b)
-    
-    mlen = min(len(pred), len(env_a), len(env_b))
-    pred = pred[:mlen]
-    env_a = env_a[:mlen]
-    env_b = env_b[:mlen]
-    
-    std_pred = np.std(pred)
-    if std_pred < 1e-12:
-        corr_a = 0.0
-        corr_b = 0.0
-    else:
-        corr_a = np.corrcoef(pred, env_a)[0, 1]
-        corr_b = np.corrcoef(pred, env_b)[0, 1]
-        
-    attended = MAPPING[ex.label]
-    
-    if attended == "A":
-        if corr_a > corr_b:
-            return 1.0
-        elif corr_a == corr_b:
-            return 0.5
-    elif attended == "B":
-        if corr_b > corr_a:
-            return 1.0
-        elif corr_b == corr_a:
-            return 0.5
+        std_p = np.std(p)
+        if std_p < 1e-12:
+            ca = 0.0
+            cb = 0.0
+        else:
+            ca = np.corrcoef(p, ea)[0, 1]
+            cb = np.corrcoef(p, eb)[0, 1]
             
-    return 0.0
+        if attended_stream == "A":
+            if ca > cb:
+                num_correct += 1.0
+            elif ca == cb:
+                num_correct += 0.5
+        else:
+            if cb > ca:
+                num_correct += 1.0
+            elif cb == ca:
+                num_correct += 0.5
+                
+        num_total += 1
+        start += window_samples
+        
+    return num_correct, num_total
 
 
 def main():
     print("===============================================================")
-    print(" DTU PAPER REPRODUCTION (64-Ch LOTO Ridge Baseline)")
+    print(" DTU PAPER REPRODUCTION (64-Ch LOTO Ridge w/ Nested CV)")
     print("===============================================================")
     
     paths = subject_files()
@@ -164,10 +102,13 @@ def main():
         print("No subjects found. Exiting.")
         return
         
-    print(f"Loading {len(paths)} subjects...")
     lags = get_lag_offsets(LAG_MS, LAG_STEP_MS, FS)
-    print(f"Using lag offsets (samples): {lags}")
-    print(f"Total features per channel: {len(lags)}, Total parameters: {len(CHANNELS) * len(lags)}")
+    print(f"Lags: 0 to {LAG_MS}ms ({len(lags)} steps at {FS}Hz)")
+    print(f"Features: {len(CHANNELS)} channels x {len(lags)} lags = {len(CHANNELS) * len(lags)}")
+    print(f"Decision Window: {DECISION_WINDOW_SEC}s")
+    print(f"Lambda Grid: {LAMBDAS}")
+    
+    window_samples = DECISION_WINDOW_SEC * FS
     
     results_normal = []
     results_zero = []
@@ -177,43 +118,130 @@ def main():
         subject_id = path.stem.split('_')[0]
         exs = load_subject_examples(path)
         num_trials = len(exs)
-        print(f"\n[Subject {subject_id}] Processing {num_trials} trials via LOTO...")
+        print(f"\n[Subject {subject_id}] Processing {num_trials} trials via nested LOTO...")
         
-        subj_normal = []
-        subj_zero = []
-        subj_shuffle = []
+        # Precompute X^T X and X^T Y for all trials to massively speed up inner CV
+        xtx_list = []
+        xty_list = []
+        x_list = []
+        env_a_list = []
+        env_b_list = []
+        n_samples_list = []
         
-        # Pre-generate shuffle mapping (ensuring no trial maps to itself)
+        for ex in exs:
+            eeg = ex.eeg[CHANNELS, :]
+            x = create_lagged_matrix(eeg, lags)
+            x = normalize_array(x)
+            
+            env_a = normalize_array(ex.wav_a.reshape(-1, 1)).ravel()
+            env_b = normalize_array(ex.wav_b.reshape(-1, 1)).ravel()
+            
+            target_env = env_a if MAPPING[ex.label] == "A" else env_b
+            
+            mlen = min(x.shape[0], len(target_env))
+            x = x[:mlen]
+            target_env = target_env[:mlen]
+            
+            xtx_list.append(x.T @ x)
+            xty_list.append(x.T @ target_env)
+            
+            x_list.append(x)
+            env_a_list.append(env_a[:mlen])
+            env_b_list.append(env_b[:mlen])
+            n_samples_list.append(mlen)
+            
+        subj_normal_corr = 0.0
+        subj_zero_corr = 0.0
+        subj_shuffle_corr = 0.0
+        subj_total_wins = 0
+        
+        # Shuffle indices for the "Shuffle EEG" test
         np.random.seed(42)
         shuffle_indices = np.random.permutation(num_trials)
         while np.any(shuffle_indices == np.arange(num_trials)):
             shuffle_indices = np.random.permutation(num_trials)
             
+        # Outer LOTO loop
         for test_idx in range(num_trials):
-            # Leave one trial out
-            train_exs = [ex for i, ex in enumerate(exs) if i != test_idx]
-            test_ex = exs[test_idx]
-            shuffled_ex = exs[shuffle_indices[test_idx]]
+            train_indices = [i for i in range(num_trials) if i != test_idx]
             
-            # Train Ridge strictly on N-1 trials
-            weights, mean_x, std_x = fit_ridge_model(train_exs, lags)
+            # Inner CV for lambda selection
+            best_lambda = None
+            best_inner_acc = -1.0
             
-            # Evaluate test trial
-            subj_normal.append(evaluate_trial(test_ex, shuffled_ex, weights, mean_x, std_x, lags, mode="normal"))
-            subj_zero.append(evaluate_trial(test_ex, shuffled_ex, weights, mean_x, std_x, lags, mode="zero"))
-            subj_shuffle.append(evaluate_trial(test_ex, shuffled_ex, weights, mean_x, std_x, lags, mode="shuffle"))
+            for lam in LAMBDAS:
+                inner_correct = 0.0
+                inner_total = 0
+                
+                for inner_test_idx in train_indices:
+                    inner_train_indices = [i for i in train_indices if i != inner_test_idx]
+                    
+                    inner_xtx = sum(xtx_list[i] for i in inner_train_indices)
+                    inner_xty = sum(xty_list[i] for i in inner_train_indices)
+                    inner_nsamp = sum(n_samples_list[i] for i in inner_train_indices)
+                    
+                    reg = lam * inner_nsamp * np.eye(inner_xtx.shape[0])
+                    weights = np.linalg.solve(inner_xtx + reg, inner_xty)
+                    
+                    x_test = x_list[inner_test_idx]
+                    pred = x_test @ weights
+                    
+                    ea = env_a_list[inner_test_idx]
+                    eb = env_b_list[inner_test_idx]
+                    attended = MAPPING[exs[inner_test_idx].label]
+                    
+                    nc, nt = evaluate_windows(pred, ea, eb, attended, window_samples)
+                    inner_correct += nc
+                    inner_total += nt
+                    
+                inner_acc = inner_correct / max(inner_total, 1)
+                if inner_acc > best_inner_acc:
+                    best_inner_acc = inner_acc
+                    best_lambda = lam
             
-        subj_acc_normal = np.mean(subj_normal)
-        subj_acc_zero = np.mean(subj_zero)
-        subj_acc_shuffle = np.mean(subj_shuffle)
+            # Train final model for this fold using best_lambda
+            outer_xtx = sum(xtx_list[i] for i in train_indices)
+            outer_xty = sum(xty_list[i] for i in train_indices)
+            outer_nsamp = sum(n_samples_list[i] for i in train_indices)
+            
+            reg = best_lambda * outer_nsamp * np.eye(outer_xtx.shape[0])
+            final_weights = np.linalg.solve(outer_xtx + reg, outer_xty)
+            
+            # Evaluate Normal
+            x_test_norm = x_list[test_idx]
+            pred_norm = x_test_norm @ final_weights
+            nc, nt = evaluate_windows(pred_norm, env_a_list[test_idx], env_b_list[test_idx], MAPPING[exs[test_idx].label], window_samples)
+            subj_normal_corr += nc
+            subj_total_wins += nt
+            
+            # Evaluate Zero
+            pred_zero = np.zeros(x_test_norm.shape[0])
+            nc_z, _ = evaluate_windows(pred_zero, env_a_list[test_idx], env_b_list[test_idx], MAPPING[exs[test_idx].label], window_samples)
+            subj_zero_corr += nc_z
+            
+            # Evaluate Shuffle
+            shuf_idx = shuffle_indices[test_idx]
+            # Use the EEG (and x matrix) from the shuffled trial, but trim/pad to match length of target audio
+            x_test_shuf = x_list[shuf_idx]
+            mlen = min(x_test_shuf.shape[0], len(env_a_list[test_idx]))
+            
+            pred_shuf = x_test_shuf[:mlen] @ final_weights
+            ea_shuf = env_a_list[test_idx][:mlen]
+            eb_shuf = env_b_list[test_idx][:mlen]
+            nc_s, _ = evaluate_windows(pred_shuf, ea_shuf, eb_shuf, MAPPING[exs[test_idx].label], window_samples)
+            subj_shuffle_corr += nc_s
+            
+        acc_norm = subj_normal_corr / subj_total_wins
+        acc_zero = subj_zero_corr / subj_total_wins
+        acc_shuf = subj_shuffle_corr / subj_total_wins
         
-        print(f"  -> Accuracy Normal : {subj_acc_normal*100:.2f}%")
-        print(f"  -> Accuracy Zero   : {subj_acc_zero*100:.2f}%")
-        print(f"  -> Accuracy Shuffle: {subj_acc_shuffle*100:.2f}%")
+        print(f"  -> Accuracy Normal : {acc_norm*100:.2f}%")
+        print(f"  -> Accuracy Zero   : {acc_zero*100:.2f}%")
+        print(f"  -> Accuracy Shuffle: {acc_shuf*100:.2f}%")
         
-        results_normal.append(subj_acc_normal)
-        results_zero.append(subj_acc_zero)
-        results_shuffle.append(subj_acc_shuffle)
+        results_normal.append(acc_norm)
+        results_zero.append(acc_zero)
+        results_shuffle.append(acc_shuf)
         
     print("\n===============================================================")
     print(" FINAL RESULTS (AVERAGE ACROSS 18 SUBJECTS)")
