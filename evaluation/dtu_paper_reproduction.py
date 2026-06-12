@@ -94,7 +94,7 @@ def evaluate_windows(pred, env_a, env_b, attended_stream, window_samples):
 
 def main():
     print("===============================================================")
-    print(" DTU PAPER REPRODUCTION (64-Ch LOTO Ridge w/ Nested CV)")
+    print(" DTU PAPER REPRODUCTION (64-Ch LOTO Ridge w/ Fixed Lambda)")
     print("===============================================================")
     
     paths = subject_files()
@@ -106,7 +106,7 @@ def main():
     print(f"Lags: 0 to {LAG_MS}ms ({len(lags)} steps at {FS}Hz)")
     print(f"Features: {len(CHANNELS)} channels x {len(lags)} lags = {len(CHANNELS) * len(lags)}")
     print(f"Decision Window: {DECISION_WINDOW_SEC}s")
-    print(f"Lambda Grid: {LAMBDAS}")
+    print(f"Fixed Lambda: {FIXED_LAMBDA}")
     
     window_samples = DECISION_WINDOW_SEC * FS
     
