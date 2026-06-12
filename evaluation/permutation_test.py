@@ -47,7 +47,7 @@ def create_lagged_matrix(eeg, lags):
         if lag == 0:
             blocks.append(eeg.T)
         else:
-            shifted = np.vstack([np.zeros((lag, channels)), eeg.T[:-lag, :]])
+            shifted = np.vstack([eeg.T[lag:, :], np.zeros((lag, channels))])
             blocks.append(shifted)
     return np.concatenate(blocks, axis=1)
 
@@ -102,6 +102,7 @@ def main():
     print("===============================================================")
     
     paths = subject_files()
+    paths = [p for p in paths if p.stem.startswith("S1_")]
     if not paths:
         print("No subjects found. Exiting.")
         return
@@ -164,7 +165,8 @@ def main():
             env_b_list.append(env_b)
             n_samples_list.append(mlen)
             
-            lbl = 0 if MAPPING[ex.label] == "A" else 1
+            # The true target is ALWAYS wavA
+            lbl = 0
             true_labels.append(lbl)
             
         true_labels = np.array(true_labels)

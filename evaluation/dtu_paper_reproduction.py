@@ -49,7 +49,7 @@ def create_lagged_matrix(eeg, lags):
         if lag == 0:
             blocks.append(eeg.T)
         else:
-            shifted = np.vstack([np.zeros((lag, channels)), eeg.T[:-lag, :]])
+            shifted = np.vstack([eeg.T[lag:, :], np.zeros((lag, channels))])
             blocks.append(shifted)
             
     return np.concatenate(blocks, axis=1)
@@ -64,7 +64,7 @@ def get_lag_offsets(lag_ms, lag_step_ms, fs):
     return sorted(set(offsets))
 
 
-def evaluate_windows(pred, env_a, env_b, attended_stream, window_samples):
+def evaluate_windows(pred, env_a, env_b, window_samples):
     """
     Splits prediction and targets into windows and computes accuracy.
     Returns: (num_correct, num_total)
@@ -88,16 +88,11 @@ def evaluate_windows(pred, env_a, env_b, attended_stream, window_samples):
             ca = np.corrcoef(p, ea)[0, 1]
             cb = np.corrcoef(p, eb)[0, 1]
             
-        if attended_stream == "A":
-            if ca > cb:
-                num_correct += 1.0
-            elif ca == cb:
-                num_correct += 0.5
-        else:
-            if cb > ca:
-                num_correct += 1.0
-            elif cb == ca:
-                num_correct += 0.5
+        # env_a is ALWAYS the attended stream
+        if ca > cb:
+            num_correct += 1.0
+        elif ca == cb:
+            num_correct += 0.5
                 
         num_total += 1
         start += window_samples
@@ -155,7 +150,8 @@ def main():
             env_a = normalize_array(wav_a.reshape(-1, 1)).ravel()
             env_b = normalize_array(wav_b.reshape(-1, 1)).ravel()
             
-            target_env = env_a if MAPPING[ex.label] == "A" else env_b
+            # Target is ALWAYS env_a in DATA_preproc.mat
+            target_env = env_a
             
             mlen = min(x.shape[0], len(target_env))
             x = x[:mlen]
@@ -195,14 +191,14 @@ def main():
             # Evaluate Normal
             x_test_norm = x_list[test_idx]
             pred_norm = x_test_norm @ final_weights
-            nc, nt = evaluate_windows(pred_norm, env_a_list[test_idx], env_b_list[test_idx], MAPPING[exs[test_idx].label], window_samples)
+            nc, nt = evaluate_windows(pred_norm, env_a_list[test_idx], env_b_list[test_idx], window_samples)
             subj_normal_corr += nc
             subj_total_wins += nt
             
             # Evaluate Zero
             pred_zero = np.zeros(x_test_norm.shape[0])
-            nc_z, _ = evaluate_windows(pred_zero, env_a_list[test_idx], env_b_list[test_idx], MAPPING[exs[test_idx].label], window_samples)
-            subj_zero_corr += nc_z
+            nc, nt = evaluate_windows(pred_zero, env_a_list[test_idx], env_b_list[test_idx], window_samples)
+            subj_zero_corr += nc
             
             # Evaluate Shuffle
             shuf_idx = shuffle_indices[test_idx]
@@ -213,7 +209,7 @@ def main():
             pred_shuf = x_test_shuf[:mlen] @ final_weights
             ea_shuf = env_a_list[test_idx][:mlen]
             eb_shuf = env_b_list[test_idx][:mlen]
-            nc_s, _ = evaluate_windows(pred_shuf, ea_shuf, eb_shuf, MAPPING[exs[test_idx].label], window_samples)
+            nc_s, _ = evaluate_windows(pred_shuf, ea_shuf, eb_shuf, window_samples)
             subj_shuffle_corr += nc_s
             
         acc_norm = subj_normal_corr / subj_total_wins
