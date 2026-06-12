@@ -129,7 +129,7 @@ def main():
         n_samples_list = []
         
         for ex in exs:
-            eeg = ex.eeg[CHANNELS, :]
+            eeg = ex.eeg[:, CHANNELS].T
             x = create_lagged_matrix(eeg, lags)
             x = normalize_array(x)
             
