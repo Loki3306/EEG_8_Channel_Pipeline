@@ -32,6 +32,7 @@ from __future__ import annotations
 import json
 import sys
 from copy import deepcopy
+from dataclasses import replace
 from pathlib import Path
 
 import numpy as np
@@ -160,10 +161,9 @@ def apply_equalization(subject_examples: dict) -> dict:
     """Base transform: Equalize audio. ALL tests must use this."""
     res = {}
     for k, exs in subject_examples.items():
-        new_exs = deepcopy(exs)
-        for ex in new_exs:
-            ex.wav_a = equalize_audio(ex.wav_a)
-            ex.wav_b = equalize_audio(ex.wav_b)
+        new_exs = []
+        for ex in exs:
+            new_exs.append(replace(ex, wav_a=equalize_audio(ex.wav_a), wav_b=equalize_audio(ex.wav_b)))
         res[k] = new_exs
     return res
 
@@ -175,8 +175,7 @@ def transform_normal(subject_examples: dict) -> dict:
 def transform_zero(subject_examples: dict) -> dict:
     res = apply_equalization(subject_examples)
     for k, exs in res.items():
-        for ex in exs:
-            ex.eeg = np.zeros_like(ex.eeg)
+        res[k] = [replace(ex, eeg=np.zeros_like(ex.eeg)) for ex in exs]
     return res
 
 
@@ -189,19 +188,23 @@ def transform_shuffle(subject_examples: dict) -> dict:
     
     idx = 0
     for k, exs in res.items():
+        new_exs = []
         for ex in exs:
-            ex.eeg = all_eegs[idx]
+            new_exs.append(replace(ex, eeg=all_eegs[idx]))
             idx += 1
+        res[k] = new_exs
     return res
 
 
 def transform_noise(subject_examples: dict) -> dict:
     res = apply_equalization(subject_examples)
     for k, exs in res.items():
+        new_exs = []
         for ex in exs:
             mean = np.mean(ex.eeg)
             std = np.std(ex.eeg) + 1e-12
-            ex.eeg = np.random.normal(loc=mean, scale=std, size=ex.eeg.shape)
+            new_exs.append(replace(ex, eeg=np.random.normal(loc=mean, scale=std, size=ex.eeg.shape)))
+        res[k] = new_exs
     return res
 
 
@@ -210,24 +213,21 @@ def transform_ablation_2(subject_examples: dict) -> dict:
     # We will just pick channels 20 and 50 as a proxy for bilateral temporal
     res = apply_equalization(subject_examples)
     for k, exs in res.items():
-        for ex in exs:
-            ex.eeg = ex.eeg[:, [20, 50]]
+        res[k] = [replace(ex, eeg=ex.eeg[:, [20, 50]]) for ex in exs]
     return res
 
 
 def transform_ablation_4(subject_examples: dict) -> dict:
     res = apply_equalization(subject_examples)
     for k, exs in res.items():
-        for ex in exs:
-            ex.eeg = ex.eeg[:, [10, 20, 40, 50]]
+        res[k] = [replace(ex, eeg=ex.eeg[:, [10, 20, 40, 50]]) for ex in exs]
     return res
 
 
 def transform_ablation_8(subject_examples: dict) -> dict:
     res = apply_equalization(subject_examples)
     for k, exs in res.items():
-        for ex in exs:
-            ex.eeg = ex.eeg[:, [5, 10, 15, 20, 35, 40, 45, 50]]
+        res[k] = [replace(ex, eeg=ex.eeg[:, [5, 10, 15, 20, 35, 40, 45, 50]]) for ex in exs]
     return res
 
 
