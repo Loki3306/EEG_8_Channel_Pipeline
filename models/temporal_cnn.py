@@ -107,6 +107,82 @@ class TemporalCNNAAD(nn.Module):
         return output.squeeze(1)
 
 
+class VLAAILiteAAD(nn.Module):
+    def __init__(
+        self,
+        in_channels: int = 8,
+        virtual_channels: int = 16,
+        hidden_channels: int = 32,
+        dropout: float = 0.2,
+        norm_type: str = "layer",
+    ) -> None:
+        super().__init__()
+        self.in_channels = in_channels
+        
+        self.spatial_projection = nn.Sequential(
+            nn.Conv1d(in_channels, virtual_channels, kernel_size=1),
+            _make_norm(norm_type, virtual_channels),
+            nn.GELU(),
+            nn.Dropout(dropout)
+        )
+        
+        self.temporal_block = nn.Sequential(
+            nn.Conv1d(virtual_channels, hidden_channels, kernel_size=9, padding=4, groups=virtual_channels),
+            _make_norm(norm_type, hidden_channels),
+            nn.GELU(),
+            nn.Dropout(dropout)
+        )
+        
+        self.context_block1 = nn.Sequential(
+            nn.Conv1d(hidden_channels, hidden_channels, kernel_size=5, padding=4, dilation=2),
+            _make_norm(norm_type, hidden_channels),
+            nn.GELU(),
+            nn.Dropout(dropout)
+        )
+        
+        self.context_block2 = nn.Sequential(
+            nn.Conv1d(hidden_channels, hidden_channels, kernel_size=5, padding=8, dilation=4),
+            _make_norm(norm_type, hidden_channels),
+            nn.GELU(),
+            nn.Dropout(dropout)
+        )
+        
+        self.output_context = nn.Sequential(
+            nn.Conv1d(hidden_channels, hidden_channels, kernel_size=1),
+            _make_norm(norm_type, hidden_channels),
+            nn.GELU(),
+            nn.Dropout(dropout)
+        )
+        
+        self.head = nn.Conv1d(hidden_channels, 1, kernel_size=1)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        if x.ndim != 3:
+            raise ValueError(f"Expected 3D input, got shape {tuple(x.shape)}")
+
+        if x.shape[-1] == self.in_channels:
+            x = x.transpose(1, 2)
+        elif x.shape[1] != self.in_channels:
+            raise ValueError(
+                f"Expected input with {self.in_channels} channels in either the last or second dimension, got shape {tuple(x.shape)}"
+            )
+
+        x = self.spatial_projection(x)
+        x = self.temporal_block(x)
+        
+        res1 = x
+        x = self.context_block1(x)
+        x = x + res1
+        
+        res2 = x
+        x = self.context_block2(x)
+        x = x + res2
+        
+        x = self.output_context(x)
+        output = self.head(x)
+        return output.squeeze(1)
+
+
 class TemporalEmbeddingEncoder(nn.Module):
     def __init__(
         self,

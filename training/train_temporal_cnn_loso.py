@@ -19,7 +19,7 @@ sys.path.insert(0, str(REPO_ROOT))
 from analysis._common import append_readme_update, ensure_output_dirs, save_json
 from baselines.ridge_aad import iter_leave_one_subject_out, load_subject_examples, subject_files, target_envelope
 from evaluation.aad_metrics import TrialScore, safe_corr, summarize_trials
-from models.temporal_cnn import TemporalCNNAAD, TemporalContrastiveAAD, cosine_similarity_matrix, count_parameters, correlation_loss
+from models.temporal_cnn import TemporalCNNAAD, TemporalContrastiveAAD, VLAAILiteAAD, cosine_similarity_matrix, count_parameters, correlation_loss
 
 SUMMARY_PATH = REPO_ROOT / "analysis" / "summaries" / "temporal_cnn_loso_summary.json"
 
@@ -481,7 +481,8 @@ def train_fold(
     weight_decay: float,
     patience: int,
     zero_inputs: bool,
-) -> tuple[TemporalCNNAAD, np.ndarray, np.ndarray, dict[str, float]]:
+    model_type: str = "temporal_cnn",
+) -> tuple[torch.nn.Module, np.ndarray, np.ndarray, dict[str, float]]:
     mean = np.zeros(len(channel_ids), dtype=float) if zero_inputs else None
     std = np.ones(len(channel_ids), dtype=float) if zero_inputs else None
     if not zero_inputs:
@@ -505,7 +506,11 @@ def train_fold(
     )
     train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=0, drop_last=False)
 
-    model = TemporalCNNAAD(in_channels=len(channel_ids)).to(device)
+    if model_type == "vlaai_lite":
+        model = VLAAILiteAAD(in_channels=len(channel_ids)).to(device)
+    else:
+        model = TemporalCNNAAD(in_channels=len(channel_ids)).to(device)
+        
     notify(f"Model parameters: {count_parameters(model):,}")
     optimizer = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=weight_decay)
 
@@ -830,6 +835,7 @@ def run_fold(
     negative_mode: str = "random",
     negative_min_shift_sec: float = 0.0,
     negative_max_shift_sec: float = 0.5,
+    model_type: str = "temporal_cnn",
 ) -> dict[str, object]:
     setattr(train_fold, "robust", getattr(run_fold, "robust", False))
 
@@ -877,6 +883,7 @@ def run_fold(
             weight_decay=weight_decay,
             patience=patience,
             zero_inputs=zero_inputs,
+            model_type=model_type,
         )
 
     predictions: list[np.ndarray] = []
@@ -1132,6 +1139,7 @@ def run_evaluation_folds(
             negative_mode=args.negative_mode,
             negative_min_shift_sec=args.negative_min_shift_sec,
             negative_max_shift_sec=args.negative_max_shift_sec,
+            model_type=args.model_type,
         )
         window_runs.append(fold_result)
         notify_fn(f"{fold_label} complete")
@@ -1142,6 +1150,7 @@ def run_evaluation_folds(
 def main() -> None:
     parser = argparse.ArgumentParser(description="Train a small temporal CNN for LOSO AAD reconstruction.")
     parser.add_argument("--device", type=str, default="auto", help="auto, cuda, cpu, or directml")
+    parser.add_argument("--model-type", choices=["temporal_cnn", "vlaai_lite"], default="temporal_cnn")
     parser.add_argument("--objective", choices=["reconstruction", "contrastive"], default="reconstruction")
     parser.add_argument("--mapping", type=str, default="A-B", choices=["A-B", "B-A", "both"])
     parser.add_argument("--evaluation-mode", choices=["loso", "within-subject"], default="loso", help="LOSO (cross-subject) or within-subject train/test split")
