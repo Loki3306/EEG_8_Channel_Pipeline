@@ -57,7 +57,10 @@ def predict_windowed_envelope(
     lag_step_ms: int = 16,
     feature_mean: np.ndarray,
     feature_std: np.ndarray,
+    channel_ids: list[int] | None = None,
 ) -> np.ndarray:
+    if channel_ids is not None:
+        eeg = eeg[channel_ids, :]
     x = lagged_eeg_matrix(eeg, lags=lags, lag_ms=lag_ms, lag_step_ms=lag_step_ms)
     x = standardize_features(x, feature_mean, feature_std)
     pred = x @ weights
@@ -94,6 +97,7 @@ def evaluate_fold(
     feature_mean: np.ndarray,
     feature_std: np.ndarray,
     window_seconds: int,
+    channel_ids: list[int] | None = None,
 ) -> list[TrialScore]:
     scores: list[TrialScore] = []
     for example in test_examples:
@@ -105,6 +109,7 @@ def evaluate_fold(
             lag_step_ms=lag_step_ms,
             feature_mean=feature_mean,
             feature_std=feature_std,
+            channel_ids=channel_ids,
         )
         corr_a, corr_b = evaluate_trial_windows(predicted, example.wav_a, example.wav_b, window_seconds=window_seconds)
         true_stream = mapping[example.label]
@@ -190,16 +195,6 @@ def run_loso(
         notify(f"Subject limit active: using first {len(subject_paths)} subjects")
     subject_examples = {path: load_subject_examples(path) for path in subject_paths}
 
-    if channel_ids is not None:
-        for path, examples in subject_examples.items():
-            updated_examples = []
-            for example in examples:
-                sliced_eeg = example.eeg[:, channel_ids]
-                updated_examples.append(
-                    example.__class__(example.subject, example.trial_index, sliced_eeg, example.wav_a, example.wav_b, example.label)
-                )
-            subject_examples[path] = updated_examples
-
     training_examples = {path: [example for example in examples] for path, examples in subject_examples.items()}
 
     if shuffle_labels:
@@ -221,13 +216,16 @@ def run_loso(
     for fold_index, (held_out, train_paths) in enumerate(iter_leave_one_subject_out(subject_paths), start=1):
         notify(f"  Fold {fold_index}/{len(subject_paths)}: held out {held_out.stem} | fitting ridge")
         fold_train_examples = [example for path in train_paths for example in training_examples[path]]
-        feature_mean, feature_std = feature_statistics(fold_train_examples, lags=lags, lag_ms=lag_ms, lag_step_ms=lag_step_ms)
+        feature_mean, feature_std = feature_statistics(fold_train_examples, lags=lags, lag_ms=lag_ms, lag_step_ms=lag_step_ms, channel_ids=channel_ids)
         feature_count = feature_mean.shape[0]
         train_xtx = np.zeros((feature_count, feature_count), dtype=float)
         train_xty = np.zeros(feature_count, dtype=float)
         n_total = len(fold_train_examples)
         for i, example in enumerate(fold_train_examples, start=1):
-            x = lagged_eeg_matrix(example.eeg, lags=lags, lag_ms=lag_ms, lag_step_ms=lag_step_ms)
+            eeg = example.eeg
+            if channel_ids is not None:
+                eeg = eeg[channel_ids, :]
+            x = lagged_eeg_matrix(eeg, lags=lags, lag_ms=lag_ms, lag_step_ms=lag_step_ms)
             x = standardize_features(x, feature_mean, feature_std)
             y = target_envelope(example, mapping)
             train_xtx += x.T @ x
@@ -246,6 +244,7 @@ def run_loso(
             feature_mean=feature_mean,
             feature_std=feature_std,
             window_seconds=window_seconds,
+            channel_ids=channel_ids,
         )
         fold_summary = summarize_trials(scores)
         fold_summary["held_out_subject"] = held_out.stem
@@ -326,7 +325,7 @@ def main() -> None:
     parser.add_argument("--shuffle-seeds", type=int, default=5)
     parser.add_argument("--window-seconds", type=int, nargs="*", default=[5, 10, 50])
     parser.add_argument("--subject-limit", type=int, default=None)
-    parser.add_argument("--channel-ids", type=int, nargs="+", default=[0, 1], help="EEG channel indices to use")
+    parser.add_argument("--channel-ids", type=int, nargs="+", default=None, help="EEG channel indices to use")
     parser.add_argument("--mapping", choices=["A-B", "B-A", "both"], default="A-B")
     parser.add_argument("--json-out", type=Path, default=SUMMARY_PATH)
     parser.add_argument("--no-readme-update", action="store_true")
