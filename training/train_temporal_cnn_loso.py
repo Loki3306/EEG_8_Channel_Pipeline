@@ -467,7 +467,6 @@ def train_fold(
     *,
     train_examples,
     val_examples,
-    test_examples,
     mapping: dict[int, str],
     channel_ids: list[int],
     target_mean: float,
@@ -816,6 +815,7 @@ def train_contrastive_fold(
 def run_fold(
     *,
     train_examples,
+    val_examples,
     test_examples,
     mapping: dict[int, str],
     channel_ids: list[int],
@@ -874,7 +874,6 @@ def run_fold(
         model, mean, std, training_info = train_fold(
             train_examples=train_examples,
             val_examples=val_examples,
-            test_examples=test_examples,
             mapping=mapping,
             channel_ids=channel_ids,
             target_mean=target_mean,
