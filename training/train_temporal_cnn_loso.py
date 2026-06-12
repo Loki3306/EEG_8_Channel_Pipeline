@@ -555,6 +555,7 @@ def evaluate_similarity_windows(
     fs: int,
     window_seconds: int,
     device: torch.device,
+    random_eeg: bool = False,
 ) -> tuple[float, float]:
     if window_seconds <= 0:
         window_seconds = int(round(example.eeg.shape[0] / fs))
@@ -572,6 +573,8 @@ def evaluate_similarity_windows(
         for start in starts:
             stop = min(start + window_samples, example.eeg.shape[0])
             eeg = channel_matrix(example.eeg[start:stop], channel_ids)
+            if random_eeg:
+                eeg = np.random.randn(*eeg.shape).astype(np.float32)
             eeg = standardize_channels(eeg, eeg_mean, eeg_std)
             eeg_tensor = torch.from_numpy(eeg.astype(np.float32)).unsqueeze(0).to(device)
 
@@ -612,6 +615,7 @@ def score_similarity_trials(
     mapping: dict[int, str],
     window_seconds: int,
     device: torch.device,
+    random_eeg: bool = False,
 ) -> dict[str, object]:
     scores: list[TrialScore] = []
     for example in examples:
@@ -628,6 +632,7 @@ def score_similarity_trials(
             fs=fs,
             window_seconds=window_seconds,
             device=device,
+            random_eeg=random_eeg,
         )
         scores.append(
             TrialScore(
@@ -666,6 +671,9 @@ def train_contrastive_fold(
     negative_mode: str = "random",
     negative_min_shift_sec: float = 0.0,
     negative_max_shift_sec: float = 0.5,
+    random_eeg: bool = False,
+    no_training: bool = False,
+    random_audio_pairs: bool = False,
 ) -> tuple[torch.nn.Module, np.ndarray, np.ndarray, dict[str, float]]:
     mean = np.zeros(len(channel_ids), dtype=float) if zero_inputs else None
     std = np.ones(len(channel_ids), dtype=float) if zero_inputs else None
@@ -703,8 +711,8 @@ def train_contrastive_fold(
     patience_left = patience
     chunk_samples = max(int(round(chunk_seconds * fs)), 1)
 
-    if zero_inputs:
-        notify("Zero-EEG mode active: skipping contrastive training and using untrained model for chance-level sanity.")
+    if no_training:
+        notify("No-training mode active: skipping optimizer updates and returning initialized model.")
         return model, mean, std, {"best_epoch": 0, "best_val_accuracy": 0.0}
 
     for epoch in range(1, epochs + 1):
@@ -715,6 +723,12 @@ def train_contrastive_fold(
         for eeg, audio_pos in loader:
             eeg = eeg.to(device)
             audio_pos = audio_pos.to(device)
+
+            if random_eeg:
+                eeg = torch.randn_like(eeg)
+            
+            if random_audio_pairs:
+                audio_pos = audio_pos[torch.randperm(audio_pos.size(0))]
 
             max_start = max(eeg.shape[1] - chunk_samples, 0)
             starts = torch.randint(0, max_start + 1, (eeg.shape[0],), device=device)
@@ -752,6 +766,7 @@ def train_contrastive_fold(
             mapping=mapping,
             window_seconds=10,
             device=device,
+            random_eeg=random_eeg,
         )["trial_accuracy"]
         notify(f"  Epoch {epoch}/{epochs}: train_loss={train_loss:.4f}, val_accuracy@10s={validation_score:.4f}")
 
@@ -797,9 +812,13 @@ def run_fold(
     patience: int,
     window_seconds: list[int],
     zero_inputs: bool,
+    shuffle_labels: bool = False,
     negative_mode: str = "random",
     negative_min_shift_sec: float = 0.0,
     negative_max_shift_sec: float = 0.5,
+    random_eeg: bool = False,
+    no_training: bool = False,
+    random_audio_pairs: bool = False,
     model_type: str = "temporal_cnn",
 ) -> dict[str, object]:
     setattr(train_fold, "robust", getattr(run_fold, "robust", False))
@@ -829,6 +848,9 @@ def run_fold(
             negative_mode=negative_mode,
             negative_min_shift_sec=negative_min_shift_sec,
             negative_max_shift_sec=negative_max_shift_sec,
+            random_eeg=random_eeg,
+            no_training=no_training,
+            random_audio_pairs=random_audio_pairs,
         )
     else:
         model, mean, std, training_info = train_fold(
@@ -848,6 +870,7 @@ def run_fold(
             weight_decay=weight_decay,
             patience=patience,
             zero_inputs=zero_inputs,
+            shuffle_labels=shuffle_labels,
             model_type=model_type,
         )
 
@@ -883,6 +906,7 @@ def run_fold(
                 mapping=mapping,
                 window_seconds=window,
                 device=device,
+                random_eeg=random_eeg,
             )
         else:
             overall = score_predictions(predictions, test_examples, mapping=mapping, window_seconds=window)
@@ -903,6 +927,7 @@ def run_fold(
                     fs=fs,
                     window_seconds=window,
                     device=device,
+                    random_eeg=random_eeg,
                 )
                 per_subject.append(
                     TrialScore(
@@ -1002,6 +1027,10 @@ def run_evaluation_folds(
     device,
     zero_inputs: bool,
     notify_fn,
+    shuffle_labels: bool = False,
+    random_eeg: bool = False,
+    no_training: bool = False,
+    random_audio_pairs: bool = False,
 ) -> list[dict]:
     """
     Run evaluation folds (either LOSO or within-subject).
@@ -1153,6 +1182,10 @@ def main() -> None:
     parser.add_argument("--env-lowpass", type=float, default=8.0, help="Envelope lowpass Hz (or 0 for none)")
     parser.add_argument("--robust-norm", action="store_true", help="Use robust median/MAD normalization for EEG")
     parser.add_argument("--sanity", choices=["none", "zero-eeg", "shuffle-labels"], default="none")
+    parser.add_argument("--random-eeg", action="store_true", help="Replace EEG with random noise dynamically before training")
+    parser.add_argument("--shuffle-labels", action="store_true", help="Shuffle attended/unattended labels in the dataset")
+    parser.add_argument("--no-training", action="store_true", help="Skip training and run inference directly")
+    parser.add_argument("--random-audio-pairs", action="store_true", help="Break EEG/audio correspondence during training")
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--json-out", type=Path, default=SUMMARY_PATH)
     parser.add_argument("--no-readme-update", action="store_true")
@@ -1171,7 +1204,15 @@ def main() -> None:
 
     mapping_options = choose_best_mapping(mapping_mode=args.mapping)
     zero_inputs = args.sanity == "zero-eeg"
-    shuffle_labels = args.sanity == "shuffle-labels"
+    shuffle_labels = args.sanity == "shuffle-labels" or args.shuffle_labels
+
+    if args.random_eeg or shuffle_labels or args.no_training or args.random_audio_pairs:
+        notify("--- SANITY TEST FRAMEWORK ACTIVE ---")
+        if args.random_eeg: notify("-> Random EEG")
+        if shuffle_labels: notify("-> Shuffle Labels")
+        if args.no_training: notify("-> No Training")
+        if args.random_audio_pairs: notify("-> Random Audio Pairing")
+        notify("------------------------------------")
 
     subject_examples = {path: load_subject_examples(path) for path in subject_paths}
     if shuffle_labels:
@@ -1210,6 +1251,10 @@ def main() -> None:
             device=device,
             zero_inputs=zero_inputs,
             notify_fn=notify,
+            shuffle_labels=shuffle_labels,
+            random_eeg=args.random_eeg,
+            no_training=args.no_training,
+            random_audio_pairs=args.random_audio_pairs,
         )
 
         aggregated_windows = []
