@@ -166,17 +166,22 @@ def feature_statistics(
     lag_ms: int | None = None,
     lag_step_ms: int = 16,
     fs: int = 64,
+    channel_ids: list[int] | None = None,
 ) -> tuple[np.ndarray, np.ndarray]:
+    num_channels = len(channel_ids) if channel_ids is not None else examples[0].eeg.shape[1]
     if lag_ms is not None:
-        feature_count = examples[0].eeg.shape[1] * len(_lag_samples_from_ms(lag_ms=lag_ms, lag_step_ms=lag_step_ms, fs=fs))
+        feature_count = num_channels * len(_lag_samples_from_ms(lag_ms=lag_ms, lag_step_ms=lag_step_ms, fs=fs))
     else:
-        feature_count = examples[0].eeg.shape[1] * (lags if lags is not None else 16)
+        feature_count = num_channels * (lags if lags is not None else 16)
     total_rows = 0
     feature_sum = np.zeros(feature_count, dtype=float)
     feature_sumsq = np.zeros(feature_count, dtype=float)
 
     for example in examples:
-        x = lagged_eeg_matrix(example.eeg, lags=lags, lag_ms=lag_ms, lag_step_ms=lag_step_ms, fs=fs)
+        eeg = example.eeg
+        if channel_ids is not None:
+            eeg = eeg[channel_ids, :]
+        x = lagged_eeg_matrix(eeg, lags=lags, lag_ms=lag_ms, lag_step_ms=lag_step_ms, fs=fs)
         feature_sum += x.sum(axis=0)
         feature_sumsq += np.square(x).sum(axis=0)
         total_rows += x.shape[0]
