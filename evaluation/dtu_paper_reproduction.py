@@ -1,6 +1,7 @@
 import sys
 from pathlib import Path
 import numpy as np
+from scipy.signal import butter, filtfilt
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT))
@@ -18,6 +19,18 @@ LAG_MS = 250
 LAG_STEP_MS = 16
 DECISION_WINDOW_SEC = 10  # 10s windowed evaluation
 FIXED_LAMBDA = 1000.0  # Fixed lambda to drastically speed up execution
+BP_LOWCUT = 1.0
+BP_HIGHCUT = 8.0
+
+
+def butter_bandpass_filter(data, lowcut, highcut, fs, order=2):
+    nyq = 0.5 * fs
+    low = lowcut / nyq
+    high = highcut / nyq
+    b, a = butter(order, [low, high], btype='band')
+    # zero-phase filter along axis 0
+    y = filtfilt(b, a, data, axis=0)
+    return y
 
 
 def normalize_array(arr):
@@ -130,11 +143,17 @@ def main():
         
         for ex in exs:
             eeg = ex.eeg[:, CHANNELS].T
+            
+            # Bandpass filter EEG and audio to 1-8 Hz (Delta/Theta) for AAD
+            eeg = butter_bandpass_filter(eeg, BP_LOWCUT, BP_HIGHCUT, FS)
+            wav_a = butter_bandpass_filter(ex.wav_a.reshape(-1, 1), BP_LOWCUT, BP_HIGHCUT, FS).ravel()
+            wav_b = butter_bandpass_filter(ex.wav_b.reshape(-1, 1), BP_LOWCUT, BP_HIGHCUT, FS).ravel()
+            
             x = create_lagged_matrix(eeg, lags)
             x = normalize_array(x)
             
-            env_a = normalize_array(ex.wav_a.reshape(-1, 1)).ravel()
-            env_b = normalize_array(ex.wav_b.reshape(-1, 1)).ravel()
+            env_a = normalize_array(wav_a.reshape(-1, 1)).ravel()
+            env_b = normalize_array(wav_b.reshape(-1, 1)).ravel()
             
             target_env = env_a if MAPPING[ex.label] == "A" else env_b
             
