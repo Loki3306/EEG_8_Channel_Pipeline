@@ -7,24 +7,31 @@ from scipy.io import wavfile
 import random
 from pathlib import Path
 
+import argparse
+
 def normalize(x):
     return (x - np.mean(x)) / (np.std(x) + 1e-12)
 
 def audit_pipeline():
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--data_dir', type=str, default='data', help='Directory containing the .pkl files')
+    parser.add_argument('--mapping_file', type=str, default='data/audio_mapping.json', help='Path to audio_mapping.json')
+    args = parser.parse_args()
+
     print("--- FORENSIC AUDIT: AUDIO PIPELINE ---")
     
     # 1. Load mapping
-    print("Loading mapping...")
-    with open('data/audio_mapping.json', 'r') as f:
+    print(f"Loading mapping from {args.mapping_file}...")
+    with open(args.mapping_file, 'r') as f:
         mapping = json.load(f)
         
     # 2. Load original DTU data
-    print("Loading S1_data_preproc.pkl...")
+    print(f"Loading {args.data_dir}/S1_data_preproc.pkl...")
     try:
-        with open('data/S1_data_preproc.pkl', 'rb') as f:
+        with open(f"{args.data_dir}/S1_data_preproc.pkl", 'rb') as f:
             subject_data = pickle.load(f)
     except FileNotFoundError:
-        print("ERROR: data/S1_data_preproc.pkl not found. Please run this script in the Kaggle working directory.")
+        print(f"ERROR: {args.data_dir}/S1_data_preproc.pkl not found. Please pass --data_dir <path>")
         return
         
     print(f"Loaded {len(subject_data)} trials.")
