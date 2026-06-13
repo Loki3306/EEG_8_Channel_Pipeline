@@ -41,9 +41,12 @@ def butter_bandpass_filter(data, lowcut, highcut, fs, order=2, axis=0):
     y = filtfilt(b, a, data, axis=axis)
     return y
 
-def normalize_array(arr):
+def normalize_array_global(arr):
+    # arr shape: (Time, Channels)
+    # Zero-mean each band independently
     arr = arr - arr.mean(axis=0, keepdims=True)
-    scale = arr.std(axis=0, keepdims=True) + 1e-12
+    # Divide by global standard deviation to preserve relative variance
+    scale = arr.std() + 1e-12
     return arr / scale
 
 class PearsonMSELoss(nn.Module):
@@ -53,18 +56,21 @@ class PearsonMSELoss(nn.Module):
         self.mse = nn.MSELoss()
 
     def forward(self, pred, target):
-        # pred, target: [Batch, 8, Time]
-        pred_mean = pred.mean(dim=2, keepdim=True)
-        target_mean = target.mean(dim=2, keepdim=True)
+        # Flatten over channels and time to calculate a single global Pearson correlation.
+        # This naturally weights bands by their true variance.
+        pred_flat = pred.view(pred.shape[0], -1)
+        target_flat = target.view(target.shape[0], -1)
         
-        # Add epsilon before square root to prevent NaN gradients when variance is very small
-        pred_std = torch.sqrt(pred.var(dim=2, keepdim=True, unbiased=False) + 1e-8)
-        target_std = torch.sqrt(target.var(dim=2, keepdim=True, unbiased=False) + 1e-8)
+        p_mean = pred_flat.mean(dim=1, keepdim=True)
+        t_mean = target_flat.mean(dim=1, keepdim=True)
         
-        cov = ((pred - pred_mean) * (target - target_mean)).mean(dim=2)
-        corr = cov / (pred_std.squeeze(2) * target_std.squeeze(2))
+        p_std = torch.sqrt(pred_flat.var(dim=1, keepdim=True, unbiased=False) + 1e-8)
+        t_std = torch.sqrt(target_flat.var(dim=1, keepdim=True, unbiased=False) + 1e-8)
         
-        pearson_loss = 1 - corr.mean() # Average across bands and batch
+        cov = ((pred_flat - p_mean) * (target_flat - t_mean)).mean(dim=1, keepdim=True)
+        corr = cov / (p_std * t_std)
+        
+        pearson_loss = 1 - corr.mean()
         mse_loss = self.mse(pred, target)
         
         return pearson_loss + self.alpha * mse_loss
@@ -114,10 +120,10 @@ def prepare_dataset(examples, channels, lowcut, highcut, subject_id, mapping, en
         env_a = env_a_full[:, :min_len]
         env_b = env_b_full[:, :min_len]
         
-        # Normalize each band independently
-        target_env = normalize_array(target_env.T).T
-        env_a = normalize_array(env_a.T).T
-        env_b = normalize_array(env_b.T).T
+        # Normalize using global variance so we don't artificially boost high-frequency noise bands
+        target_env = normalize_array_global(target_env.T).T
+        env_a = normalize_array_global(env_a.T).T
+        env_b = normalize_array_global(env_b.T).T
         
         X.append(x_norm)
         Y.append(target_env)
@@ -130,32 +136,26 @@ def evaluate_windows(pred, env_a, env_b, window_samples):
     num_correct = 0.0
     num_total = 0
     start = 0
-    # pred, env_a, env_b shapes: (8, Time)
     while start + window_samples <= pred.shape[1]:
         end = start + window_samples
+        # pred is [8, Time]
         p = pred[:, start:end]
         ea = env_a[:, start:end]
         eb = env_b[:, start:end]
         
-        corr_a_sum = 0
-        corr_b_sum = 0
-        valid_bands = 0
-        
-        for band in range(NUM_BANDS):
-            std_p = np.std(p[band])
-            if std_p > 1e-12:
-                corr_a_sum += np.corrcoef(p[band], ea[band])[0, 1]
-                corr_b_sum += np.corrcoef(p[band], eb[band])[0, 1]
-                valid_bands += 1
-                
-        if valid_bands > 0:
-            ca = corr_a_sum / valid_bands
-            cb = corr_b_sum / valid_bands
+        std_p = np.std(p)
+        if np.isnan(std_p) or std_p < 1e-12:
+            ca = 0.0
+            cb = 0.0
+        else:
+            # Flatten to calculate correlation over all 8 bands jointly
+            ca = np.corrcoef(p.ravel(), ea.ravel())[0, 1]
+            cb = np.corrcoef(p.ravel(), eb.ravel())[0, 1]
             
-            if ca > cb:
-                num_correct += 1.0
-            elif ca == cb:
-                num_correct += 0.5
+        if ca > cb:
+            num_correct += 1.0
+        elif ca == cb:
+            num_correct += 0.5
                 
         num_total += 1
         start += window_samples
