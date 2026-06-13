@@ -1,3 +1,4 @@
+import argparse
 import sys
 import torch
 import torch.nn as nn
@@ -160,9 +161,9 @@ def evaluate_model(model, X, Y_A, Y_B, device, zero_eeg=False, shuffle_eeg=False
             
     return n_correct, n_total
 
-def train_loso():
+def train_loso(max_dilation):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    print(f"Using device: {device}")
+    print(f"Using device: {device} | Max Dilation: {max_dilation}")
     
     paths = subject_files()
     if not paths:
@@ -196,7 +197,7 @@ def train_loso():
         X_va, Y_va, YA_va, YB_va = prepare_dataset(val_exs)
         X_te, Y_te, YA_te, YB_te = prepare_dataset(test_exs)
         
-        model = VLAAILite(in_channels=8).to(device)
+        model = VLAAILite(in_channels=8, max_dilation=max_dilation).to(device)
         optimizer = optim.Adam(model.parameters(), lr=1e-3, weight_decay=1e-4)
         criterion = PearsonMSELoss(alpha=0.1)
         
@@ -268,4 +269,8 @@ def train_loso():
     print("="*50)
 
 if __name__ == "__main__":
-    train_loso()
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--max-dilation", type=int, default=8, help="Max dilation factor for temporal context. 16 ~500ms, 32 ~750ms")
+    args = parser.parse_args()
+    
+    train_loso(args.max_dilation)

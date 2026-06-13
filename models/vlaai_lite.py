@@ -36,9 +36,14 @@ class TemporalBlock(nn.Module):
         return x
 
 class ContextModule(nn.Module):
-    def __init__(self, in_channels, out_channels):
+    def __init__(self, in_channels, out_channels, max_dilation=8):
         super().__init__()
-        self.dilations = [1, 2, 4, 8]
+        self.dilations = []
+        d = 1
+        while d <= max_dilation:
+            self.dilations.append(d)
+            d *= 2
+            
         self.convs = nn.ModuleList([
             DepthwiseSeparableConv1d(
                 in_channels, out_channels, kernel_size=5, padding=2 * d, dilation=d
@@ -62,7 +67,7 @@ class VLAAILite(nn.Module):
     Lightweight VLAAI-inspired architecture for envelope reconstruction.
     Target parameter count: 50k - 300k.
     """
-    def __init__(self, in_channels=8, spatial_dim=32, temporal_dim=64):
+    def __init__(self, in_channels=8, spatial_dim=32, temporal_dim=64, max_dilation=8):
         super().__init__()
         
         # Spatial Projection Layer
@@ -79,7 +84,7 @@ class VLAAILite(nn.Module):
         self.temp_block3 = TemporalBlock(temporal_dim, temporal_dim, kernel_size=15)
         
         # Context Module
-        self.context = ContextModule(temporal_dim, temporal_dim)
+        self.context = ContextModule(temporal_dim, temporal_dim, max_dilation=max_dilation)
         
         # Output Projection
         self.output_proj = nn.Conv1d(temporal_dim, 1, kernel_size=1)
