@@ -29,13 +29,14 @@ class EEGNet(nn.Module):
         self.output_proj = nn.Conv1d(F2, 1, kernel_size=1)
 
     def forward(self, x):
+        orig_len = x.shape[-1]
         # Input: [Batch, Channels, Time]
         x = x.unsqueeze(1) # [Batch, 1, Channels, Time]
-        x = self.block1(x) # [Batch, F1*D, 1, Time]
-        x = self.block2(x) # [Batch, F2, 1, Time]
-        x = x.squeeze(2)   # [Batch, F2, Time]
-        x = self.output_proj(x) # [Batch, 1, Time]
-        return x
+        x = self.block1(x) # [Batch, F1*D, 1, Time+1]
+        x = self.block2(x) # [Batch, F2, 1, Time+2]
+        x = x.squeeze(2)   # [Batch, F2, Time+2]
+        x = self.output_proj(x) # [Batch, 1, Time+2]
+        return x[..., :orig_len]
 
 def print_summary():
     model = EEGNet()
