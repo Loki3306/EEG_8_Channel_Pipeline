@@ -18,8 +18,6 @@ SCREENING_SUBJECTS = ["S1_data_preproc", "S7_data_preproc", "S8_data_preproc", "
 
 FS = 64
 DECISION_WINDOW_SEC = 10
-# Use the data-driven discovered 8-channel set: C5, FCz, FC6, P9, C6, Fp1, TP8, T7
-CHANNELS = [13, 46, 43, 23, 50, 0, 52, 14]
 
 def butter_bandpass_filter(data, lowcut, highcut, fs, order=2, axis=0):
     nyq = 0.5 * fs
@@ -55,14 +53,14 @@ class PearsonMSELoss(nn.Module):
         
         return pearson_loss + self.alpha * mse_loss
 
-def prepare_dataset(examples, lowcut, highcut):
+def prepare_dataset(examples, channels, lowcut, highcut):
     X = []
     Y = []
     Y_A = []
     Y_B = []
     
     for ex in examples:
-        eeg = ex.eeg[:, CHANNELS].T
+        eeg = ex.eeg[:, channels].T
         
         # Bandpass filter
         eeg = butter_bandpass_filter(eeg, lowcut, highcut, FS, axis=1)
@@ -161,9 +159,9 @@ def evaluate_model(model, X, Y_A, Y_B, device, zero_eeg=False, shuffle_eeg=False
             
     return n_correct, n_total
 
-def train_eegnet_screening(lowcut, highcut):
+def train_eegnet_screening(channels, lowcut, highcut):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    print(f"Using device: {device} | Running EEGNet Screening | Band: {lowcut}-{highcut} Hz")
+    print(f"Using device: {device} | Running EEGNet Screening | Channels: {len(channels)} | Band: {lowcut}-{highcut} Hz")
     
     all_paths = subject_files()
     if not all_paths:
@@ -195,11 +193,11 @@ def train_eegnet_screening(lowcut, highcut):
         val_exs = train_exs[:val_split]
         train_exs = train_exs[val_split:]
         
-        X_tr, Y_tr, YA_tr, YB_tr = prepare_dataset(train_exs, lowcut, highcut)
-        X_va, Y_va, YA_va, YB_va = prepare_dataset(val_exs, lowcut, highcut)
-        X_te, Y_te, YA_te, YB_te = prepare_dataset(test_exs, lowcut, highcut)
+        X_tr, Y_tr, YA_tr, YB_tr = prepare_dataset(train_exs, channels, lowcut, highcut)
+        X_va, Y_va, YA_va, YB_va = prepare_dataset(val_exs, channels, lowcut, highcut)
+        X_te, Y_te, YA_te, YB_te = prepare_dataset(test_exs, channels, lowcut, highcut)
         
-        model = EEGNet(in_channels=8).to(device)
+        model = EEGNet(in_channels=len(channels)).to(device)
         optimizer = optim.Adam(model.parameters(), lr=1e-3, weight_decay=1e-4)
         criterion = PearsonMSELoss(alpha=0.1)
         
@@ -274,7 +272,9 @@ if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser()
     parser.add_argument("--lowcut", type=float, default=1.0, help="Lowcut frequency for bandpass filter")
-    parser.add_argument("--highcut", type=float, default=8.0, help="Highcut frequency for bandpass filter")
+    parser.add_argument("--highcut", type=float, default=6.0, help="Highcut frequency for bandpass filter")
+    parser.add_argument("--channels", type=int, nargs='+', default=[13, 46, 43, 23, 50, 0, 52, 14],
+                        help="List of channel indices to use (default: Top 8 Ridge channels)")
     args = parser.parse_args()
     
-    train_eegnet_screening(args.lowcut, args.highcut)
+    train_eegnet_screening(args.channels, args.lowcut, args.highcut)
