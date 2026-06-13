@@ -1,5 +1,7 @@
 import argparse
 import sys
+import json
+import pickle
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -18,6 +20,18 @@ SCREENING_SUBJECTS = ["S1_data_preproc", "S7_data_preproc", "S8_data_preproc", "
 
 FS = 64
 DECISION_WINDOW_SEC = 10
+NUM_BANDS = 8
+
+class SubbandEEGNet(nn.Module):
+    def __init__(self, in_channels=8, F1=8, D=2, F2=16, kernel_length=64, num_bands=8):
+        super().__init__()
+        # Use standard EEGNet, but change output projection
+        self.base = EEGNet(in_channels=in_channels, F1=F1, D=D, F2=F2, kernel_length=kernel_length)
+        # Override output projection
+        self.base.output_proj = nn.Conv1d(F2, num_bands, kernel_size=1)
+
+    def forward(self, x):
+        return self.base(x)
 
 def butter_bandpass_filter(data, lowcut, highcut, fs, order=2, axis=0):
     nyq = 0.5 * fs
@@ -39,7 +53,7 @@ class PearsonMSELoss(nn.Module):
         self.mse = nn.MSELoss()
 
     def forward(self, pred, target):
-        # pred, target: [Batch, 1, Time]
+        # pred, target: [Batch, 8, Time]
         pred_mean = pred.mean(dim=2, keepdim=True)
         target_mean = target.mean(dim=2, keepdim=True)
         pred_std = pred.std(dim=2, keepdim=True) + 1e-8
@@ -48,38 +62,60 @@ class PearsonMSELoss(nn.Module):
         cov = ((pred - pred_mean) * (target - target_mean)).mean(dim=2)
         corr = cov / (pred_std.squeeze(2) * target_std.squeeze(2))
         
-        pearson_loss = 1 - corr.mean()
+        pearson_loss = 1 - corr.mean() # Average across bands and batch
         mse_loss = self.mse(pred, target)
         
         return pearson_loss + self.alpha * mse_loss
 
-def prepare_dataset(examples, channels, lowcut, highcut):
+def get_mapping_data():
+    map_file = REPO_ROOT / "data" / "audio_mapping.json"
+    env_file = REPO_ROOT / "data" / "subband_envelopes.pkl"
+    with open(map_file, 'r') as f:
+        mapping = json.load(f)
+    with open(env_file, 'rb') as f:
+        envelopes = pickle.load(f)
+    return mapping, envelopes
+
+def prepare_dataset(examples, channels, lowcut, highcut, subject_id, mapping, envelopes):
     X = []
     Y = []
     Y_A = []
     Y_B = []
     
-    for ex in examples:
+    # We strip "_data_preproc" from subject_id for lookup
+    sub_key = subject_id.replace("_data_preproc", "")
+    
+    for i, ex in enumerate(examples):
         eeg = ex.eeg[:, channels].T
-        
-        # Bandpass filter
+        # Bandpass filter EEG
         eeg = butter_bandpass_filter(eeg, lowcut, highcut, FS, axis=1)
-        wav_a = butter_bandpass_filter(ex.wav_a.reshape(-1, 1), lowcut, highcut, FS, axis=0).ravel()
-        wav_b = butter_bandpass_filter(ex.wav_b.reshape(-1, 1), lowcut, highcut, FS, axis=0).ravel()
-        
-        # Trial-level normalization
         x_norm = normalize_array(eeg.T).T  # scale over time
-        env_a = normalize_array(wav_a.reshape(-1, 1)).ravel()
-        env_b = normalize_array(wav_b.reshape(-1, 1)).ravel()
         
+        trial_key = f"trial_{i}"
+        
+        if sub_key in mapping and trial_key in mapping[sub_key]:
+            fname_a = mapping[sub_key][trial_key]["wavA"]["filename"]
+            fname_b = mapping[sub_key][trial_key]["wavB"]["filename"]
+            
+            env_a_full = envelopes[fname_a] # shape: (8, Time)
+            env_b_full = envelopes[fname_b] # shape: (8, Time)
+        else:
+            print(f"Warning: Missing mapping for {sub_key} {trial_key}")
+            continue
+            
         # Target is ALWAYS env_a
-        target_env = env_a
+        target_env = env_a_full
         
-        min_len = min(x_norm.shape[1], len(target_env))
+        min_len = min(x_norm.shape[1], target_env.shape[1])
         x_norm = x_norm[:, :min_len]
-        target_env = target_env[:min_len]
-        env_a = env_a[:min_len]
-        env_b = env_b[:min_len]
+        target_env = target_env[:, :min_len]
+        env_a = env_a_full[:, :min_len]
+        env_b = env_b_full[:, :min_len]
+        
+        # Normalize each band independently
+        target_env = normalize_array(target_env.T).T
+        env_a = normalize_array(env_a.T).T
+        env_b = normalize_array(env_b.T).T
         
         X.append(x_norm)
         Y.append(target_env)
@@ -92,24 +128,32 @@ def evaluate_windows(pred, env_a, env_b, window_samples):
     num_correct = 0.0
     num_total = 0
     start = 0
-    while start + window_samples <= len(pred):
+    # pred, env_a, env_b shapes: (8, Time)
+    while start + window_samples <= pred.shape[1]:
         end = start + window_samples
-        p = pred[start:end]
-        ea = env_a[start:end]
-        eb = env_b[start:end]
+        p = pred[:, start:end]
+        ea = env_a[:, start:end]
+        eb = env_b[:, start:end]
         
-        std_p = np.std(p)
-        if std_p < 1e-12:
-            ca = 0.0
-            cb = 0.0
-        else:
-            ca = np.corrcoef(p, ea)[0, 1]
-            cb = np.corrcoef(p, eb)[0, 1]
+        corr_a_sum = 0
+        corr_b_sum = 0
+        valid_bands = 0
+        
+        for band in range(NUM_BANDS):
+            std_p = np.std(p[band])
+            if std_p > 1e-12:
+                corr_a_sum += np.corrcoef(p[band], ea[band])[0, 1]
+                corr_b_sum += np.corrcoef(p[band], eb[band])[0, 1]
+                valid_bands += 1
+                
+        if valid_bands > 0:
+            ca = corr_a_sum / valid_bands
+            cb = corr_b_sum / valid_bands
             
-        if ca > cb:
-            num_correct += 1.0
-        elif ca == cb:
-            num_correct += 0.5
+            if ca > cb:
+                num_correct += 1.0
+            elif ca == cb:
+                num_correct += 0.5
                 
         num_total += 1
         start += window_samples
@@ -131,7 +175,7 @@ def evaluate_model(model, X, Y_A, Y_B, device, zero_eeg=False, shuffle_eeg=False
             if shuffle_eeg:
                 shuf_idx = shuffle_indices[i]
                 x_np = X[shuf_idx]
-                mlen = min(x_np.shape[1], len(Y_A[i]))
+                mlen = min(x_np.shape[1], Y_A[i].shape[1])
                 x_np = x_np[:, :mlen]
             else:
                 x_np = X[i]
@@ -143,12 +187,12 @@ def evaluate_model(model, X, Y_A, Y_B, device, zero_eeg=False, shuffle_eeg=False
             elif random_eeg:
                 x = torch.randn_like(x)
             
-            pred = model(x).squeeze(0).squeeze(0).cpu().numpy()
+            pred = model(x).squeeze(0).cpu().numpy() # [8, Time]
             
             if shuffle_eeg:
-                ea = Y_A[i][:mlen]
-                eb = Y_B[i][:mlen]
-                pred = pred[:mlen]
+                ea = Y_A[i][:, :mlen]
+                eb = Y_B[i][:, :mlen]
+                pred = pred[:, :mlen]
             else:
                 ea = Y_A[i]
                 eb = Y_B[i]
@@ -159,9 +203,11 @@ def evaluate_model(model, X, Y_A, Y_B, device, zero_eeg=False, shuffle_eeg=False
             
     return n_correct, n_total
 
-def train_eegnet_screening(channels, lowcut, highcut):
+def train_eegnet_subband_screening(channels, lowcut, highcut):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    print(f"Using device: {device} | Running EEGNet Screening | Channels: {len(channels)} | Band: {lowcut}-{highcut} Hz")
+    print(f"Using device: {device} | Subband EEGNet | Channels: {len(channels)} | Band: {lowcut}-{highcut} Hz")
+    
+    mapping, envelopes = get_mapping_data()
     
     all_paths = subject_files()
     if not all_paths:
@@ -169,13 +215,10 @@ def train_eegnet_screening(channels, lowcut, highcut):
         return
         
     paths = [p for p in all_paths if p.stem in SCREENING_SUBJECTS]
-        
     subject_examples = {str(p): load_subject_examples(p) for p in paths}
     folds = list(iter_leave_one_subject_out(paths))
     
     all_normal_accs = []
-    all_random_accs = []
-    all_shuffle_accs = []
     
     for held_out_path, train_paths in folds:
         held_out_key = str(held_out_path)
@@ -193,11 +236,18 @@ def train_eegnet_screening(channels, lowcut, highcut):
         val_exs = train_exs[:val_split]
         train_exs = train_exs[val_split:]
         
-        X_tr, Y_tr, YA_tr, YB_tr = prepare_dataset(train_exs, channels, lowcut, highcut)
-        X_va, Y_va, YA_va, YB_va = prepare_dataset(val_exs, channels, lowcut, highcut)
-        X_te, Y_te, YA_te, YB_te = prepare_dataset(test_exs, channels, lowcut, highcut)
+        X_tr, Y_tr, YA_tr, YB_tr = [], [], [], []
+        for p in train_paths:
+            tX, tY, tYA, tYB = prepare_dataset(subject_examples[str(p)], channels, lowcut, highcut, p.stem, mapping, envelopes)
+            X_tr.extend(tX); Y_tr.extend(tY); YA_tr.extend(tYA); YB_tr.extend(tYB)
+            
+        # Resplit correctly
+        X_va, Y_va, YA_va, YB_va = X_tr[:val_split], Y_tr[:val_split], YA_tr[:val_split], YB_tr[:val_split]
+        X_tr, Y_tr, YA_tr, YB_tr = X_tr[val_split:], Y_tr[val_split:], YA_tr[val_split:], YB_tr[val_split:]
         
-        model = EEGNet(in_channels=len(channels)).to(device)
+        X_te, Y_te, YA_te, YB_te = prepare_dataset(test_exs, channels, lowcut, highcut, held_out_path.stem, mapping, envelopes)
+        
+        model = SubbandEEGNet(in_channels=len(channels)).to(device)
         optimizer = optim.Adam(model.parameters(), lr=1e-3, weight_decay=1e-4)
         criterion = PearsonMSELoss(alpha=0.1)
         
@@ -212,7 +262,7 @@ def train_eegnet_screening(channels, lowcut, highcut):
             
             for i in range(len(X_tr)):
                 x = torch.FloatTensor(X_tr[i]).unsqueeze(0).to(device)
-                y = torch.FloatTensor(Y_tr[i]).unsqueeze(0).unsqueeze(0).to(device)
+                y = torch.FloatTensor(Y_tr[i]).unsqueeze(0).to(device) # shape: [1, 8, Time]
                 
                 optimizer.zero_grad()
                 pred = model(x)
@@ -232,7 +282,6 @@ def train_eegnet_screening(channels, lowcut, highcut):
                 epochs_no_improve += 1
                 
             print(f"  Epoch {epoch+1:02d}/100 | Train Loss: {train_loss:.4f} | Val Acc: {val_acc*100:.2f}% | Patience: {epochs_no_improve}/15")
-            
                 
             if epochs_no_improve >= patience:
                 break
@@ -241,40 +290,25 @@ def train_eegnet_screening(channels, lowcut, highcut):
         
         # Test Evaluation
         nc_norm, nt_norm = evaluate_model(model, X_te, YA_te, YB_te, device, zero_eeg=False)
-        nc_rand, nt_rand = evaluate_model(model, X_te, YA_te, YB_te, device, random_eeg=True)
-        nc_shuf, nt_shuf = evaluate_model(model, X_te, YA_te, YB_te, device, shuffle_eeg=True)
-        
         normal_acc = nc_norm / max(nt_norm, 1)
-        rand_acc = nc_rand / max(nt_rand, 1)
-        shuffle_acc = nc_shuf / max(nt_shuf, 1)
         
         print(f"  -> Accuracy Normal : {normal_acc*100:.2f}%")
-        print(f"  -> Accuracy Random : {rand_acc*100:.2f}%")
-        print(f"  -> Accuracy Shuffle: {shuffle_acc*100:.2f}%")
-        
         all_normal_accs.append(normal_acc)
-        all_random_accs.append(rand_acc)
-        all_shuffle_accs.append(shuffle_acc)
         
     final_normal = np.mean(all_normal_accs)
-    final_random = np.mean(all_random_accs)
-    final_shuffle = np.mean(all_shuffle_accs)
     
     print("\n" + "="*50)
-    print(f"EEGNET {len(channels)}-CHANNEL SCREENING RESULTS")
+    print(f"EEGNET SUBBAND {len(channels)}-CHANNEL SCREENING RESULTS")
     print("="*50)
     print(f" Normal EEG  : {final_normal*100:.2f}%")
-    print(f" Random EEG  : {final_random*100:.2f}%")
-    print(f" Shuffle EEG : {final_shuffle*100:.2f}%")
     print("="*50)
 
 if __name__ == "__main__":
-    import argparse
     parser = argparse.ArgumentParser()
     parser.add_argument("--lowcut", type=float, default=1.0, help="Lowcut frequency for bandpass filter")
     parser.add_argument("--highcut", type=float, default=6.0, help="Highcut frequency for bandpass filter")
     parser.add_argument("--channels", type=int, nargs='+', default=[13, 46, 43, 23, 50, 0, 52, 14],
-                        help="List of channel indices to use (default: Top 8 Ridge channels)")
+                        help="List of channel indices to use (default: Top 8)")
     args = parser.parse_args()
     
-    train_eegnet_screening(args.channels, args.lowcut, args.highcut)
+    train_eegnet_subband_screening(args.channels, args.lowcut, args.highcut)
