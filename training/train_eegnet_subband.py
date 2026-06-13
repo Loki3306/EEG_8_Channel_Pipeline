@@ -41,6 +41,11 @@ def butter_bandpass_filter(data, lowcut, highcut, fs, order=2, axis=0):
     y = filtfilt(b, a, data, axis=axis)
     return y
 
+def normalize_array(arr):
+    arr = arr - arr.mean(axis=0, keepdims=True)
+    scale = arr.std(axis=0, keepdims=True) + 1e-12
+    return arr / scale
+
 def normalize_array_global(arr):
     # arr shape: (Time, Channels)
     # Zero-mean each band independently
