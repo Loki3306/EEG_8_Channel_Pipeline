@@ -17,8 +17,8 @@ FS = 64
 DECISION_WINDOW_SEC = 10
 BP_LOWCUT = 1.0
 BP_HIGHCUT = 8.0
-# Use 8 specific channels: Cz, C3, C4, CPz, CP3, CP4, Pz, Fz
-CHANNELS = [47, 12, 49, 31, 17, 53, 30, 37]
+# Use the data-driven discovered 8-channel set: C5, FCz, FC6, P9, C6, Fp1, TP8, T7
+CHANNELS = [13, 46, 43, 23, 50, 0, 52, 14]
 
 def butter_bandpass_filter(data, lowcut, highcut, fs, order=2, axis=0):
     nyq = 0.5 * fs
