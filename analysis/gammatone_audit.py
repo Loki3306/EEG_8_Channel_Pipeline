@@ -44,8 +44,8 @@ def gammatone_envelope(audio, fs, num_bands=28, low_freq=50, high_freq=8000, tar
     env_sum = np.zeros_like(audio_float)
     
     for cf in cfs:
-        # 1. Gammatone filter
-        b_gt, a_gt = gammatone(cf, 'iir', fs=fs)
+        # 1. Gammatone filter (FIR is numerically stable at low freq / high fs)
+        b_gt, a_gt = gammatone(cf, 'fir', fs=fs)
         filtered = lfilter(b_gt, a_gt, audio_float)
         
         # 2. Rectification & Power-law compression
