@@ -18,8 +18,6 @@ FS = 64
 LAG_MS = 250
 DECISION_WINDOW_SEC = 10
 FIXED_LAMBDA = 1000.0
-BP_LOWCUT = 1.0
-BP_HIGHCUT = 8.0
 
 MANUAL_8_CHANNELS = [47, 12, 49, 31, 17, 53, 30, 37]
 
@@ -57,13 +55,13 @@ def evaluate_windows(pred, ea, eb, window_samples):
         
     return num_correct, num_total
 
-def prepare_dataset_for_channels(examples, channels, num_lags):
+def prepare_dataset_for_channels(examples, channels, num_lags, lowcut, highcut):
     trials = []
     for ex in examples:
         eeg = ex.eeg[:, channels].T
-        eeg = butter_bandpass_filter(eeg, BP_LOWCUT, BP_HIGHCUT, FS, axis=1)
-        wav_a = butter_bandpass_filter(ex.wav_a.reshape(-1, 1), BP_LOWCUT, BP_HIGHCUT, FS, axis=0).ravel()
-        wav_b = butter_bandpass_filter(ex.wav_b.reshape(-1, 1), BP_LOWCUT, BP_HIGHCUT, FS, axis=0).ravel()
+        eeg = butter_bandpass_filter(eeg, lowcut, highcut, FS, axis=1)
+        wav_a = butter_bandpass_filter(ex.wav_a.reshape(-1, 1), lowcut, highcut, FS, axis=0).ravel()
+        wav_b = butter_bandpass_filter(ex.wav_b.reshape(-1, 1), lowcut, highcut, FS, axis=0).ravel()
         
         shifted = np.vstack([eeg.T[num_lags-1:, :], np.zeros((num_lags-1, len(channels)))])
         x_feat = np.zeros((shifted.shape[0], len(channels) * num_lags))
@@ -86,9 +84,10 @@ def prepare_dataset_for_channels(examples, channels, num_lags):
         })
     return trials
 
-def evaluate_subset_loso(name, channels):
+def evaluate_subset_loso(name, channels, lowcut, highcut):
     print(f"\n===============================================================")
     print(f" EVALUATING LOSO: {name} (Channels: {channels})")
+    print(f" BAND: {lowcut}-{highcut} Hz")
     print(f"===============================================================")
     
     paths = subject_files()
@@ -113,8 +112,8 @@ def evaluate_subset_loso(name, channels):
             train_exs.extend(subject_examples[str(p)])
         test_exs = subject_examples[held_out_key]
         
-        train_trials = prepare_dataset_for_channels(train_exs, channels, num_lags)
-        test_trials = prepare_dataset_for_channels(test_exs, channels, num_lags)
+        train_trials = prepare_dataset_for_channels(train_exs, channels, num_lags, lowcut, highcut)
+        test_trials = prepare_dataset_for_channels(test_exs, channels, num_lags, lowcut, highcut)
         
         # Train Ridge on ALL train trials
         x_train_list = [t['x'] for t in train_trials]
@@ -189,10 +188,12 @@ def evaluate_subset_loso(name, channels):
 def main():
     parser = argparse.ArgumentParser(description="Validate Channel Sets (LOSO)")
     parser.add_argument("--best", type=int, nargs="+", required=True, help="List of best discovered 8 channels, e.g. --best 1 2 3 4 5 6 7 8")
+    parser.add_argument("--lowcut", type=float, default=1.0, help="Lowcut frequency for bandpass filter")
+    parser.add_argument("--highcut", type=float, default=8.0, help="Highcut frequency for bandpass filter")
     args = parser.parse_args()
     
-    evaluate_subset_loso("A) Current Manual 8-Channel Set", MANUAL_8_CHANNELS)
-    evaluate_subset_loso("B) Best Discovered 8-Channel Set", args.best)
+    evaluate_subset_loso("A) Current Manual 8-Channel Set", MANUAL_8_CHANNELS, args.lowcut, args.highcut)
+    evaluate_subset_loso("B) Best Discovered 8-Channel Set", args.best, args.lowcut, args.highcut)
 
 if __name__ == "__main__":
     main()

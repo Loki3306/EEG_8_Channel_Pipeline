@@ -16,8 +16,6 @@ from baselines.ridge_aad import load_subject_examples, subject_files, iter_leave
 
 FS = 64
 DECISION_WINDOW_SEC = 10
-BP_LOWCUT = 1.0
-BP_HIGHCUT = 8.0
 # Use the data-driven discovered 8-channel set: C5, FCz, FC6, P9, C6, Fp1, TP8, T7
 CHANNELS = [13, 46, 43, 23, 50, 0, 52, 14]
 
@@ -55,7 +53,7 @@ class PearsonMSELoss(nn.Module):
         
         return pearson_loss + self.alpha * mse_loss
 
-def prepare_dataset(examples):
+def prepare_dataset(examples, lowcut, highcut):
     X = []
     Y = []
     Y_A = []
@@ -64,10 +62,10 @@ def prepare_dataset(examples):
     for ex in examples:
         eeg = ex.eeg[:, CHANNELS].T
         
-        # 1-8 Hz Bandpass
-        eeg = butter_bandpass_filter(eeg, BP_LOWCUT, BP_HIGHCUT, FS, axis=1)
-        wav_a = butter_bandpass_filter(ex.wav_a.reshape(-1, 1), BP_LOWCUT, BP_HIGHCUT, FS, axis=0).ravel()
-        wav_b = butter_bandpass_filter(ex.wav_b.reshape(-1, 1), BP_LOWCUT, BP_HIGHCUT, FS, axis=0).ravel()
+        # Bandpass
+        eeg = butter_bandpass_filter(eeg, lowcut, highcut, FS, axis=1)
+        wav_a = butter_bandpass_filter(ex.wav_a.reshape(-1, 1), lowcut, highcut, FS, axis=0).ravel()
+        wav_b = butter_bandpass_filter(ex.wav_b.reshape(-1, 1), lowcut, highcut, FS, axis=0).ravel()
         
         # Trial-level normalization
         x_norm = normalize_array(eeg.T).T  # scale over time
@@ -161,9 +159,9 @@ def evaluate_model(model, X, Y_A, Y_B, device, zero_eeg=False, shuffle_eeg=False
             
     return n_correct, n_total
 
-def train_loso(max_dilation, width):
+def train_loso(max_dilation, width, lowcut, highcut):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    print(f"Using device: {device} | Max Dilation: {max_dilation} | Width: {width}x")
+    print(f"Using device: {device} | Max Dilation: {max_dilation} | Width: {width}x | Band: {lowcut}-{highcut} Hz")
     
     paths = subject_files()
     if not paths:
@@ -193,9 +191,9 @@ def train_loso(max_dilation, width):
         val_exs = train_exs[:val_split]
         train_exs = train_exs[val_split:]
         
-        X_tr, Y_tr, YA_tr, YB_tr = prepare_dataset(train_exs)
-        X_va, Y_va, YA_va, YB_va = prepare_dataset(val_exs)
-        X_te, Y_te, YA_te, YB_te = prepare_dataset(test_exs)
+        X_tr, Y_tr, YA_tr, YB_tr = prepare_dataset(train_exs, lowcut, highcut)
+        X_va, Y_va, YA_va, YB_va = prepare_dataset(val_exs, lowcut, highcut)
+        X_te, Y_te, YA_te, YB_te = prepare_dataset(test_exs, lowcut, highcut)
         
         spatial_dim = 32 * width
         temporal_dim = 64 * width
@@ -274,6 +272,8 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--max-dilation", type=int, default=8, help="Max dilation factor for temporal context.")
     parser.add_argument("--width", type=int, default=1, help="Width multiplier (1x, 2x, 4x) for spatial and temporal dimensions.")
+    parser.add_argument("--lowcut", type=float, default=1.0, help="Lowcut frequency for bandpass filter")
+    parser.add_argument("--highcut", type=float, default=8.0, help="Highcut frequency for bandpass filter")
     args = parser.parse_args()
     
-    train_loso(args.max_dilation, args.width)
+    train_loso(args.max_dilation, args.width, args.lowcut, args.highcut)
