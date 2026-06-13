@@ -161,9 +161,9 @@ def evaluate_model(model, X, Y_A, Y_B, device, zero_eeg=False, shuffle_eeg=False
             
     return n_correct, n_total
 
-def train_loso(max_dilation):
+def train_loso(max_dilation, width):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    print(f"Using device: {device} | Max Dilation: {max_dilation}")
+    print(f"Using device: {device} | Max Dilation: {max_dilation} | Width: {width}x")
     
     paths = subject_files()
     if not paths:
@@ -197,16 +197,18 @@ def train_loso(max_dilation):
         X_va, Y_va, YA_va, YB_va = prepare_dataset(val_exs)
         X_te, Y_te, YA_te, YB_te = prepare_dataset(test_exs)
         
-        model = VLAAILite(in_channels=8, max_dilation=max_dilation).to(device)
+        spatial_dim = 32 * width
+        temporal_dim = 64 * width
+        model = VLAAILite(in_channels=8, spatial_dim=spatial_dim, temporal_dim=temporal_dim, max_dilation=max_dilation).to(device)
         optimizer = optim.Adam(model.parameters(), lr=1e-3, weight_decay=1e-4)
         criterion = PearsonMSELoss(alpha=0.1)
         
         best_val_acc = 0.0
         best_weights = deepcopy(model.state_dict())
-        patience = 5
+        patience = 15
         epochs_no_improve = 0
         
-        for epoch in range(50):
+        for epoch in range(100):
             model.train()
             train_loss = 0.0
             
@@ -231,7 +233,7 @@ def train_loso(max_dilation):
             else:
                 epochs_no_improve += 1
                 
-            print(f"  Epoch {epoch+1:02d}/50 | Train Loss: {train_loss:.4f} | Val Acc: {val_acc*100:.2f}% | Patience: {epochs_no_improve}/5")
+            print(f"  Epoch {epoch+1:02d}/100 | Train Loss: {train_loss:.4f} | Val Acc: {val_acc*100:.2f}% | Patience: {epochs_no_improve}/15")
             
                 
             if epochs_no_improve >= patience:
@@ -270,7 +272,8 @@ def train_loso(max_dilation):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--max-dilation", type=int, default=8, help="Max dilation factor for temporal context. 16 ~500ms, 32 ~750ms")
+    parser.add_argument("--max-dilation", type=int, default=8, help="Max dilation factor for temporal context.")
+    parser.add_argument("--width", type=int, default=1, help="Width multiplier (1x, 2x, 4x) for spatial and temporal dimensions.")
     args = parser.parse_args()
     
-    train_loso(args.max_dilation)
+    train_loso(args.max_dilation, args.width)
