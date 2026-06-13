@@ -18,6 +18,7 @@ import numpy as np
 from pathlib import Path
 from copy import deepcopy
 from scipy.signal import butter, filtfilt
+from scipy.stats import spearmanr
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT))
@@ -140,7 +141,8 @@ def extract_spatial_importance(model):
     return importance
 
 def train_and_extract(paths, subject_examples, all_channels, lowcut, highcut, device):
-    """Train 64-channel EEGNet on screening subjects and extract channel importance."""
+    """Train 64-channel EEGNet on screening subjects and extract channel importance.
+    Returns (mean_importance, per_fold_importances)."""
     folds = list(iter_leave_one_subject_out(paths))
     num_channels = len(all_channels)
     
@@ -206,9 +208,79 @@ def train_and_extract(paths, subject_examples, all_channels, lowcut, highcut, de
         all_importances.append(importance)
         print(f"    Best val acc: {best_val_acc*100:.1f}%")
     
-    # Average importance across folds
     mean_importance = np.mean(all_importances, axis=0)
-    return mean_importance
+    return mean_importance, all_importances
+
+def check_ranking_stability(all_importances, ranked_indices, fold_names, top_k=16):
+    """Check if channel rankings are consistent across folds.
+    
+    Computes per-fold ranks and pairwise Spearman correlation.
+    Returns (is_stable, mean_correlation, per_fold_ranks_for_top_k).
+    """
+    n_folds = len(all_importances)
+    n_channels = len(all_importances[0])
+    
+    # Compute per-fold rank arrays (rank 1 = most important)
+    per_fold_ranks = []
+    for imp in all_importances:
+        ranks = np.zeros(n_channels, dtype=int)
+        sorted_idx = np.argsort(imp)[::-1]
+        for rank, ch_idx in enumerate(sorted_idx):
+            ranks[ch_idx] = rank + 1
+        per_fold_ranks.append(ranks)
+    
+    # Show per-fold ranks for the top-K channels (based on mean ranking)
+    top_channels = ranked_indices[:top_k]
+    
+    print(f"\n{'='*60}")
+    print(f"CROSS-FOLD STABILITY ANALYSIS (Top {top_k} channels)")
+    print(f"{'='*60}")
+    header = f"{'Ch':<6} {'Name':<8}" + "".join([f" {fn:<6}" for fn in fold_names]) + f" {'StdDev':<8} {'Stable?'}"
+    print(header)
+    print("-" * len(header))
+    
+    unstable_count = 0
+    for ch_idx in top_channels:
+        name = DTU_CHANNEL_NAMES[ch_idx] if ch_idx < len(DTU_CHANNEL_NAMES) else f"Ch{ch_idx}"
+        fold_ranks = [pfr[ch_idx] for pfr in per_fold_ranks]
+        rank_std = np.std(fold_ranks)
+        is_ch_stable = rank_std < 15  # channel rank varies by less than 15 positions
+        if not is_ch_stable:
+            unstable_count += 1
+        stable_str = "  ✓" if is_ch_stable else "  ✗ UNSTABLE"
+        fold_str = "".join([f" {r:<6}" for r in fold_ranks])
+        print(f"{ch_idx:<6} {name:<8}{fold_str} {rank_std:<8.1f} {stable_str}")
+    
+    # Pairwise Spearman correlation between fold rankings
+    correlations = []
+    for i in range(n_folds):
+        for j in range(i + 1, n_folds):
+            rho, _ = spearmanr(all_importances[i], all_importances[j])
+            correlations.append(rho)
+    
+    mean_corr = np.mean(correlations)
+    min_corr = np.min(correlations)
+    
+    print(f"\nPairwise Spearman correlations: {[f'{c:.3f}' for c in correlations]}")
+    print(f"Mean Spearman rho: {mean_corr:.3f}")
+    print(f"Min  Spearman rho: {min_corr:.3f}")
+    print(f"Unstable channels in Top {top_k}: {unstable_count}/{top_k}")
+    
+    # Decision: stable if mean correlation >= 0.5 AND less than half the channels are unstable
+    is_stable = mean_corr >= 0.5 and unstable_count <= top_k // 2
+    
+    if is_stable:
+        print(f"\n>> STABILITY CHECK: PASSED (rho={mean_corr:.3f} >= 0.5)")
+        print(f">> Proceeding to Phase 2 screening.")
+    else:
+        print(f"\n>> STABILITY CHECK: FAILED")
+        if mean_corr < 0.5:
+            print(f">> Mean Spearman rho={mean_corr:.3f} < 0.5 — rankings are mostly noise.")
+        if unstable_count > top_k // 2:
+            print(f">> {unstable_count}/{top_k} top channels have rank StdDev >= 15 — too unstable.")
+        print(f">> ABORTING screening. Weight-based ranking is unreliable for this data.")
+    
+    return is_stable, mean_corr
 
 def screen_channel_set(name, channels, paths, subject_examples, lowcut, highcut, device):
     """Train and evaluate EEGNet with a specific channel set on screening subjects."""
@@ -309,8 +381,8 @@ def main():
     print("PHASE 1: Training 64-channel EEGNet for channel ranking")
     print("=" * 60)
     
-    importance = train_and_extract(paths, subject_examples, all_channels, 
-                                    args.lowcut, args.highcut, device)
+    importance, all_importances = train_and_extract(paths, subject_examples, all_channels, 
+                                                     args.lowcut, args.highcut, device)
     
     # Rank channels by importance (descending)
     ranked_indices = np.argsort(importance)[::-1]
@@ -340,6 +412,19 @@ def main():
     overlap = set(top8) & set(CURRENT_BEST_CHANNELS)
     print(f"\nOverlap between EEGNet Top8 and Ridge Top8: {len(overlap)}/8 channels")
     print(f"  Shared: {[DTU_CHANNEL_NAMES[i] if i < len(DTU_CHANNEL_NAMES) else f'Ch{i}' for i in overlap]}")
+    
+    # ============================================================
+    # STABILITY CHECK: Abort if rankings are noisy across folds
+    # ============================================================
+    fold_names = [p.stem.replace('_data_preproc', '') for p in paths]
+    is_stable, mean_corr = check_ranking_stability(
+        all_importances, ranked_indices, fold_names, top_k=16
+    )
+    
+    if not is_stable:
+        print("\n>> Screening aborted due to unstable rankings.")
+        print(">> Consider gradient-based or permutation-based importance instead.")
+        return
     
     # ============================================================
     # PHASE 2: Screen each channel set
