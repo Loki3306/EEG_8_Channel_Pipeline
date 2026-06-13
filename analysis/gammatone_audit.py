@@ -38,15 +38,15 @@ def gammatone_envelope(audio, fs, num_bands=28, low_freq=50, high_freq=8000, tar
     cfs = erb_space(low_freq, high_freq, num_bands)
     
     # Pre-compute low-pass filter for envelope extraction
-    # 8 Hz is typical for AAD 
     b_lp, a_lp = butter(3, 8 / (fs / 2), btype='low')
     
-    env_sum = np.zeros_like(audio)
+    audio_float = audio.astype(np.float64)
+    env_sum = np.zeros_like(audio_float)
     
     for cf in cfs:
         # 1. Gammatone filter
         b_gt, a_gt = gammatone(cf, 'iir', fs=fs)
-        filtered = lfilter(b_gt, a_gt, audio)
+        filtered = lfilter(b_gt, a_gt, audio_float)
         
         # 2. Rectification & Power-law compression
         compressed = np.abs(filtered) ** 0.6
