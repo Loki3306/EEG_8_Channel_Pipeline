@@ -1,12 +1,18 @@
 import argparse
 import json
-import scipy.io as sio
 import numpy as np
 import matplotlib.pyplot as plt
 from scipy.signal import hilbert, butter, filtfilt, resample
 from scipy.io import wavfile
 import random
 from pathlib import Path
+import sys
+
+# Ensure baselines can be imported
+REPO_ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(REPO_ROOT))
+
+from baselines.ridge_aad import load_subject_examples
 
 def normalize(x):
     return (x - np.mean(x)) / (np.std(x) + 1e-12)
@@ -14,6 +20,7 @@ def normalize(x):
 def audit_pipeline():
     parser = argparse.ArgumentParser()
     parser.add_argument('--data_dir', type=str, default='/kaggle/input/datasets/lokeshgile/dataset-eeg', help='Directory containing the .mat files')
+    parser.add_argument('--audio_dir', type=str, default='/kaggle/input/dtu-audio-files', help='Directory containing the raw .wav files')
     parser.add_argument('--mapping_file', type=str, default='data/audio_mapping.json', help='Path to audio_mapping.json')
     args = parser.parse_args()
 
@@ -24,17 +31,16 @@ def audit_pipeline():
     with open(args.mapping_file, 'r') as f:
         mapping = json.load(f)
         
-    # 2. Load original DTU data from .mat
-    mat_path = f"{args.data_dir}/S1_data_preproc.mat"
-    print(f"Loading {mat_path}...")
+    # 2. Load original DTU data using the exact same loader used for training
+    mat_path = Path(args.data_dir) / "S1_data_preproc.mat"
+    print(f"Loading {mat_path} using load_subject_examples()...")
     try:
-        mat_data = sio.loadmat(mat_path, squeeze_me=True, struct_as_record=False)
-        trials = mat_data['data']
-    except FileNotFoundError:
-        print(f"ERROR: {mat_path} not found.")
+        trials = load_subject_examples(mat_path)
+    except Exception as e:
+        print(f"ERROR: Failed to load using load_subject_examples. Is the path correct? {e}")
         return
         
-    print(f"Loaded {len(trials)} trials from .mat file.")
+    print(f"Loaded {len(trials)} trials using the pipeline loader.")
     
     # 3. Select 20 random trials
     random.seed(42)
@@ -44,26 +50,23 @@ def audit_pipeline():
     
     for idx in sample_indices:
         trial = trials[idx]
-        trial_id = trial.trial
-        story_a = trial.story_a
-        story_b = trial.story_b
+        subject = trial.subject
+        trial_index = trial.trial_index
         
-        # DTU uses a custom struct format. Extracting wavA envelope.
-        orig_env_a = trial.env_a
+        # The EXACT DTU target array used by EEGNet/ATCNet
+        orig_env_a = trial.wav_a
         
         # Find mapping
-        found = None
-        for k, v in mapping.items():
-            if v['trial'] == trial_id and v['story_a'] == story_a and v['story_b'] == story_b:
-                found = v
-                break
-                
-        if not found:
-            print(f"Trial {trial_id} ({story_a}/{story_b}) not found in mapping!")
+        try:
+            found = mapping[subject][f"trial_{trial_index}"]
+        except KeyError:
+            print(f"Trial {trial_index} for subject {subject} not found in mapping!")
             continue
             
-        wav_path = found['wavA']
-        if not Path(wav_path).exists():
+        wav_filename = found['wavA']['filename']
+        wav_path = Path(args.audio_dir) / wav_filename
+        
+        if not wav_path.exists():
             print(f"WAV file not found at {wav_path}")
             continue
             
@@ -71,7 +74,7 @@ def audit_pipeline():
         if len(audio.shape) > 1:
             audio = np.mean(audio, axis=1) # mix to mono
             
-        # --- RECONSTRUCT BROADBAND ENVELOPE ---
+        # --- RECONSTRUCT BROADBAND ENVELOPE (EXACT PIPELINE COPY) ---
         env = np.abs(hilbert(audio))
         b, a = butter(3, 8 / (fs / 2), btype='low')
         env_lp = filtfilt(b, a, env)
@@ -90,6 +93,10 @@ def audit_pipeline():
         correlations.append(corr)
             
     print("\n--- AUDIT RESULTS (20 Trials) ---")
+    if len(correlations) == 0:
+        print("No correlations were computed. Check paths.")
+        return
+        
     print(f"Mean Correlation:   {np.mean(correlations):.4f}")
     print(f"Median Correlation: {np.median(correlations):.4f}")
     print(f"Min Correlation:    {np.min(correlations):.4f}")
