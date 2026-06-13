@@ -242,10 +242,10 @@ def train_sweep():
     
     print("Pre-processing complete. Starting sweep...")
     
-    # Grid
+    # Targeted Grid Search
     lrs = [1e-4, 3e-4, 1e-3]
-    wds = [0, 1e-5, 1e-4]
-    widths = [1, 2]
+    wds = [1e-4]
+    widths = [1]
     
     combinations = list(itertools.product(lrs, wds, widths))
     results = []
