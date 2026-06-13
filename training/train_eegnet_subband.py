@@ -63,8 +63,8 @@ class PearsonMSELoss(nn.Module):
     def forward(self, pred, target):
         # Flatten over channels and time to calculate a single global Pearson correlation.
         # This naturally weights bands by their true variance.
-        pred_flat = pred.view(pred.shape[0], -1)
-        target_flat = target.view(target.shape[0], -1)
+        pred_flat = pred.reshape(pred.shape[0], -1)
+        target_flat = target.reshape(target.shape[0], -1)
         
         p_mean = pred_flat.mean(dim=1, keepdim=True)
         t_mean = target_flat.mean(dim=1, keepdim=True)
