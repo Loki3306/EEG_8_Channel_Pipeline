@@ -3,7 +3,7 @@ import pickle
 import numpy as np
 from pathlib import Path
 from scipy.io import wavfile
-from scipy.signal import butter, filtfilt, hilbert, resample
+from scipy.signal import butter, sosfiltfilt, hilbert, resample
 import warnings
 warnings.filterwarnings("ignore")
 
@@ -27,17 +27,17 @@ def extract_subband_envelopes(wav_path, num_bands=8, fmin=100, fmax=8000, target
         low = edges[i]
         high = edges[i+1]
         
-        # Bandpass filter
-        b, a = butter(4, [low / nyq, min(high / nyq, 0.99)], btype='band')
-        filtered = filtfilt(b, a, data)
+        # Bandpass filter (use SOS for numerical stability)
+        sos = butter(4, [low / nyq, min(high / nyq, 0.99)], btype='band', output='sos')
+        filtered = sosfiltfilt(sos, data)
         
         # Hilbert envelope
         analytic = hilbert(filtered)
         envelope = np.abs(analytic)
         
         # Low pass filter at 8 Hz to capture envelope modulations
-        b_lp, a_lp = butter(4, 8.0 / nyq, btype='low')
-        env_lp = filtfilt(b_lp, a_lp, envelope)
+        sos_lp = butter(4, 8.0 / nyq, btype='low', output='sos')
+        env_lp = sosfiltfilt(sos_lp, envelope)
         
         # Resample to 64Hz
         num_samples = int(len(env_lp) * target_fs / fs)

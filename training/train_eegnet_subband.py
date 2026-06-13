@@ -56,8 +56,10 @@ class PearsonMSELoss(nn.Module):
         # pred, target: [Batch, 8, Time]
         pred_mean = pred.mean(dim=2, keepdim=True)
         target_mean = target.mean(dim=2, keepdim=True)
-        pred_std = pred.std(dim=2, keepdim=True) + 1e-8
-        target_std = target.std(dim=2, keepdim=True) + 1e-8
+        
+        # Add epsilon before square root to prevent NaN gradients when variance is very small
+        pred_std = torch.sqrt(pred.var(dim=2, keepdim=True, unbiased=False) + 1e-8)
+        target_std = torch.sqrt(target.var(dim=2, keepdim=True, unbiased=False) + 1e-8)
         
         cov = ((pred - pred_mean) * (target - target_mean)).mean(dim=2)
         corr = cov / (pred_std.squeeze(2) * target_std.squeeze(2))
