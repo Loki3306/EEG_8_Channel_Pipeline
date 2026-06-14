@@ -64,7 +64,7 @@ def prepare_dataset(examples, channels, lowcut, highcut, subject_id, mapping, en
         eeg = butter_bandpass_filter(eeg, lowcut, highcut, FS, axis=1)
         x_norm = normalize_array(eeg.T).T 
         
-        trial_key = f"trial_{i}"
+        trial_key = f"trial_{ex.trial_index}"
         
         if sub_key in mapping and trial_key in mapping[sub_key]:
             fname_a = mapping[sub_key][trial_key]["wavA"]["filename"]
