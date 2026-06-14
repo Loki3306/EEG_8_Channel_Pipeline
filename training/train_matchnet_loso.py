@@ -7,6 +7,8 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
 import numpy as np
+import psutil
+import gc
 from pathlib import Path
 from copy import deepcopy
 from scipy.signal import butter, filtfilt
@@ -178,6 +180,7 @@ def train_matchnet_loso(eeg_model, channels, lowcut, highcut):
     for held_out_path, train_paths in folds:
         held_out_key = str(held_out_path)
         print(f"\nEvaluating fold with held-out subject: {held_out_path.stem}")
+        print(f"  [Memory] Pre-fold RAM: {psutil.virtual_memory().percent}% ({psutil.virtual_memory().used / 1e9:.2f} GB used)")
         
         train_exs = []
         for p in train_paths:
@@ -299,6 +302,12 @@ def train_matchnet_loso(eeg_model, channels, lowcut, highcut):
         
         all_accs_zero.append(acc_zero)
         all_accs_shuf.append(acc_shuf)
+        
+        # Aggressive memory cleanup to prevent swap death on Kaggle
+        del X_tr, YA_tr, YB_tr, X_tr_full, YA_tr_full, YB_tr_full, X_va_full, YA_va_full, YB_va_full, X_te_full, YA_te_full, YB_te_full
+        gc.collect()
+        
+        print(f"  [Memory] Post-cleanup RAM: {psutil.virtual_memory().percent}% ({psutil.virtual_memory().used / 1e9:.2f} GB used)")
         
     final_acc_zero = np.mean(all_accs_zero)
     final_acc_shuf = np.mean(all_accs_shuf)
