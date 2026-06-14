@@ -72,13 +72,11 @@ def prepare_dataset(examples, channels, lowcut, highcut, subject_id, mapping):
         eeg = butter_bandpass_filter(eeg, lowcut, highcut, FS, axis=1)
         x_norm = normalize_array(eeg.T).T
         
-        env_a_full = ex.env_a.T
-        env_b_full = ex.env_b.T
+        wav_a = butter_bandpass_filter(ex.wav_a.reshape(-1, 1), lowcut, highcut, FS, axis=0).ravel()
+        wav_b = butter_bandpass_filter(ex.wav_b.reshape(-1, 1), lowcut, highcut, FS, axis=0).ravel()
         
-        if len(env_a_full.shape) == 1:
-            env_a_full = env_a_full.reshape(1, -1)
-        if len(env_b_full.shape) == 1:
-            env_b_full = env_b_full.reshape(1, -1)
+        env_a_full = normalize_array(wav_a.reshape(-1, 1)).T
+        env_b_full = normalize_array(wav_b.reshape(-1, 1)).T
             
         target_env = env_a_full
         
