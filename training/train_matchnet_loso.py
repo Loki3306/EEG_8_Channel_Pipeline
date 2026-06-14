@@ -14,7 +14,7 @@ from scipy.signal import butter, filtfilt
 REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT))
 
-from models.matchnet import ContrastiveMatchNet, contrastive_loss
+from models.matchnet import ContrastiveMatchNet, infonce_loss
 from baselines.ridge_aad import load_subject_examples, subject_files, iter_leave_one_subject_out
 
 FS = 64
@@ -236,6 +236,8 @@ def train_matchnet_loso(eeg_model, channels, lowcut, highcut):
         for epoch in range(100):
             model.train()
             train_loss = 0.0
+            train_sa = 0.0
+            train_sb = 0.0
             
             # Shuffle chunks
             perm = np.random.permutation(len(X_tr))
@@ -248,10 +250,12 @@ def train_matchnet_loso(eeg_model, channels, lowcut, highcut):
                 
                 optimizer.zero_grad()
                 z_eeg, z_a, z_b = model(bx, bya, byb)
-                loss, sa, sb = contrastive_loss(z_eeg, z_a, z_b, margin=0.1)
+                loss, sa, sb = infonce_loss(z_eeg, z_a, z_b, temperature=0.1)
                 loss.backward()
                 optimizer.step()
                 train_loss += loss.item()
+                train_sa += sa.item()
+                train_sb += sb.item()
                 
             nc_va, nt_va = evaluate_model(model, X_va_full, YA_va_full, YB_va_full, device)
             val_acc = nc_va / max(nt_va, 1)
@@ -263,7 +267,11 @@ def train_matchnet_loso(eeg_model, channels, lowcut, highcut):
             else:
                 epochs_no_improve += 1
                 
-            print(f"  Epoch {epoch+1:02d}/100 | Train Loss: {train_loss:.4f} | Val Acc: {val_acc*100:.2f}% | Patience: {epochs_no_improve}/10")
+            avg_loss = train_loss / max(len(X_tr) // batch_size, 1)
+            avg_sa = train_sa / max(len(X_tr) // batch_size, 1)
+            avg_sb = train_sb / max(len(X_tr) // batch_size, 1)
+            
+            print(f"  Epoch {epoch+1:02d}/100 | Loss: {avg_loss:.4f} (sA: {avg_sa:.3f}, sB: {avg_sb:.3f}) | Val Acc: {val_acc*100:.2f}% | Patience: {epochs_no_improve}/10")
                 
             if epochs_no_improve >= patience:
                 break

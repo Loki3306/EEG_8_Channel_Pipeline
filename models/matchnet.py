@@ -81,34 +81,51 @@ class ContrastiveMatchNet(nn.Module):
         
         return z_eeg, z_a, z_b
 
-def contrastive_loss(z_eeg, z_a, z_b, margin=0.1):
+def infonce_loss(z_eeg, z_a, z_b, temperature=0.1):
     """
-    Computes a max-margin contrastive loss based on cosine similarity.
-    We assume z_a is the attended audio, and z_b is the unattended audio.
+    Computes an InfoNCE loss across the batch.
+    For each EEG representation, the network must identify the correct audio (z_a[i])
+    out of 2B candidates: all z_a and all z_b in the batch.
     
     z_eeg, z_a, z_b shape: [B, latent_dim, T]
-    We compute cosine similarity over the latent dimension, then average over Time.
     """
-    # Cosine similarity: [B, T]
-    sim_a = F.cosine_similarity(z_eeg, z_a, dim=1)
-    sim_b = F.cosine_similarity(z_eeg, z_b, dim=1)
+    B, D, T = z_eeg.shape
     
-    # Average over time to get a single scalar per batch element
-    sim_a_mean = sim_a.mean(dim=1)
-    sim_b_mean = sim_b.mean(dim=1)
+    # 1. Normalize over the latent dimension
+    z_eeg_norm = F.normalize(z_eeg, dim=1)
+    z_a_norm = F.normalize(z_a, dim=1)
+    z_b_norm = F.normalize(z_b, dim=1)
     
-    # We want sim_a > sim_b + margin
-    loss = F.relu(margin - (sim_a_mean - sim_b_mean)).mean()
+    # 2. Compute time-averaged similarity matrix
+    # torch.einsum('bdt,cdt->bc', X, Y) computes the dot product over D and T for all pairs of B and C
+    # We divide by T to get the mean similarity over time.
+    sim_a = torch.einsum('bdt,cdt->bc', z_eeg_norm, z_a_norm) / T  # [B, B]
+    sim_b = torch.einsum('bdt,cdt->bc', z_eeg_norm, z_b_norm) / T  # [B, B]
     
-    return loss, sim_a_mean, sim_b_mean
+    # 3. Concatenate all candidates
+    # The first B columns are comparisons against z_a (positive is on the diagonal)
+    # The next B columns are comparisons against z_b (all are negative, including diagonal)
+    logits = torch.cat([sim_a, sim_b], dim=1) / temperature  # [B, 2B]
+    
+    # 4. The correct target for eeg i is z_a i, which is at index i
+    labels = torch.arange(B, device=logits.device)
+    
+    loss = F.cross_entropy(logits, labels)
+    
+    # For tracking purposes, return the mean similarity of the true positive and the hard negative
+    with torch.no_grad():
+        sim_a_diag = torch.diag(sim_a).mean()
+        sim_b_diag = torch.diag(sim_b).mean()
+        
+    return loss, sim_a_diag, sim_b_diag
 
 if __name__ == "__main__":
     model = ContrastiveMatchNet("eegnet")
-    eeg = torch.randn(2, 8, 640)
-    audio_a = torch.randn(2, 28, 640)
-    audio_b = torch.randn(2, 28, 640)
+    eeg = torch.randn(16, 8, 320)
+    audio_a = torch.randn(16, 28, 320)
+    audio_b = torch.randn(16, 28, 320)
     
     z_eeg, z_a, z_b = model(eeg, audio_a, audio_b)
     print("Z_eeg:", z_eeg.shape)
-    loss, sa, sb = contrastive_loss(z_eeg, z_a, z_b)
-    print("Loss:", loss.item())
+    loss, sa, sb = infonce_loss(z_eeg, z_a, z_b)
+    print(f"InfoNCE Loss: {loss.item():.4f} | Sim A: {sa:.4f} | Sim B: {sb:.4f}")
