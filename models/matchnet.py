@@ -81,6 +81,21 @@ class ContrastiveMatchNet(nn.Module):
         
         return z_eeg, z_a, z_b
 
+def contrastive_loss(z_eeg, z_a, z_b, margin=0.1):
+    """
+    Computes a max-margin contrastive loss based on cosine similarity.
+    We assume z_a is the attended audio, and z_b is the unattended audio.
+    """
+    sim_a = F.cosine_similarity(z_eeg, z_a, dim=1)
+    sim_b = F.cosine_similarity(z_eeg, z_b, dim=1)
+    
+    sim_a_mean = sim_a.mean(dim=1)
+    sim_b_mean = sim_b.mean(dim=1)
+    
+    loss = F.relu(margin - (sim_a_mean - sim_b_mean)).mean()
+    
+    return loss, sim_a_mean, sim_b_mean
+
 def infonce_loss(z_eeg, z_a, z_b, temperature=0.1):
     """
     Computes an InfoNCE loss across the batch.
