@@ -14,7 +14,7 @@ from scipy.signal import butter, filtfilt
 REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT))
 
-from models.matchnet import ContrastiveMatchNet, infonce_loss
+from models.matchnet import ContrastiveMatchNet, contrastive_loss
 from baselines.ridge_aad import load_subject_examples, subject_files, iter_leave_one_subject_out
 
 FS = 64
@@ -103,13 +103,13 @@ def chunk_trial(x, ya, yb, window_sec, hop_sec):
         
     return chunks_x, chunks_ya, chunks_yb
 
-def evaluate_model(model, X, Y_A, Y_B, device, zero_eeg=False, shuffle_labels=False):
+def evaluate_model(model, X, Y_A, Y_B, device, window_sec=10, zero_eeg=False, shuffle_labels=False):
     """
-    Evaluates the model using 10-second non-overlapping windows.
+    Evaluates the model using non-overlapping windows.
     Decision rule: cosine_similarity(Z_eeg, Z_A) > cosine_similarity(Z_eeg, Z_B)
     """
     model.eval()
-    window_samples = DECISION_WINDOW_SEC * FS
+    window_samples = int(window_sec * FS)
     n_correct = 0.0
     n_total = 0
     
@@ -171,7 +171,7 @@ def train_matchnet_loso(eeg_model, channels, lowcut, highcut):
     subject_examples = {str(p): load_subject_examples(p) for p in all_paths}
     folds = list(iter_leave_one_subject_out(all_paths))
     
-    all_accs_norm = []
+    all_accs_norm_dict = {}
     all_accs_zero = []
     all_accs_shuf = []
     
@@ -250,14 +250,14 @@ def train_matchnet_loso(eeg_model, channels, lowcut, highcut):
                 
                 optimizer.zero_grad()
                 z_eeg, z_a, z_b = model(bx, bya, byb)
-                loss, sa, sb = infonce_loss(z_eeg, z_a, z_b, temperature=0.1)
+                loss, sa, sb = contrastive_loss(z_eeg, z_a, z_b, margin=0.1)
                 loss.backward()
                 optimizer.step()
                 train_loss += loss.item()
                 train_sa += sa.item()
                 train_sb += sb.item()
                 
-            nc_va, nt_va = evaluate_model(model, X_va_full, YA_va_full, YB_va_full, device)
+            nc_va, nt_va = evaluate_model(model, X_va_full, YA_va_full, YB_va_full, device, window_sec=10)
             val_acc = nc_va / max(nt_va, 1)
             
             if val_acc > best_val_acc:
@@ -278,33 +278,40 @@ def train_matchnet_loso(eeg_model, channels, lowcut, highcut):
                 
         model.load_state_dict(best_weights)
         
-        nc_norm, nt_norm = evaluate_model(model, X_te_full, YA_te_full, YB_te_full, device, zero_eeg=False, shuffle_labels=False)
-        acc_norm = nc_norm / max(nt_norm, 1)
-        
-        nc_zero, nt_zero = evaluate_model(model, X_te_full, YA_te_full, YB_te_full, device, zero_eeg=True, shuffle_labels=False)
+        print(f"  [Evaluation Ablation]")
+        for w_sec in [2, 5, 10, 20, 30]:
+            nc_norm, nt_norm = evaluate_model(model, X_te_full, YA_te_full, YB_te_full, device, window_sec=w_sec, zero_eeg=False, shuffle_labels=False)
+            acc_norm = nc_norm / max(nt_norm, 1)
+            print(f"    -> Window {w_sec:2d}s | Acc: {acc_norm*100:.2f}% | Decisions: {nt_norm}")
+            
+            if w_sec not in all_accs_norm_dict:
+                all_accs_norm_dict[w_sec] = []
+            all_accs_norm_dict[w_sec].append(acc_norm)
+            
+        # Still test Zero/Shuffled on 10s for baseline sanity
+        nc_zero, nt_zero = evaluate_model(model, X_te_full, YA_te_full, YB_te_full, device, window_sec=10, zero_eeg=True, shuffle_labels=False)
         acc_zero = nc_zero / max(nt_zero, 1)
-        
-        nc_shuf, nt_shuf = evaluate_model(model, X_te_full, YA_te_full, YB_te_full, device, zero_eeg=False, shuffle_labels=True)
+        nc_shuf, nt_shuf = evaluate_model(model, X_te_full, YA_te_full, YB_te_full, device, window_sec=10, zero_eeg=False, shuffle_labels=True)
         acc_shuf = nc_shuf / max(nt_shuf, 1)
         
-        print(f"  -> Accuracy Normal  : {acc_norm*100:.2f}%")
-        print(f"  -> Accuracy Zero EEG: {acc_zero*100:.2f}%")
-        print(f"  -> Accuracy Shuffled: {acc_shuf*100:.2f}%")
+        print(f"  -> Accuracy Zero EEG (10s): {acc_zero*100:.2f}%")
+        print(f"  -> Accuracy Shuffled (10s): {acc_shuf*100:.2f}%")
         
-        all_accs_norm.append(acc_norm)
         all_accs_zero.append(acc_zero)
         all_accs_shuf.append(acc_shuf)
         
-    final_acc_norm = np.mean(all_accs_norm)
     final_acc_zero = np.mean(all_accs_zero)
     final_acc_shuf = np.mean(all_accs_shuf)
     
     print("\n" + "="*50)
-    print(f"[MATCHNET ({eeg_model.upper()}) LOSO SCREENING RESULTS]")
+    print(f"[MATCHNET ({eeg_model.upper()}) FULL LOSO WINDOW ABLATION]")
     print("="*50)
-    print(f" Accuracy Normal  : {final_acc_norm*100:.2f}%")
-    print(f" Accuracy Zero EEG: {final_acc_zero*100:.2f}%")
-    print(f" Accuracy Shuffled: {final_acc_shuf*100:.2f}%")
+    for w_sec in sorted(all_accs_norm_dict.keys()):
+        final_acc = np.mean(all_accs_norm_dict[w_sec])
+        print(f" Window {w_sec:2d}s LOSO Accuracy : {final_acc*100:.2f}%")
+    print("-" * 50)
+    print(f" Baseline Zero EEG (10s) : {final_acc_zero*100:.2f}%")
+    print(f" Baseline Shuffled (10s) : {final_acc_shuf*100:.2f}%")
     print("="*50)
 
 if __name__ == "__main__":
