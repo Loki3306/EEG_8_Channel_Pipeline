@@ -3,6 +3,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from models.eegnet import EEGNet
 from models.atcnet import ATCNet
+from models.eegnet_tcn import EEGNetTCN
 
 class AudioEncoder(nn.Module):
     """
@@ -45,6 +46,10 @@ class ContrastiveMatchNet(nn.Module):
             # Override the final projection
             hidden_dim = 16 * 2 # F1 * D
             self.eeg_encoder.output_proj = nn.Conv1d(hidden_dim, latent_dim, kernel_size=1)
+        elif eeg_model_type.lower() == "eegnet_tcn":
+            self.eeg_encoder = EEGNetTCN(in_channels=eeg_channels)
+            # Override the final projection. EEGNetTCN output_proj takes F2 channels (default 16)
+            self.eeg_encoder.output_proj = nn.Conv1d(16, latent_dim, kernel_size=1)
         else:
             raise ValueError(f"Unknown eeg_model_type: {eeg_model_type}")
             
