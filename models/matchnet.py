@@ -94,7 +94,7 @@ def contrastive_loss(z_eeg, z_a, z_b, margin=0.1):
     
     loss = F.relu(margin - (sim_a_mean - sim_b_mean)).mean()
     
-    return loss, sim_a_mean, sim_b_mean
+    return loss, sim_a_mean.mean(), sim_b_mean.mean()
 
 def infonce_loss(z_eeg, z_a, z_b, temperature=0.1):
     """
