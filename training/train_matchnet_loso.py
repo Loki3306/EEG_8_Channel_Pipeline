@@ -103,7 +103,7 @@ def chunk_trial(x, ya, yb, window_sec, hop_sec):
         
     return chunks_x, chunks_ya, chunks_yb
 
-def evaluate_model(model, X, Y_A, Y_B, device):
+def evaluate_model(model, X, Y_A, Y_B, device, zero_eeg=False, shuffle_labels=False):
     """
     Evaluates the model using 10-second non-overlapping windows.
     Decision rule: cosine_similarity(Z_eeg, Z_A) > cosine_similarity(Z_eeg, Z_B)
@@ -113,16 +113,32 @@ def evaluate_model(model, X, Y_A, Y_B, device):
     n_correct = 0.0
     n_total = 0
     
+    np.random.seed(42)
+    shuffle_indices = np.random.permutation(len(X))
+    while np.any(shuffle_indices == np.arange(len(X))):
+        shuffle_indices = np.random.permutation(len(X))
+    
     with torch.no_grad():
         for i in range(len(X)):
             x_np = X[i]
-            ya_np = Y_A[i]
-            yb_np = Y_B[i]
+            
+            if shuffle_labels:
+                shuf_idx = shuffle_indices[i]
+                ya_np = Y_A[shuf_idx]
+                yb_np = Y_B[shuf_idx]
+            else:
+                ya_np = Y_A[i]
+                yb_np = Y_B[i]
+            
             
             start = 0
             while start + window_samples <= x_np.shape[1]:
                 end = start + window_samples
                 x_chunk = torch.FloatTensor(x_np[:, start:end]).unsqueeze(0).to(device)
+                
+                if zero_eeg:
+                    x_chunk = torch.zeros_like(x_chunk)
+                    
                 ya_chunk = torch.FloatTensor(ya_np[:, start:end]).unsqueeze(0).to(device)
                 yb_chunk = torch.FloatTensor(yb_np[:, start:end]).unsqueeze(0).to(device)
                 
@@ -155,7 +171,9 @@ def train_matchnet_loso(eeg_model, channels, lowcut, highcut):
     subject_examples = {str(p): load_subject_examples(p) for p in all_paths}
     folds = list(iter_leave_one_subject_out(all_paths))
     
-    all_accs = []
+    all_accs_norm = []
+    all_accs_zero = []
+    all_accs_shuf = []
     
     for held_out_path, train_paths in folds:
         held_out_key = str(held_out_path)
@@ -252,18 +270,33 @@ def train_matchnet_loso(eeg_model, channels, lowcut, highcut):
                 
         model.load_state_dict(best_weights)
         
-        nc_norm, nt_norm = evaluate_model(model, X_te_full, YA_te_full, YB_te_full, device)
-        acc = nc_norm / max(nt_norm, 1)
+        nc_norm, nt_norm = evaluate_model(model, X_te_full, YA_te_full, YB_te_full, device, zero_eeg=False, shuffle_labels=False)
+        acc_norm = nc_norm / max(nt_norm, 1)
         
-        print(f"  -> Accuracy : {acc*100:.2f}%")
-        all_accs.append(acc)
+        nc_zero, nt_zero = evaluate_model(model, X_te_full, YA_te_full, YB_te_full, device, zero_eeg=True, shuffle_labels=False)
+        acc_zero = nc_zero / max(nt_zero, 1)
         
-    final_acc = np.mean(all_accs)
+        nc_shuf, nt_shuf = evaluate_model(model, X_te_full, YA_te_full, YB_te_full, device, zero_eeg=False, shuffle_labels=True)
+        acc_shuf = nc_shuf / max(nt_shuf, 1)
+        
+        print(f"  -> Accuracy Normal  : {acc_norm*100:.2f}%")
+        print(f"  -> Accuracy Zero EEG: {acc_zero*100:.2f}%")
+        print(f"  -> Accuracy Shuffled: {acc_shuf*100:.2f}%")
+        
+        all_accs_norm.append(acc_norm)
+        all_accs_zero.append(acc_zero)
+        all_accs_shuf.append(acc_shuf)
+        
+    final_acc_norm = np.mean(all_accs_norm)
+    final_acc_zero = np.mean(all_accs_zero)
+    final_acc_shuf = np.mean(all_accs_shuf)
     
     print("\n" + "="*50)
     print(f"[MATCHNET ({eeg_model.upper()}) LOSO SCREENING RESULTS]")
     print("="*50)
-    print(f" Accuracy  : {final_acc*100:.2f}%")
+    print(f" Accuracy Normal  : {final_acc_norm*100:.2f}%")
+    print(f" Accuracy Zero EEG: {final_acc_zero*100:.2f}%")
+    print(f" Accuracy Shuffled: {final_acc_shuf*100:.2f}%")
     print("="*50)
 
 if __name__ == "__main__":

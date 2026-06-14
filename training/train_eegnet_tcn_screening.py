@@ -167,7 +167,7 @@ def evaluate_model(model, X, Y_A, Y_B, device, zero_eeg=False, shuffle_labels=Fa
             
     return n_correct, n_total
 
-def train_eegnet_tcn_screening(channels, lowcut, highcut, sanity_zero_eeg=False, sanity_shuffle_labels=False):
+def train_eegnet_tcn_screening(channels, lowcut, highcut):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Using device: {device} | EEGNet+TCN | Channels: {channels} | Band: {lowcut}-{highcut} Hz\n")
     
@@ -182,7 +182,9 @@ def train_eegnet_tcn_screening(channels, lowcut, highcut, sanity_zero_eeg=False,
     subject_examples = {str(p): load_subject_examples(p) for p in paths}
     folds = list(iter_leave_one_subject_out(paths))
     
-    all_accs = []
+    all_accs_norm = []
+    all_accs_zero = []
+    all_accs_shuf = []
     
     for held_out_path, train_paths in folds:
         held_out_key = str(held_out_path)
@@ -251,24 +253,33 @@ def train_eegnet_tcn_screening(channels, lowcut, highcut, sanity_zero_eeg=False,
                 
         model.load_state_dict(best_weights)
         
-        nc_norm, nt_norm = evaluate_model(model, X_te, YA_te, YB_te, device, 
-                                          zero_eeg=sanity_zero_eeg, 
-                                          shuffle_labels=sanity_shuffle_labels)
-        acc = nc_norm / max(nt_norm, 1)
+        nc_norm, nt_norm = evaluate_model(model, X_te, YA_te, YB_te, device, zero_eeg=False, shuffle_labels=False)
+        acc_norm = nc_norm / max(nt_norm, 1)
         
-        print(f"  -> Accuracy : {acc*100:.2f}%")
-        all_accs.append(acc)
+        nc_zero, nt_zero = evaluate_model(model, X_te, YA_te, YB_te, device, zero_eeg=True, shuffle_labels=False)
+        acc_zero = nc_zero / max(nt_zero, 1)
         
-    final_acc = np.mean(all_accs)
+        nc_shuf, nt_shuf = evaluate_model(model, X_te, YA_te, YB_te, device, zero_eeg=False, shuffle_labels=True)
+        acc_shuf = nc_shuf / max(nt_shuf, 1)
+        
+        print(f"  -> Accuracy Normal  : {acc_norm*100:.2f}%")
+        print(f"  -> Accuracy Zero EEG: {acc_zero*100:.2f}%")
+        print(f"  -> Accuracy Shuffled: {acc_shuf*100:.2f}%")
+        
+        all_accs_norm.append(acc_norm)
+        all_accs_zero.append(acc_zero)
+        all_accs_shuf.append(acc_shuf)
+        
+    final_acc_norm = np.mean(all_accs_norm)
+    final_acc_zero = np.mean(all_accs_zero)
+    final_acc_shuf = np.mean(all_accs_shuf)
     
     print("\n" + "="*50)
     print(f"[EEGNET+TCN SCREENING RESULTS]")
-    if sanity_zero_eeg:
-        print("!!! ZERO EEG SANITY CHECK ACTIVE !!!")
-    if sanity_shuffle_labels:
-        print("!!! SHUFFLED LABELS SANITY CHECK ACTIVE !!!")
     print("="*50)
-    print(f" Accuracy  : {final_acc*100:.2f}%")
+    print(f" Accuracy Normal  : {final_acc_norm*100:.2f}%")
+    print(f" Accuracy Zero EEG: {final_acc_zero*100:.2f}%")
+    print(f" Accuracy Shuffled: {final_acc_shuf*100:.2f}%")
     print("="*50)
 
 def main():
@@ -277,11 +288,9 @@ def main():
                         help="List of channel indices to use (default: Top 8)")
     parser.add_argument("--lowcut", type=float, default=1.0, help="Lowcut frequency")
     parser.add_argument("--highcut", type=float, default=6.0, help="Highcut frequency")
-    parser.add_argument("--sanity_zero_eeg", action="store_true", help="Zero out EEG at inference")
-    parser.add_argument("--sanity_shuffle_labels", action="store_true", help="Shuffle labels at inference")
     args = parser.parse_args()
     
-    train_eegnet_tcn_screening(args.channels, args.lowcut, args.highcut, args.sanity_zero_eeg, args.sanity_shuffle_labels)
+    train_eegnet_tcn_screening(args.channels, args.lowcut, args.highcut)
 
 if __name__ == "__main__":
     main()
