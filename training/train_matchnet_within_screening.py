@@ -17,7 +17,7 @@ sys.path.insert(0, str(REPO_ROOT))
 from models.matchnet import ContrastiveMatchNet, contrastive_loss
 from baselines.ridge_aad import load_subject_examples, subject_files, iter_leave_one_subject_out
 
-SCREENING_SUBJECTS = ["S3_data_preproc", "S13_data_preproc", "S15_data_preproc", "S16_data_preproc"]
+SCREENING_SUBJECTS = ["S7_data_preproc", "S10_data_preproc", "S11_data_preproc", "S15_data_preproc"]
 
 FS = 64
 DECISION_WINDOW_SEC = 10

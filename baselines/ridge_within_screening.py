@@ -26,7 +26,7 @@ def evaluate_ridge_fold(weights, test_exs, mapping):
     
     for ex in test_exs:
         # Predict envelope from EEG
-        pred_env = predict_envelope(ex.eeg.T, weights, lags=16, fs=FS)
+        pred_env = predict_envelope(ex.eeg, weights, lags=16, fs=FS)
         
         # Get ground truth audio envelopes
         env_a = speech_envelope(ex.wav_a, fs=FS, normalize=True)
