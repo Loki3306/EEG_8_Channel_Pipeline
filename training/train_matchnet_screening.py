@@ -14,10 +14,10 @@ from scipy.signal import butter, filtfilt
 REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT))
 
-from models.matchnet import ContrastiveMatchNet, infonce_loss
+from models.matchnet import ContrastiveMatchNet, contrastive_loss
 from baselines.ridge_aad import load_subject_examples, subject_files, iter_leave_one_subject_out
 
-SCREENING_SUBJECTS = ["S3_data_preproc", "S13_data_preproc", "S15_data_preproc", "S16_data_preproc"]
+SCREENING_SUBJECTS = ["S7_data_preproc", "S10_data_preproc", "S11_data_preproc", "S15_data_preproc"]
 
 FS = 64
 DECISION_WINDOW_SEC = 10
@@ -253,7 +253,7 @@ def train_matchnet_loso(eeg_model, channels, lowcut, highcut):
                 
                 optimizer.zero_grad()
                 z_eeg, z_a, z_b = model(bx, bya, byb)
-                loss, sa, sb = infonce_loss(z_eeg, z_a, z_b, temperature=0.1)
+                loss, sa, sb = contrastive_loss(z_eeg, z_a, z_b, margin=0.1)
                 loss.backward()
                 optimizer.step()
                 train_loss += loss.item()
