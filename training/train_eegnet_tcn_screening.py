@@ -57,10 +57,7 @@ def normalize_array(arr):
     return arr / scale
 
 def get_mapping_data():
-    map_file = REPO_ROOT / "data" / "audio_mapping.json"
-    with open(map_file, 'r') as f:
-        mapping = json.load(f)
-    return mapping
+    return None
 
 def prepare_dataset(examples, channels, lowcut, highcut, subject_id, mapping):
     X = []
@@ -75,14 +72,13 @@ def prepare_dataset(examples, channels, lowcut, highcut, subject_id, mapping):
         eeg = butter_bandpass_filter(eeg, lowcut, highcut, FS, axis=1)
         x_norm = normalize_array(eeg.T).T
         
-        trial_key = f"trial_{i}"
+        env_a_full = ex.env_a.T
+        env_b_full = ex.env_b.T
         
-        if sub_key in mapping and trial_key in mapping[sub_key]:
-            env_a_full = np.array(mapping[sub_key][trial_key]["wavA"]["envelope"]).reshape(1, -1)
-            env_b_full = np.array(mapping[sub_key][trial_key]["wavB"]["envelope"]).reshape(1, -1)
-        else:
-            print(f"Warning: Missing mapping for {sub_key} {trial_key}")
-            continue
+        if len(env_a_full.shape) == 1:
+            env_a_full = env_a_full.reshape(1, -1)
+        if len(env_b_full.shape) == 1:
+            env_b_full = env_b_full.reshape(1, -1)
             
         target_env = env_a_full
         
