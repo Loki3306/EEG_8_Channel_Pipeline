@@ -80,8 +80,8 @@ def prepare_dataset(examples, channels, lowcut, highcut, subject_id, mapping, en
         env_a = env_a_full[:, :min_len]
         env_b = env_b_full[:, :min_len]
         
-        env_a = normalize_array_global(env_a.T).T
-        env_b = normalize_array_global(env_b.T).T
+        env_a = normalize_array(env_a.T).T
+        env_b = normalize_array(env_b.T).T
         
         X.append(x_norm)
         Y_A.append(env_a)
