@@ -86,6 +86,7 @@ def run_audio_audit():
         
         X = []
         y = []
+        groups = []
         
         for i, ex in enumerate(examples):
             trial_key = f"trial_{i}"
@@ -130,6 +131,7 @@ def run_audio_audit():
                 else:
                     y.append(0)
                     
+                groups.append(i)
                 start += win_samples
                 
         if len(X) == 0:
@@ -138,14 +140,18 @@ def run_audio_audit():
             
         X = np.array(X)
         y = np.array(y)
+        groups = np.array(groups)
         
         scaler = StandardScaler()
         X_scaled = scaler.fit_transform(X)
         
-        clf = LogisticRegression(max_iter=1000)
-        scores = cross_val_score(clf, X_scaled, y, cv=5)
+        from sklearn.model_selection import GroupKFold
+        gkf = GroupKFold(n_splits=5)
         
-        print(f"{sub} Audio-Only Accuracy: {scores.mean()*100:.2f}% (Std: {scores.std()*100:.2f}%)")
+        clf = LogisticRegression(max_iter=1000)
+        scores = cross_val_score(clf, X_scaled, y, groups=groups, cv=gkf)
+        
+        print(f"{sub} Audio-Only Accuracy (GroupKFold): {scores.mean()*100:.2f}% (Std: {scores.std()*100:.2f}%)")
 
 if __name__ == "__main__":
     run_audio_audit()
