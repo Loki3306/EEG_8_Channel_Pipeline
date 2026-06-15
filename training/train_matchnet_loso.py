@@ -1,5 +1,6 @@
 import argparse
 import sys
+import os
 import json
 import pickle
 import torch
@@ -12,6 +13,7 @@ import gc
 from pathlib import Path
 from copy import deepcopy
 from scipy.signal import butter, filtfilt
+from torch.utils.data import TensorDataset, DataLoader
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT))
@@ -171,7 +173,8 @@ def evaluate_model(model, X, Y_A, Y_B, device, window_sec=10, zero_eeg=False, sh
                 
     return n_correct, n_total
 
-def train_matchnet_loso(eeg_model, channels, lowcut, highcut):
+def train_matchnet_loso(eeg_model, channels, lowcut, highcut, batch_size=128, num_workers=2):
+    torch.backends.cudnn.benchmark = True
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Using device: {device} | MatchNet ({eeg_model}) | Channels: {channels}")
     
@@ -236,17 +239,32 @@ def train_matchnet_loso(eeg_model, channels, lowcut, highcut):
             cx, cya, cyb = chunk_trial(X_tr_full[i], YA_tr_full[i], YB_tr_full[i], TRAIN_WINDOW_SEC, TRAIN_HOP_SEC)
             X_tr.extend(cx); YA_tr.extend(cya); YB_tr.extend(cyb)
             
+        print("Converting to PyTorch Dataset...")
+        X_tr_t = torch.FloatTensor(np.stack(X_tr))
+        YA_tr_t = torch.FloatTensor(np.stack(YA_tr))
+        YB_tr_t = torch.FloatTensor(np.stack(YB_tr))
+        
+        train_dataset = TensorDataset(X_tr_t, YA_tr_t, YB_tr_t)
+        train_loader = DataLoader(
+            train_dataset, 
+            batch_size=batch_size, 
+            shuffle=True, 
+            num_workers=num_workers, 
+            pin_memory=True, 
+            persistent_workers=(num_workers > 0)
+        )
+            
         # Model
         model = ContrastiveMatchNet(eeg_model_type=eeg_model, eeg_channels=len(channels), audio_channels=NUM_BANDS, latent_dim=64).to(device)
         optimizer = optim.Adam(model.parameters(), lr=1e-3, weight_decay=1e-4)
+        scaler = torch.cuda.amp.GradScaler()
         
         best_val_acc = 0.0
         best_weights = deepcopy(model.state_dict())
         patience = 10
         epochs_no_improve = 0
-        batch_size = 16
         
-        print(f"Training on {len(X_tr)} chunks ({TRAIN_WINDOW_SEC}s)...")
+        print(f"Training on {len(X_tr)} chunks ({TRAIN_WINDOW_SEC}s) | Batch Size: {batch_size} | Workers: {num_workers}...")
         
         for epoch in range(100):
             model.train()
@@ -254,20 +272,20 @@ def train_matchnet_loso(eeg_model, channels, lowcut, highcut):
             train_sa = 0.0
             train_sb = 0.0
             
-            # Shuffle chunks
-            perm = np.random.permutation(len(X_tr))
-            
-            for i in range(0, len(X_tr), batch_size):
-                batch_idx = perm[i:i+batch_size]
-                bx = torch.FloatTensor(np.stack([X_tr[j] for j in batch_idx])).to(device)
-                bya = torch.FloatTensor(np.stack([YA_tr[j] for j in batch_idx])).to(device)
-                byb = torch.FloatTensor(np.stack([YB_tr[j] for j in batch_idx])).to(device)
+            for bx, bya, byb in train_loader:
+                bx = bx.to(device, non_blocking=True)
+                bya = bya.to(device, non_blocking=True)
+                byb = byb.to(device, non_blocking=True)
                 
                 optimizer.zero_grad()
-                z_eeg, z_a, z_b = model(bx, bya, byb)
-                loss, sa, sb = contrastive_loss(z_eeg, z_a, z_b, margin=0.1)
-                loss.backward()
-                optimizer.step()
+                with torch.cuda.amp.autocast():
+                    z_eeg, z_a, z_b = model(bx, bya, byb)
+                    loss, sa, sb = contrastive_loss(z_eeg, z_a, z_b, margin=0.1)
+                
+                scaler.scale(loss).backward()
+                scaler.step(optimizer)
+                scaler.update()
+                
                 train_loss += loss.item()
                 train_sa += sa.item()
                 train_sb += sb.item()
@@ -282,16 +300,24 @@ def train_matchnet_loso(eeg_model, channels, lowcut, highcut):
             else:
                 epochs_no_improve += 1
                 
-            avg_loss = train_loss / max(len(X_tr) // batch_size, 1)
-            avg_sa = train_sa / max(len(X_tr) // batch_size, 1)
-            avg_sb = train_sb / max(len(X_tr) // batch_size, 1)
+            num_batches = max(len(train_loader), 1)
+            avg_loss = train_loss / num_batches
+            avg_sa = train_sa / num_batches
+            avg_sb = train_sb / num_batches
             
             print(f"  Epoch {epoch+1:02d}/100 | Loss: {avg_loss:.4f} (sA: {avg_sa:.3f}, sB: {avg_sb:.3f}) | Val Acc: {val_acc*100:.2f}% | Patience: {epochs_no_improve}/10")
                 
             if epochs_no_improve >= patience:
                 break
                 
+        # Checkpointing
+        os.makedirs("checkpoints", exist_ok=True)
+        final_path = f"checkpoints/matchnet_fold_{held_out_path.stem}_final.pth"
+        torch.save(model.state_dict(), final_path)
+        
         model.load_state_dict(best_weights)
+        best_path = f"checkpoints/matchnet_fold_{held_out_path.stem}_best.pth"
+        torch.save(best_weights, best_path)
         
         print(f"  [Evaluation Ablation - Pearson Correlation]")
         for w_sec in [2, 5, 10, 20, 30]:
@@ -322,6 +348,21 @@ def train_matchnet_loso(eeg_model, channels, lowcut, highcut):
         nc_zero_cos, nt_zero_cos = evaluate_model(model, X_te_full, YA_te_full, YB_te_full, device, window_sec=10, zero_eeg=True, shuffle_labels=False, metric="cosine")
         print(f"  -> Zero EEG (Cosine, 10s): {nc_zero_cos / max(nt_zero_cos, 1) * 100:.2f}%")
         
+        fold_metrics = {
+            "held_out": held_out_path.stem,
+            "pearson": {
+                "normal": {w: all_accs_norm_dict[w][-1] for w in all_accs_norm_dict},
+                "zero": {w: all_accs_zero_dict[w][-1] for w in all_accs_zero_dict},
+                "shuf": {w: all_accs_shuf_dict[w][-1] for w in all_accs_shuf_dict}
+            },
+            "cosine_10s": {
+                "normal": nc_cos / max(nt_cos, 1),
+                "zero": nc_zero_cos / max(nt_zero_cos, 1)
+            }
+        }
+        with open(f"checkpoints/matchnet_fold_{held_out_path.stem}_metrics.json", "w") as f:
+            json.dump(fold_metrics, f, indent=4)
+        
         # Aggressive memory cleanup to prevent swap death on Kaggle
         del X_tr, YA_tr, YB_tr, X_tr_full, YA_tr_full, YB_tr_full, X_va_full, YA_va_full, YB_va_full, X_te_full, YA_te_full, YB_te_full
         gc.collect()
@@ -344,6 +385,8 @@ if __name__ == "__main__":
     parser.add_argument("--channels", type=int, nargs='+', default=[13, 46, 43, 23, 50, 0, 52, 14])
     parser.add_argument("--lowcut", type=float, default=1.0)
     parser.add_argument("--highcut", type=float, default=6.0)
+    parser.add_argument("--batch_size", type=int, default=128, help="Training batch size")
+    parser.add_argument("--num_workers", type=int, default=2, help="Dataloader num_workers")
     args = parser.parse_args()
     
-    train_matchnet_loso(args.model, args.channels, args.lowcut, args.highcut)
+    train_matchnet_loso(args.model, args.channels, args.lowcut, args.highcut, args.batch_size, args.num_workers)
