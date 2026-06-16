@@ -34,8 +34,9 @@ class Timer:
 
 try:
     import umap
+    UMAP_AVAILABLE = True
 except ImportError:
-    pass
+    UMAP_AVAILABLE = False
 
 import matplotlib.pyplot as plt
 import seaborn as sns
@@ -229,7 +230,7 @@ def main():
                     
                     for ch in range(n_channels):
                         bp[f"ch_{ch}_{band_name}_power"] = band_psd[ch]
-                bp[f"avg_{band_name}_power"] = np.mean(band_psd)
+                    bp[f"avg_{band_name}_power"] = np.mean(band_psd)
                 
                 bandpowers.append(bp)
             except Exception as e:
@@ -263,7 +264,7 @@ def main():
             cf = {
                 "subject": s1,
                 "trace": np.trace(c1),
-                "determinant": np.linalg.det(c1),
+                "log_determinant": np.linalg.slogdet(c1)[1],
                 "condition_number": np.linalg.cond(c1)
             }
             cov_features.append(cf)
@@ -321,20 +322,19 @@ def main():
         except Exception as e:
             print(f"  [FATAL ERROR] t-SNE failed: {e}")
         
-        try:
-            reducer = umap.UMAP(n_neighbors=config['umap'].get('n_neighbors', 5), random_state=42)
-            X_umap = reducer.fit_transform(X)
-            plt.figure()
-            plt.scatter(X_umap[:, 0], X_umap[:, 1])
-            for i, txt in enumerate(subs):
-                plt.annotate(txt, (X_umap[i, 0], X_umap[i, 1]))
-            plt.title(f"UMAP of Subject Covariances (Status: Exploratory)\nCommit: {get_git_commit()}")
-            plt.savefig(fig_dir / "umap_subjects.png")
-            plt.close()
-        except NameError:
-            pass
-        except Exception as e:
-            print(f"  [FATAL ERROR] UMAP failed: {e}")
+        if UMAP_AVAILABLE:
+            try:
+                reducer = umap.UMAP(n_neighbors=config['umap'].get('n_neighbors', 5), random_state=42)
+                X_umap = reducer.fit_transform(X)
+                plt.figure()
+                plt.scatter(X_umap[:, 0], X_umap[:, 1])
+                for i, txt in enumerate(subs):
+                    plt.annotate(txt, (X_umap[i, 0], X_umap[i, 1]))
+                plt.title(f"UMAP of Subject Covariances (Status: Exploratory)\nCommit: {get_git_commit()}")
+                plt.savefig(fig_dir / "umap_subjects.png")
+                plt.close()
+            except Exception as e:
+                print(f"  [FATAL ERROR] UMAP failed: {e}")
             
     # 5. Feature Engineering and Correlation Analysis
     with Timer("Stage 4: Feature Correlation"):
@@ -351,6 +351,8 @@ def main():
         
         correlations = []
         for f in feature_cols:
+            if np.std(merged[f]) < 1e-12:
+                continue
             r, p_val = pearsonr(merged[f], merged['accuracy'])
             correlations.append({
                 "feature": f,
@@ -381,6 +383,8 @@ def main():
             bad_vals = bad_subs[f].values
             
             if len(good_vals) < 2 or len(bad_vals) < 2:
+                continue
+            if len(np.unique(good_vals)) <= 1 and len(np.unique(bad_vals)) <= 1:
                 continue
                 
             stat, p_val = mannwhitneyu(good_vals, bad_vals, alternative='two-sided')
