@@ -173,7 +173,7 @@ def evaluate_model(model, X, Y_A, Y_B, device, window_sec=10, zero_eeg=False, sh
                 
     return n_correct, n_total
 
-def train_matchnet_loso(eeg_model, channels, lowcut, highcut, batch_size=128, num_workers=2):
+def train_matchnet_loso(eeg_model, channels, lowcut, highcut, batch_size=128, num_workers=2, margin=0.1, dropout=0.1, checkpoint_path=""):
     torch.backends.cudnn.benchmark = True
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Using device: {device} | MatchNet ({eeg_model}) | Channels: {channels}")
@@ -256,8 +256,15 @@ def train_matchnet_loso(eeg_model, channels, lowcut, highcut, batch_size=128, nu
             
         # Model
         model = ContrastiveMatchNet(eeg_model_type=eeg_model, eeg_channels=len(channels), audio_channels=NUM_BANDS, latent_dim=64).to(device)
+        
+        if checkpoint_path and os.path.exists(checkpoint_path):
+            print(f"Loading pre-trained checkpoint for fine-tuning: {checkpoint_path}")
+            model.load_state_dict(torch.load(checkpoint_path, map_location=device))
+            
         optimizer = optim.Adam(model.parameters(), lr=1e-3, weight_decay=1e-4)
         scaler = torch.cuda.amp.GradScaler()
+        
+        input_dropout = nn.Dropout(p=dropout) if dropout > 0 else nn.Identity()
         
         best_val_acc = 0.0
         best_weights = deepcopy(model.state_dict())
@@ -277,10 +284,14 @@ def train_matchnet_loso(eeg_model, channels, lowcut, highcut, batch_size=128, nu
                 bya = bya.to(device, non_blocking=True)
                 byb = byb.to(device, non_blocking=True)
                 
+                bx = input_dropout(bx)
+                bya = input_dropout(bya)
+                byb = input_dropout(byb)
+                
                 optimizer.zero_grad()
                 with torch.cuda.amp.autocast():
                     z_eeg, z_a, z_b = model(bx, bya, byb)
-                    loss, sa, sb = contrastive_loss(z_eeg, z_a, z_b, margin=0.1)
+                    loss, sa, sb = contrastive_loss(z_eeg, z_a, z_b, margin=margin)
                 
                 scaler.scale(loss).backward()
                 scaler.step(optimizer)
@@ -387,6 +398,9 @@ if __name__ == "__main__":
     parser.add_argument("--highcut", type=float, default=6.0)
     parser.add_argument("--batch_size", type=int, default=128, help="Training batch size")
     parser.add_argument("--num_workers", type=int, default=2, help="Dataloader num_workers")
+    parser.add_argument("--margin", type=float, default=0.1, help="Contrastive loss margin")
+    parser.add_argument("--dropout", type=float, default=0.1, help="Input dropout probability")
+    parser.add_argument("--checkpoint", type=str, default="", help="Path to pre-trained model for curriculum learning")
     args = parser.parse_args()
     
-    train_matchnet_loso(args.model, args.channels, args.lowcut, args.highcut, args.batch_size, args.num_workers)
+    train_matchnet_loso(args.model, args.channels, args.lowcut, args.highcut, args.batch_size, args.num_workers, args.margin, args.dropout, args.checkpoint)
