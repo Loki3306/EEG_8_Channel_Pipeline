@@ -12,8 +12,8 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT))
 
-from preprocessing.dataset import get_mapping_data, subject_files, load_subject_examples
-from training.train_matchnet_loso import prepare_dataset, chunk_trial, evaluate_model
+from baselines.ridge_aad import load_subject_examples, subject_files
+from training.train_matchnet_loso import prepare_dataset, chunk_trial, evaluate_model, get_mapping_data
 from models.matchnet import ContrastiveMatchNet
 
 FS = 64
