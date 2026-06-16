@@ -18,11 +18,11 @@ from statsmodels.stats.multitest import multipletests
 import time
 import traceback
 
-# --- DEBUG & SAFETY CONTROLS ---
-DEBUG_FAST = True
-RUN_UMAP = False if DEBUG_FAST else True
-RUN_ISOLATION_FOREST = False if DEBUG_FAST else True
-# -------------------------------
+# --- EXPLORATORY MODULES ---
+RUN_TSNE = False
+RUN_UMAP = False
+RUN_ISOLATION_FOREST = False
+# ---------------------------
 
 class Timer:
     def __init__(self, name):
@@ -323,125 +323,32 @@ def main():
         cf_df = pd.DataFrame(cov_features)
         add_csv_metadata(cf_df).to_csv(stat_dir / "subject_covariance_features.csv", index=False)
         
-    # 4. Dimensionality Reduction
-    with Timer("Stage 3: Dimensionality Reduction"):
-        X = np.array(cov_flat)
+    # 4. Domain Shift Metrics
+    with Timer("Stage 3: Domain Shift Metrics"):
+        cov_list = list(covariances.values())
+        population_centroid = np.mean(cov_list, axis=0)
         
-        try:
-            with Timer("StandardScaler"):
-                X_scaled = StandardScaler().fit_transform(X)
+        domain_metrics_list = []
+        for i, c in enumerate(cov_list):
+            trace = np.trace(c)
+            _, log_det = np.linalg.slogdet(c)
+            cond = np.linalg.cond(c)
+            frob_dist = frobenius_distance(c, population_centroid)
+            riem_dist = riemannian_distance(c, population_centroid)
+            cos_sim = cosine_similarity_cov(c, population_centroid)
             
-            # True Population Centroid Distance
-            with Timer("Centroid Distances"):
-                cov_list = list(covariances.values())
-                population_centroid = np.mean(cov_list, axis=0)
-                
-                centroid_riem = [riemannian_distance(c, population_centroid) for c in cov_list]
-                centroid_frob = [frobenius_distance(c, population_centroid) for c in cov_list]
-                centroid_cos = [cosine_similarity_cov(c, population_centroid) for c in cov_list]
+            domain_metrics_list.append({
+                'subject': subs[i],
+                'cov_trace': trace,
+                'cov_log_det': log_det,
+                'cov_condition_number': cond,
+                'distance_to_centroid_frobenius': frob_dist,
+                'distance_to_centroid_riemannian': riem_dist,
+                'similarity_to_centroid_cosine': cos_sim
+            })
             
-            # Covariance Estimator / Mahalanobis Distance
-            with Timer("MinCovDet (Mahalanobis)"):
-                n_samples, n_features = X_scaled.shape
-                print(f"  [Diagnostic] X_scaled shape: {X_scaled.shape}")
-                print(f"  [Diagnostic] Matrix rank: {np.linalg.matrix_rank(X_scaled)}")
-                print(f"  [Diagnostic] Condition number: {np.linalg.cond(X_scaled):.2e}")
-                
-                # Dimensionality safeguard: If p > n, MinCovDet will hang searching for full rank
-                if n_features > n_samples:
-                    print(f"  [Warning] n_features ({n_features}) > n_samples ({n_samples}). Applying PCA before covariance estimation.")
-                    n_components = min(10, n_samples - 2)
-                    X_cov_input = PCA(n_components=n_components, random_state=42).fit_transform(X_scaled)
-                else:
-                    X_cov_input = X_scaled
-                
-                if DEBUG_FAST:
-                    print("  [DEBUG_FAST] Using EmpiricalCovariance instead of MinCovDet")
-                    cov_estimator = EmpiricalCovariance().fit(X_cov_input)
-                else:
-                    cov_estimator = MinCovDet(random_state=42).fit(X_cov_input)
-                mahalanobis_dist = cov_estimator.mahalanobis(X_cov_input)
-            
-            # Isolation Forest
-            if RUN_ISOLATION_FOREST:
-                with Timer("IsolationForest"):
-                    iso_forest = IsolationForest(random_state=42).fit(X_scaled)
-                    iso_scores = iso_forest.decision_function(X_scaled)
-            else:
-                print("  [DEBUG_FAST] Skipping IsolationForest")
-                iso_scores = np.zeros(n_samples)
-            
-            # Add to covariance features
-            for i, cf in enumerate(cov_features):
-                cf['mean_riemannian_dist'] = centroid_riem[i]
-                cf['mean_frobenius_dist'] = centroid_frob[i]
-                cf['mean_cosine_sim'] = centroid_cos[i]
-                cf['mahalanobis_dist'] = mahalanobis_dist[i]
-                cf['isolation_forest_score'] = iso_scores[i]
-                
-            # Re-save cf_df with new metrics
-            cf_df = pd.DataFrame(cov_features)
-            add_csv_metadata(cf_df).to_csv(stat_dir / "subject_covariance_features.csv", index=False)
-        except Exception as e:
-            print(f"  [FATAL ERROR] Outlier detection failed: {e}")
-            X_scaled = X  # Fallback
-            
-        # PCA
-        try:
-            with Timer("PCA"):
-                pca = PCA(n_components=2, random_state=42)
-                X_pca = pca.fit_transform(X_scaled)
-                explained_var = pca.explained_variance_ratio_
-                
-                # Print Top Loadings
-                pc1_loadings = pca.components_[0]
-                top_idx = np.argsort(np.abs(pc1_loadings))[::-1][:5]
-                print(f"  [PCA Diagnostics] Explained Variance: PC1={explained_var[0]:.2f}, PC2={explained_var[1]:.2f}")
-                print(f"  [PCA Diagnostics] Top PC1 Covariance Feature Indices: {top_idx}")
-                
-                plt.figure()
-                plt.scatter(X_pca[:, 0], X_pca[:, 1])
-                for i, txt in enumerate(subs):
-                    plt.annotate(txt, (X_pca[i, 0], X_pca[i, 1]))
-                plt.title(f"PCA of Subject Covariances (Status: Confirmed)\nExplained Var: {explained_var[0]:.2f}, {explained_var[1]:.2f}\nCommit: {get_git_commit()}")
-                plt.savefig(fig_dir / "pca_subjects.png")
-                plt.close()
-        except Exception as e:
-            print(f"  [FATAL ERROR] PCA failed: {e}")
-        
-        # t-SNE (Exploratory)
-        try:
-            with Timer("t-SNE"):
-                max_perp = max(1, min(config['tsne'].get('perplexity', 5), len(subs) - 1))
-                n_iter = 250 if DEBUG_FAST else 1000
-                tsne = TSNE(n_components=2, perplexity=max_perp, random_state=42, n_iter=n_iter)
-                X_tsne = tsne.fit_transform(X_scaled)
-                plt.figure()
-                plt.scatter(X_tsne[:, 0], X_tsne[:, 1])
-                for i, txt in enumerate(subs):
-                    plt.annotate(txt, (X_tsne[i, 0], X_tsne[i, 1]))
-                plt.title(f"t-SNE of Subject Covariances (Status: Exploratory)\nCommit: {get_git_commit()}")
-                plt.savefig(fig_dir / "tsne_subjects.png")
-                plt.close()
-        except Exception as e:
-            print(f"  [FATAL ERROR] t-SNE failed: {e}")
-        
-        if RUN_UMAP and UMAP_AVAILABLE:
-            try:
-                with Timer("UMAP"):
-                    reducer = umap.UMAP(n_neighbors=config['umap'].get('n_neighbors', 5), random_state=42)
-                    X_umap = reducer.fit_transform(X_scaled)
-                    plt.figure()
-                    plt.scatter(X_umap[:, 0], X_umap[:, 1])
-                    for i, txt in enumerate(subs):
-                        plt.annotate(txt, (X_umap[i, 0], X_umap[i, 1]))
-                    plt.title(f"UMAP of Subject Covariances (Status: Exploratory)\nCommit: {get_git_commit()}")
-                    plt.savefig(fig_dir / "umap_subjects.png")
-                    plt.close()
-            except Exception as e:
-                print(f"  [FATAL ERROR] UMAP failed: {e}")
-        elif not RUN_UMAP:
-            print("  [DEBUG_FAST] Skipping UMAP")
+        domain_df = pd.DataFrame(domain_metrics_list)
+        add_csv_metadata(domain_df).to_csv(stat_dir / "subject_domain_shift_metrics.csv", index=False)
             
     # 5. Feature Engineering and Correlation Analysis
     with Timer("Stage 4: Feature Correlation"):
@@ -452,30 +359,35 @@ def main():
         merged = pd.merge(_strip_meta(loso_df), _strip_meta(bp_df), on="subject")
         merged = pd.merge(merged, _strip_meta(ss_df), on="subject")
         merged = pd.merge(merged, _strip_meta(cf_df), on="subject")
+        merged = pd.merge(merged, _strip_meta(domain_df), on="subject")
         
         numeric_cols = merged.select_dtypes(include=[np.number])
         # Exclude 'accuracy', 'rank', and all channel-specific features ('ch_X_...')
         feature_cols = [c for c in numeric_cols.columns if c not in ['accuracy', 'rank'] and not c.startswith('ch_')]
         
         correlations = []
+        from scipy.stats import spearmanr
         for f in feature_cols:
             if np.std(merged[f]) < 1e-12:
                 continue
             r, p_val = pearsonr(merged[f], merged['accuracy'])
+            rho, p_spearman = spearmanr(merged[f], merged['accuracy'])
             correlations.append({
                 "feature": f,
                 "pearson_r": r,
-                "p_value": p_val,
+                "pearson_p": p_val,
+                "spearman_rho": rho,
+                "spearman_p": p_spearman,
                 "sample_size": len(merged)
             })
             
         corr_df = pd.DataFrame(correlations)
-        # Multiple comparison correction
-        reject, pvals_corrected, _, _ = multipletests(corr_df['p_value'], method='fdr_bh')
-        corr_df['p_value_fdr'] = pvals_corrected
-        corr_df['significant'] = reject
+        # Multiple comparison correction (Pearson)
+        reject, pvals_corrected, _, _ = multipletests(corr_df['pearson_p'], method='fdr_bh')
+        corr_df['pearson_p_fdr'] = pvals_corrected
+        corr_df['pearson_significant'] = reject
         
-        corr_df = corr_df.sort_values('pearson_r', ascending=False)
+        corr_df = corr_df.sort_values('pearson_r', key=abs, ascending=False)
         add_csv_metadata(corr_df).to_csv(stat_dir / "performance_correlations.csv", index=False)
         
         # 6. Good vs Bad Subject Analysis (Mann-Whitney U)
@@ -522,43 +434,22 @@ def main():
             f.write(f"- Median Accuracy: {merged['accuracy'].median():.4f}\n")
             f.write(f"- Accuracy StdDev: {merged['accuracy'].std():.4f}\n\n")
             
-            f.write("## 2. LOSO Ranking\n")
-            f.write(loso_df[['subject', 'accuracy']].to_markdown(index=False) + "\n\n")
+            f.write("## 2. Subject Ranking (Typical vs Atypical)\n")
+            domain_merged = pd.merge(loso_df[['subject', 'accuracy']], domain_df, on='subject')
+            domain_merged = domain_merged.sort_values('distance_to_centroid_riemannian', ascending=True)
             
-            f.write("## 3. Best Subjects (Top Quartile)\n")
-            f.write(good_subs[['subject', 'accuracy']].to_markdown(index=False) + "\n\n")
+            f.write("### Top 5 Most Typical Subjects (Closest to Centroid)\n")
+            f.write(domain_merged.head(5)[['subject', 'accuracy', 'distance_to_centroid_riemannian', 'similarity_to_centroid_cosine']].to_markdown(index=False) + "\n\n")
             
-            f.write("## 4. Worst Subjects (Bottom Quartile)\n")
-            f.write(bad_subs[['subject', 'accuracy']].to_markdown(index=False) + "\n\n")
+            f.write("### Top 5 Most Atypical Subjects (Farthest from Centroid)\n")
+            f.write(domain_merged.tail(5)[['subject', 'accuracy', 'distance_to_centroid_riemannian', 'similarity_to_centroid_cosine']].to_markdown(index=False) + "\n\n")
             
-            f.write("## 5. Statistical Tests (Good vs Bad)\n")
-            f.write("Comparing Top 25% vs Bottom 25% subjects using Mann-Whitney U tests.\n\n")
-            sig_tests = tests_df[tests_df['p_value'] < 0.05]
-            if len(sig_tests) > 0:
-                f.write(sig_tests[['feature', 'p_value', 'cohens_d', 'good_mean', 'bad_mean']].to_markdown(index=False) + "\n\n")
-            else:
-                f.write("*No statistically significant differences (p < 0.05) found between Good and Bad subjects for the computed features.*\n\n")
-                
-            f.write("## 6. Significant Correlations\n")
-            f.write("Pearson correlations between subject features and LOSO accuracy (FDR corrected).\n\n")
-            sig_corr = corr_df[corr_df['significant'] == True]
-            if len(sig_corr) > 0:
-                f.write(sig_corr[['feature', 'pearson_r', 'p_value_fdr', 'sample_size']].to_markdown(index=False) + "\n\n")
-            else:
-                f.write("*No statistically significant correlations found after FDR correction.*\n\n")
-                
-            f.write("## 7. Cluster Observations\n")
-            f.write(f"- PCA Analysis completed. Explained Variance Ratio (PC1, PC2): {explained_var[0]:.2f}, {explained_var[1]:.2f}.\n")
-            f.write("- Frobenius, Riemannian, and Cosine similarity matrices have been written to the statistics directory.\n\n")
-            
-            f.write("## 8. Dual-Hypothesis Decision Test\n")
+            f.write("## 3. Dual-Hypothesis Decision Test\n")
             f.write("### A. Domain Shift Hypothesis\n")
-            domain_metrics = ['mean_riemannian_dist', 'mean_frobenius_dist', 'mean_cosine_sim', 'mahalanobis_dist', 'isolation_forest_score']
-            domain_corr = corr_df[corr_df['feature'].isin(domain_metrics)].copy()
-            # Mark IsolationForest as exploratory
-            domain_corr.loc[domain_corr['feature'] == 'isolation_forest_score', 'feature'] = 'isolation_forest_score (Exploratory)'
+            domain_metrics = ['cov_trace', 'cov_log_det', 'cov_condition_number', 'distance_to_centroid_frobenius', 'distance_to_centroid_riemannian', 'similarity_to_centroid_cosine']
+            domain_corr = corr_df[corr_df['feature'].isin(domain_metrics)]
             if len(domain_corr) > 0:
-                f.write(domain_corr[['feature', 'pearson_r', 'p_value_fdr']].to_markdown(index=False) + "\n\n")
+                f.write(domain_corr[['feature', 'pearson_r', 'pearson_p_fdr', 'spearman_rho', 'spearman_p']].to_markdown(index=False) + "\n\n")
             else:
                 f.write("*Domain metrics not computed.*\n\n")
             
@@ -566,19 +457,41 @@ def main():
             signal_metrics = ['cov_stability', 'psd_stability', 'spectral_power_ratio', 'avg_entropy', 'avg_var']
             signal_corr = corr_df[corr_df['feature'].isin(signal_metrics)]
             if len(signal_corr) > 0:
-                f.write(signal_corr[['feature', 'pearson_r', 'p_value_fdr']].to_markdown(index=False) + "\n\n")
+                f.write(signal_corr[['feature', 'pearson_r', 'pearson_p_fdr', 'spearman_rho', 'spearman_p']].to_markdown(index=False) + "\n\n")
             else:
                 f.write("*Signal quality metrics not computed.*\n\n")
             
             f.write("### Final Assessment & Evidence Summary\n")
-            f.write("The auto-decision engine has been disabled to prevent statistically unsafe conclusions. ")
-            f.write("Instead, please review the correlations above and determine:\n")
+            f.write("Review the correlations above and determine:\n")
             f.write("1. Are the correlations in Hypothesis A (Domain Shift) strong and statistically significant?\n")
             f.write("2. Are the correlations in Hypothesis B (Signal Quality) strong and statistically significant?\n")
             f.write("\n**Decision Matrix:**\n")
             f.write("- If **A** dominates: Domain Adaptation (CORAL, MMD, DANN) is strongly justified.\n")
             f.write("- If **B** dominates: Calibration, data cleaning, and trial-level SNR filtering are justified.\n")
             f.write("- If neither dominates: Consider latent-space analysis or checking for dataset leakage.\n")
+
+        # Optional: PCA Visualization on Reduced Metric Space
+        try:
+            metric_cols = domain_metrics + signal_metrics
+            valid_cols = [c for c in metric_cols if c in merged.columns]
+            
+            if len(valid_cols) > 0:
+                X_metrics = merged[valid_cols].values
+                X_metrics_scaled = StandardScaler().fit_transform(X_metrics)
+                
+                pca = PCA(n_components=2, random_state=42)
+                X_pca = pca.fit_transform(X_metrics_scaled)
+                
+                import matplotlib.pyplot as plt
+                plt.figure()
+                plt.scatter(X_pca[:, 0], X_pca[:, 1])
+                for i, txt in enumerate(merged['subject']):
+                    plt.annotate(txt, (X_pca[i, 0], X_pca[i, 1]))
+                plt.title(f"PCA of Subject Metrics (Status: Confirmed)\nCommit: {get_git_commit()}")
+                plt.savefig(fig_dir / "pca_subject_metrics.png")
+                plt.close()
+        except Exception as e:
+            print(f"  [Warning] Metric PCA failed: {e}")
 
 if __name__ == "__main__":
         main()
