@@ -18,7 +18,7 @@ from torch.utils.data import TensorDataset, DataLoader
 REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT))
 
-from models.matchnet import ContrastiveMatchNet, contrastive_loss
+from models.matchnet import ContrastiveMatchNet, contrastive_loss, infonce_loss
 from baselines.ridge_aad import load_subject_examples, subject_files, iter_leave_one_subject_out
 
 FS = 64
@@ -173,7 +173,7 @@ def evaluate_model(model, X, Y_A, Y_B, device, window_sec=10, zero_eeg=False, sh
                 
     return n_correct, n_total
 
-def train_matchnet_loso(eeg_model, channels, lowcut, highcut, batch_size=128, num_workers=2, margin=0.1, dropout=0.1, checkpoint_path=""):
+def train_matchnet_loso(eeg_model, channels, lowcut, highcut, batch_size=128, num_workers=2, margin=0.1, dropout=0.1, checkpoint_path="", loss_type="contrastive"):
     torch.backends.cudnn.benchmark = True
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Using device: {device} | MatchNet ({eeg_model}) | Channels: {channels}")
@@ -291,7 +291,10 @@ def train_matchnet_loso(eeg_model, channels, lowcut, highcut, batch_size=128, nu
                 optimizer.zero_grad()
                 with torch.cuda.amp.autocast():
                     z_eeg, z_a, z_b = model(bx, bya, byb)
-                    loss, sa, sb = contrastive_loss(z_eeg, z_a, z_b, margin=margin)
+                    if loss_type == "infonce":
+                        loss, sa, sb = infonce_loss(z_eeg, z_a, z_b, temperature=0.1)
+                    else:
+                        loss, sa, sb = contrastive_loss(z_eeg, z_a, z_b, margin=margin)
                 
                 scaler.scale(loss).backward()
                 scaler.step(optimizer)
@@ -401,6 +404,7 @@ if __name__ == "__main__":
     parser.add_argument("--margin", type=float, default=0.1, help="Contrastive loss margin")
     parser.add_argument("--dropout", type=float, default=0.1, help="Input dropout probability")
     parser.add_argument("--checkpoint", type=str, default="", help="Path to pre-trained model for curriculum learning")
+    parser.add_argument("--loss", type=str, default="contrastive", choices=["contrastive", "infonce"], help="Loss function")
     args = parser.parse_args()
     
-    train_matchnet_loso(args.model, args.channels, args.lowcut, args.highcut, args.batch_size, args.num_workers, args.margin, args.dropout, args.checkpoint)
+    train_matchnet_loso(args.model, args.channels, args.lowcut, args.highcut, args.batch_size, args.num_workers, args.margin, args.dropout, args.checkpoint, args.loss)

@@ -11,7 +11,7 @@ from copy import deepcopy
 
 from preprocessing.dataset import get_mapping_data, subject_files, load_subject_examples
 from training.train_matchnet_loso import prepare_dataset, chunk_trial, evaluate_model
-from models.matchnet import ContrastiveMatchNet, contrastive_loss
+from models.matchnet import ContrastiveMatchNet, contrastive_loss, infonce_loss
 
 # Hardcode configuration for quick tests
 TRAIN_WINDOW_SEC = 2
@@ -23,7 +23,7 @@ LOWCUT = 1.0
 HIGHCUT = 6.0
 NUM_BANDS = 28
 
-def evaluate_model_version(model_lags, X_tr_full, YA_tr_full, YB_tr_full, X_va_full, YA_va_full, YB_va_full, X_te_full, YA_te_full, YB_te_full, device, epochs, batch_size):
+def evaluate_model_version(model_lags, eeg_model, audio_model, loss_type, X_tr_full, YA_tr_full, YB_tr_full, X_va_full, YA_va_full, YB_va_full, X_te_full, YA_te_full, YB_te_full, device, epochs, batch_size):
     # Chunk training data
     X_tr, YA_tr, YB_tr = [], [], []
     for i in range(len(X_tr_full)):
@@ -37,7 +37,7 @@ def evaluate_model_version(model_lags, X_tr_full, YA_tr_full, YB_tr_full, X_va_f
     train_dataset = TensorDataset(X_tr_t, YA_tr_t, YB_tr_t)
     train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, pin_memory=True)
         
-    model = ContrastiveMatchNet(eeg_model_type="eegnet", eeg_channels=len(CHANNELS), audio_channels=NUM_BANDS, latent_dim=64, lags=model_lags).to(device)
+    model = ContrastiveMatchNet(eeg_model_type=eeg_model, eeg_channels=len(CHANNELS), audio_channels=NUM_BANDS, latent_dim=64, lags=model_lags, audio_model_type=audio_model).to(device)
     optimizer = optim.Adam(model.parameters(), lr=1e-3, weight_decay=1e-4)
     scaler = torch.amp.GradScaler('cuda' if torch.cuda.is_available() else 'cpu')
     
@@ -56,7 +56,10 @@ def evaluate_model_version(model_lags, X_tr_full, YA_tr_full, YB_tr_full, X_va_f
             optimizer.zero_grad()
             with torch.amp.autocast('cuda' if torch.cuda.is_available() else 'cpu'):
                 z_eeg, z_a, z_b = model(bx, bya, byb)
-                loss, sa, sb = contrastive_loss(z_eeg, z_a, z_b, margin=0.05)
+                if loss_type == "infonce":
+                    loss, sa, sb = infonce_loss(z_eeg, z_a, z_b, temperature=0.1)
+                else:
+                    loss, sa, sb = contrastive_loss(z_eeg, z_a, z_b, margin=0.05)
             
             scaler.scale(loss).backward()
             scaler.step(optimizer)
@@ -123,48 +126,57 @@ def quick_loso(target_subjects, epochs, batch_size):
             
         X_te_full, YA_te_full, YB_te_full = prepare_dataset(test_exs, CHANNELS, LOWCUT, HIGHCUT, held_out_subj, mapping, envelopes)
         
-        print("Running Baseline (No Lag)...")
-        b_val, b_test, b_time = evaluate_model_version([], X_tr_full, YA_tr_full, YB_tr_full, X_va_full, YA_va_full, YB_va_full, X_te_full, YA_te_full, YB_te_full, device, epochs, batch_size)
+        print("Running Baseline...")
+        b_val, b_test, b_time = evaluate_model_version([], "eegnet", "standard", "contrastive", X_tr_full, YA_tr_full, YB_tr_full, X_va_full, YA_va_full, YB_va_full, X_te_full, YA_te_full, YB_te_full, device, epochs, batch_size)
         
-        print("Running Lag Model ([3, 6, 10, 13, 16])...")
-        l_val, l_test, l_time = evaluate_model_version([3, 6, 10, 13, 16], X_tr_full, YA_tr_full, YB_tr_full, X_va_full, YA_va_full, YB_va_full, X_te_full, YA_te_full, YB_te_full, device, epochs, batch_size)
+        print("Running InfoNCE Loss...")
+        i_val, i_test, i_time = evaluate_model_version([], "eegnet", "standard", "infonce", X_tr_full, YA_tr_full, YB_tr_full, X_va_full, YA_va_full, YB_va_full, X_te_full, YA_te_full, YB_te_full, device, epochs, batch_size)
+
+        print("Running EEGNetTCN Encoder...")
+        t_val, t_test, t_time = evaluate_model_version([], "eegnet_tcn", "standard", "contrastive", X_tr_full, YA_tr_full, YB_tr_full, X_va_full, YA_va_full, YB_va_full, X_te_full, YA_te_full, YB_te_full, device, epochs, batch_size)
+
+        print("Running InceptionAudioEncoder...")
+        a_val, a_test, a_time = evaluate_model_version([], "eegnet", "inception", "contrastive", X_tr_full, YA_tr_full, YB_tr_full, X_va_full, YA_va_full, YB_va_full, X_te_full, YA_te_full, YB_te_full, device, epochs, batch_size)
         
-        delta = l_test - b_test
         results[held_out_subj] = {
             "baseline": b_test,
-            "lagged": l_test,
-            "delta": delta,
-            "b_time": b_time,
-            "l_time": l_time
+            "infonce": i_test,
+            "tcn": t_test,
+            "inception": a_test
         }
-        print(f"  Baseline 2s Acc: {b_test*100:.2f}%")
-        print(f"  Lagged 2s Acc  : {l_test*100:.2f}%")
-        print(f"  Delta          : {delta*100:+.2f}%")
+        print(f"  Baseline  : {b_test*100:.2f}%")
+        print(f"  InfoNCE   : {i_test*100:.2f}%")
+        print(f"  EEGNetTCN : {t_test*100:.2f}%")
+        print(f"  Inception : {a_test*100:.2f}%")
         
-    print("\n\n" + "="*50)
-    print("SMOKE TEST SUMMARY")
-    print("="*50)
-    print("| Subject | Baseline | Lag Model | Delta |")
-    print("| ------- | -------- | --------- | ----- |")
-    deltas = []
+    print("\n\n" + "="*80)
+    print("SMOKE TEST SUMMARY (Accuracy %)")
+    print("="*80)
+    print("| Subject | Baseline | InfoNCE  | EEGNetTCN | Inception |")
+    print("| ------- | -------- | -------- | --------- | --------- |")
+    
+    b_list, i_list, t_list, a_list = [], [], [], []
     for subj, res in results.items():
-        b, l, d = res['baseline']*100, res['lagged']*100, res['delta']*100
-        deltas.append(d)
-        print(f"| {subj:7s} | {b:7.2f}% | {l:8.2f}% | {d:+4.2f}% |")
+        b, i, t, a = res['baseline']*100, res['infonce']*100, res['tcn']*100, res['inception']*100
+        b_list.append(b); i_list.append(i); t_list.append(t); a_list.append(a)
+        print(f"| {subj:7s} | {b:8.2f} | {i:8.2f} | {t:9.2f} | {a:9.2f} |")
         
-    if deltas:
-        mean_delta = np.mean(deltas)
-        median_delta = np.median(deltas)
-        print(f"\nMean Delta:   {mean_delta:+.2f}%")
-        print(f"Median Delta: {median_delta:+.2f}%")
-        
-        print("\nDECISION RECOMMENDATION:")
-        if mean_delta < 2.0:
-            print("❌ Mean gain < 2%. RECOMMENDATION: KILL EXPERIMENT. Do not run full LOSO.")
-        elif 2.0 <= mean_delta <= 5.0:
-            print("⚠️ Mean gain 2-5%. RECOMMENDATION: Run Mini-LOSO (S1, S4, S6, S8, S11, S14).")
+    print("| ------- | -------- | -------- | --------- | --------- |")
+    print(f"| Mean    | {np.mean(b_list):8.2f} | {np.mean(i_list):8.2f} | {np.mean(t_list):9.2f} | {np.mean(a_list):9.2f} |")
+    
+    def recommend(name, mean_acc, base_acc):
+        delta = mean_acc - base_acc
+        if delta < 2.0:
+            return f"❌ {name}: {delta:+.2f}% (KILL)"
+        elif 2.0 <= delta <= 5.0:
+            return f"⚠️ {name}: {delta:+.2f}% (MINI-LOSO)"
         else:
-            print("✅ Mean gain > 5%. RECOMMENDATION: PROMOTE. Run full LOSO immediately.")
+            return f"✅ {name}: {delta:+.2f}% (PROMOTE)"
+            
+    print("\nDECISION RECOMMENDATIONS:")
+    print(recommend("InfoNCE", np.mean(i_list), np.mean(b_list)))
+    print(recommend("EEGNetTCN", np.mean(t_list), np.mean(b_list)))
+    print(recommend("Inception", np.mean(a_list), np.mean(b_list)))
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Quick LOSO Smoke Test")

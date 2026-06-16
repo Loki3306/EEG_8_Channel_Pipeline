@@ -46,12 +46,44 @@ class AudioEncoder(nn.Module):
     def forward(self, x):
         return self.net(x)
 
+class InceptionAudioEncoder(nn.Module):
+    """
+    Multi-scale audio encoder using parallel convolution branches.
+    """
+    def __init__(self, in_channels=28, latent_dim=64):
+        super().__init__()
+        
+        # Parallel branches
+        self.branch1 = nn.Conv1d(in_channels, 16, kernel_size=3, padding=1)
+        self.branch2 = nn.Conv1d(in_channels, 16, kernel_size=7, padding=3)
+        self.branch3 = nn.Conv1d(in_channels, 16, kernel_size=15, padding=7)
+        self.branch4 = nn.Conv1d(in_channels, 16, kernel_size=31, padding=15)
+        
+        self.bn = nn.BatchNorm1d(64)
+        self.gelu = nn.GELU()
+        self.dropout = nn.Dropout(0.2)
+        
+        self.proj = nn.Conv1d(64, latent_dim, kernel_size=1)
+        
+    def forward(self, x):
+        x1 = self.branch1(x)
+        x2 = self.branch2(x)
+        x3 = self.branch3(x)
+        x4 = self.branch4(x)
+        
+        out = torch.cat([x1, x2, x3, x4], dim=1) # [B, 64, T]
+        out = self.bn(out)
+        out = self.gelu(out)
+        out = self.dropout(out)
+        
+        return self.proj(out)
+
 class ContrastiveMatchNet(nn.Module):
     """
     A Siamese network that explicitly learns a matching function between EEG and Audio.
     Includes explicit auditory delay modeling.
     """
-    def __init__(self, eeg_model_type="eegnet", eeg_channels=8, audio_channels=28, latent_dim=64, lags=[3, 6, 10, 13, 16]):
+    def __init__(self, eeg_model_type="eegnet", eeg_channels=8, audio_channels=28, latent_dim=64, lags=[3, 6, 10, 13, 16], audio_model_type="standard"):
         super().__init__()
         self.lags = lags
         
@@ -75,7 +107,10 @@ class ContrastiveMatchNet(nn.Module):
             
         # 2. Audio Encoder
         num_lags = len(self.lags) if self.lags else 1
-        self.audio_encoder = AudioEncoder(in_channels=audio_channels * num_lags, latent_dim=latent_dim)
+        if audio_model_type == "inception":
+            self.audio_encoder = InceptionAudioEncoder(in_channels=audio_channels * num_lags, latent_dim=latent_dim)
+        else:
+            self.audio_encoder = AudioEncoder(in_channels=audio_channels * num_lags, latent_dim=latent_dim)
         
         self.latent_dim = latent_dim
 
