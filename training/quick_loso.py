@@ -102,14 +102,14 @@ def quick_loso(target_subjects, epochs, batch_size):
     results = {}
     
     for held_out_subj in target_subjects:
-        held_out_path = next((p for p in all_paths if p.stem == held_out_subj), None)
+        held_out_path = next((p for p in all_paths if p.stem.split('_')[0] == held_out_subj), None)
         if not held_out_path:
             print(f"Warning: Subject {held_out_subj} not found, skipping.")
             continue
             
         print(f"\n--- Testing Subject {held_out_subj} ---")
         
-        train_paths = [p for p in all_paths if p.stem != held_out_subj]
+        train_paths = [p for p in all_paths if p.stem.split('_')[0] != held_out_subj]
         
         # Prepare Data
         train_exs = []
@@ -130,7 +130,7 @@ def quick_loso(target_subjects, epochs, batch_size):
             X_va_full.extend(tX[:v_split_idx]); YA_va_full.extend(tYA[:v_split_idx]); YB_va_full.extend(tYB[:v_split_idx])
             X_tr_full.extend(tX[v_split_idx:]); YA_tr_full.extend(tYA[v_split_idx:]); YB_tr_full.extend(tYB[v_split_idx:])
             
-        X_te_full, YA_te_full, YB_te_full = prepare_dataset(test_exs, CHANNELS, LOWCUT, HIGHCUT, held_out_subj, mapping, envelopes)
+        X_te_full, YA_te_full, YB_te_full = prepare_dataset(test_exs, CHANNELS, LOWCUT, HIGHCUT, held_out_path.stem, mapping, envelopes)
         
         print("Running Baseline...")
         b_val, b_test, b_time = evaluate_model_version([], "eegnet", "standard", "contrastive", X_tr_full, YA_tr_full, YB_tr_full, X_va_full, YA_va_full, YB_va_full, X_te_full, YA_te_full, YB_te_full, device, epochs, batch_size)
