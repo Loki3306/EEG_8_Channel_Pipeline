@@ -135,35 +135,30 @@ def quick_loso(target_subjects, epochs, batch_size):
         print("Running Baseline...")
         b_val, b_test, b_time = evaluate_model_version([], "eegnet", "standard", "contrastive", False, X_tr_full, YA_tr_full, YB_tr_full, X_va_full, YA_va_full, YB_va_full, X_te_full, YA_te_full, YB_te_full, device, epochs, batch_size)
         
-        print("Running Temporal Attention...")
-        a_val, a_test, a_time = evaluate_model_version([], "eegnet", "standard", "contrastive", True, X_tr_full, YA_tr_full, YB_tr_full, X_va_full, YA_va_full, YB_va_full, X_te_full, YA_te_full, YB_te_full, device, epochs, batch_size)
-
-        print("Running Multi-Scale EEGNet (with Attention)...")
-        m_val, m_test, m_time = evaluate_model_version([], "eegnet_multiscale", "standard", "contrastive", True, X_tr_full, YA_tr_full, YB_tr_full, X_va_full, YA_va_full, YB_va_full, X_te_full, YA_te_full, YB_te_full, device, epochs, batch_size)
+        print("Running Multi-Scale EEGNet (No Attention)...")
+        m_val, m_test, m_time = evaluate_model_version([], "eegnet_multiscale", "standard", "contrastive", False, X_tr_full, YA_tr_full, YB_tr_full, X_va_full, YA_va_full, YB_va_full, X_te_full, YA_te_full, YB_te_full, device, epochs, batch_size)
 
         results[held_out_subj] = {
             "baseline": b_test,
-            "attention": a_test,
             "multiscale": m_test
         }
         print(f"  Baseline   : {b_test*100:.2f}%")
-        print(f"  Attention  : {a_test*100:.2f}%")
         print(f"  MultiScale : {m_test*100:.2f}%")
         
     print("\n\n" + "="*80)
     print("SMOKE TEST SUMMARY (Accuracy %)")
     print("="*80)
-    print("| Subject | Baseline | Attention | MultiScale |")
-    print("| ------- | -------- | --------- | ---------- |")
+    print("| Subject | Baseline | MultiScale |")
+    print("| ------- | -------- | ---------- |")
     
-    b_list, a_list, m_list = [], [], []
+    b_list, m_list = [], []
     for subj, res in results.items():
-        b, a, m = res['baseline']*100, res['attention']*100, res['multiscale']*100
-        b_list.append(b); a_list.append(a); m_list.append(m)
-        print(f"| {subj:7s} | {b:8.2f} | {a:9.2f} | {m:10.2f} |")
+        b, m = res['baseline']*100, res['multiscale']*100
+        b_list.append(b); m_list.append(m)
+        print(f"| {subj:7s} | {b:8.2f} | {m:10.2f} |")
         
-    print("| ------- | -------- | --------- | ---------- |")
-    print(f"| Mean    | {np.mean(b_list):8.2f} | {np.mean(a_list):9.2f} | {np.mean(m_list):10.2f} |")
+    print("| ------- | -------- | ---------- |")
+    print(f"| Mean    | {np.mean(b_list):8.2f} | {np.mean(m_list):10.2f} |")
     
     def recommend(name, mean_acc, base_acc):
         delta = mean_acc - base_acc
@@ -175,7 +170,6 @@ def quick_loso(target_subjects, epochs, batch_size):
             return f"✅ {name}: {delta:+.2f}% (PROMOTE)"
             
     print("\nDECISION RECOMMENDATIONS:")
-    print(recommend("Attention", np.mean(a_list), np.mean(b_list)))
     print(recommend("MultiScale", np.mean(m_list), np.mean(b_list)))
 
 if __name__ == "__main__":
