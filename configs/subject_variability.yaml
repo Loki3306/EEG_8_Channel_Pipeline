@@ -1,0 +1,14 @@
+bands:
+  delta: [1, 4]
+  theta: [4, 8]
+  alpha: [8, 13]
+  beta: [13, 30]
+
+top_percentile: 25
+bottom_percentile: 25
+
+tsne:
+  perplexity: 5
+
+umap:
+  n_neighbors: 5
