@@ -202,26 +202,9 @@ def train_matchnet_loso(eeg_model, channels, lowcut, highcut, batch_size=128, nu
         print(f"\nEvaluating fold with held-out subject: {held_out_path.stem}")
         print(f"  [Memory] Pre-fold RAM: {psutil.virtual_memory().percent}% ({psutil.virtual_memory().used / 1e9:.2f} GB used)")
         
-        train_exs = []
-        for p in train_paths:
-            train_exs.extend(subject_examples[str(p)])
-            
         test_exs = subject_examples[held_out_key]
         
-        np.random.seed(42)
-        np.random.shuffle(train_exs)
-        val_split = int(0.1 * len(train_exs))
-        val_exs = train_exs[:val_split]
-        train_exs = train_exs[val_split:]
-        
         # Prepare datasets
-        X_tr_full, YA_tr_full, YB_tr_full = [], [], []
-        for p in train_paths:
-            if str(p) in [e.subject for e in val_exs]: continue # Skip validation mixing roughly
-            tX, tYA, tYB = prepare_dataset(subject_examples[str(p)], channels, lowcut, highcut, p.stem, mapping, envelopes)
-            X_tr_full.extend(tX); YA_tr_full.extend(tYA); YB_tr_full.extend(tYB)
-            
-        # Re-extract correctly without overlap
         X_tr_full, YA_tr_full, YB_tr_full = [], [], []
         X_va_full, YA_va_full, YB_va_full = [], [], []
         
