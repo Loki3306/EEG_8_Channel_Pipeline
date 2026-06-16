@@ -5,6 +5,24 @@ from models.eegnet import EEGNet
 from models.atcnet import ATCNet
 from models.eegnet_tcn import EEGNetTCN
 
+def create_lagged_audio(audio, lags=[3, 6, 10, 13, 16]):
+    """
+    Shifts the audio tensor by discrete sample delays to explicitly model neural lag.
+    audio: [B, C, T]
+    lags: list of integer sample delays (e.g., at 64Hz, 3=~50ms, 16=250ms)
+    Returns: [B, C * len(lags), T]
+    """
+    B, C, T = audio.shape
+    lagged = []
+    for lag in lags:
+        if lag == 0:
+            lagged.append(audio)
+        else:
+            # Shift right by 'lag', pad left with zeros
+            shifted = torch.cat([torch.zeros(B, C, lag, device=audio.device), audio[:, :, :-lag]], dim=2)
+            lagged.append(shifted)
+    return torch.cat(lagged, dim=1)
+
 class AudioEncoder(nn.Module):
     """
     Encodes 28-band Gammatone subbands into a latent representation.
@@ -31,9 +49,11 @@ class AudioEncoder(nn.Module):
 class ContrastiveMatchNet(nn.Module):
     """
     A Siamese network that explicitly learns a matching function between EEG and Audio.
+    Includes explicit auditory delay modeling.
     """
-    def __init__(self, eeg_model_type="eegnet", eeg_channels=8, audio_channels=28, latent_dim=64):
+    def __init__(self, eeg_model_type="eegnet", eeg_channels=8, audio_channels=28, latent_dim=64, lags=[3, 6, 10, 13, 16]):
         super().__init__()
+        self.lags = lags
         
         # 1. EEG Encoder
         if eeg_model_type.lower() == "eegnet":
@@ -54,7 +74,8 @@ class ContrastiveMatchNet(nn.Module):
             raise ValueError(f"Unknown eeg_model_type: {eeg_model_type}")
             
         # 2. Audio Encoder
-        self.audio_encoder = AudioEncoder(in_channels=audio_channels, latent_dim=latent_dim)
+        num_lags = len(self.lags) if self.lags else 1
+        self.audio_encoder = AudioEncoder(in_channels=audio_channels * num_lags, latent_dim=latent_dim)
         
         self.latent_dim = latent_dim
 
@@ -64,6 +85,8 @@ class ContrastiveMatchNet(nn.Module):
         
     def encode_audio(self, audio):
         """ Returns [B, latent_dim, Time] """
+        if self.lags:
+            audio = create_lagged_audio(audio, self.lags)
         return self.audio_encoder(audio)
 
     def forward(self, eeg, audio_a, audio_b):
