@@ -24,31 +24,48 @@ NUM_BANDS = 28
 WINDOW_SEC = 2.0
 BASE_HOP_SEC = 0.25 # Extract at finest granularity
 
-def evaluate_trial_similarities(model, x_np, ya_np, yb_np, device):
+def evaluate_trial_similarities(model, x_np, ya_np, yb_np, device, batch_size=256):
     """
     Evaluate a single full-length trial and return similarities at 0.25s intervals.
+    Uses batched inference to maximize GPU utilization.
     """
     window_samples = int(WINDOW_SEC * FS)
     hop_samples = int(BASE_HOP_SEC * FS)
     
-    sims_a, sims_b = [], []
+    x_chunks, ya_chunks, yb_chunks = [], [], []
     
     start = 0
     while start + window_samples <= x_np.shape[1]:
         end = start + window_samples
-        x_chunk = torch.FloatTensor(x_np[:, start:end]).unsqueeze(0).to(device)
-        ya_chunk = torch.FloatTensor(ya_np[:, start:end]).unsqueeze(0).to(device)
-        yb_chunk = torch.FloatTensor(yb_np[:, start:end]).unsqueeze(0).to(device)
-        
-        with torch.no_grad():
-            with torch.amp.autocast('cuda' if torch.cuda.is_available() else 'cpu'):
-                z_eeg, z_a, z_b = model(x_chunk, ya_chunk, yb_chunk)
-                sim_a = F.cosine_similarity(z_eeg, z_a, dim=1).mean().item()
-                sim_b = F.cosine_similarity(z_eeg, z_b, dim=1).mean().item()
-        
-        sims_a.append(sim_a)
-        sims_b.append(sim_b)
+        x_chunks.append(x_np[:, start:end])
+        ya_chunks.append(ya_np[:, start:end])
+        yb_chunks.append(yb_np[:, start:end])
         start += hop_samples
+        
+    if not x_chunks:
+        return np.array([]), np.array([])
+        
+    x_tensor = torch.FloatTensor(np.stack(x_chunks))
+    ya_tensor = torch.FloatTensor(np.stack(ya_chunks))
+    yb_tensor = torch.FloatTensor(np.stack(yb_chunks))
+    
+    dataset = torch.utils.data.TensorDataset(x_tensor, ya_tensor, yb_tensor)
+    loader = torch.utils.data.DataLoader(dataset, batch_size=batch_size, shuffle=False)
+    
+    sims_a, sims_b = [], []
+    
+    with torch.no_grad():
+        for bx, bya, byb in loader:
+            bx, bya, byb = bx.to(device), bya.to(device), byb.to(device)
+            with torch.amp.autocast('cuda' if torch.cuda.is_available() else 'cpu'):
+                z_eeg, z_a, z_b = model(bx, bya, byb)
+                # Cosine similarity across channel dimension (dim=1) yields [B, T]
+                # Mean across time dimension (dim=1) yields [B]
+                batch_sim_a = F.cosine_similarity(z_eeg, z_a, dim=1).mean(dim=1).cpu().numpy()
+                batch_sim_b = F.cosine_similarity(z_eeg, z_b, dim=1).mean(dim=1).cpu().numpy()
+            
+            sims_a.extend(batch_sim_a)
+            sims_b.extend(batch_sim_b)
         
     return np.array(sims_a), np.array(sims_b)
 
