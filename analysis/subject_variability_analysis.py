@@ -11,6 +11,9 @@ from scipy.signal import welch
 from scipy.stats import skew, kurtosis, entropy, mannwhitneyu, pearsonr, ttest_ind
 from sklearn.manifold import TSNE
 from sklearn.decomposition import PCA
+from sklearn.preprocessing import StandardScaler
+from sklearn.ensemble import IsolationForest
+from sklearn.covariance import MinCovDet
 from statsmodels.stats.multitest import multipletests
 import time
 import traceback
@@ -232,6 +235,29 @@ def main():
                         bp[f"ch_{ch}_{band_name}_power"] = band_psd[ch]
                     bp[f"avg_{band_name}_power"] = np.mean(band_psd)
                 
+                # --- Signal Quality Metrics (Trial-Level Stability) ---
+                trial_covs = []
+                trial_psds = []
+                for ex in examples:
+                    ex_cov = np.cov(ex.eeg, rowvar=False)
+                    trial_covs.append(ex_cov.flatten())
+                    _, ex_psd = welch(ex.eeg, fs=fs, axis=0)
+                    trial_psds.append(np.mean(ex_psd, axis=0)) # Mean PSD over freq per channel
+                
+                # Covariance stability: variance of flattened covariances across trials
+                ss_dict["cov_stability"] = np.mean(np.var(trial_covs, axis=0))
+                # PSD stability: variance of mean PSDs across trials
+                ss_dict["psd_stability"] = np.mean(np.var(trial_psds, axis=0))
+                
+                # SNR Estimate: Ratio of signal power to noise power
+                signal_bands = ['delta', 'theta', 'alpha']
+                noise_bands = ['beta', 'gamma']
+                
+                signal_power = np.mean([bp[f"avg_{b}_power"] for b in signal_bands if f"avg_{b}_power" in bp])
+                noise_power = np.mean([bp[f"avg_{b}_power"] for b in noise_bands if f"avg_{b}_power" in bp])
+                ss_dict["snr_estimate"] = signal_power / (noise_power + 1e-12)
+                # ------------------------------------------------------
+                
                 bandpowers.append(bp)
             except Exception as e:
                 print(f"  [FATAL ERROR] Failed processing {sub}: {e}")
@@ -291,11 +317,48 @@ def main():
     with Timer("Stage 3: Dimensionality Reduction"):
         X = np.array(cov_flat)
         
+        try:
+            X_scaled = StandardScaler().fit_transform(X)
+            
+            # Distance to Population Centroid
+            mean_riem = np.mean(riem_dist, axis=1)
+            mean_frob = np.mean(frob_dist, axis=1)
+            mean_cos = np.mean(cos_sim, axis=1)
+            
+            # Mahalanobis Distance
+            cov_estimator = MinCovDet(random_state=42).fit(X_scaled)
+            mahalanobis_dist = cov_estimator.mahalanobis(X_scaled)
+            
+            # Isolation Forest
+            iso_forest = IsolationForest(random_state=42).fit(X_scaled)
+            iso_scores = iso_forest.decision_function(X_scaled)
+            
+            # Add to covariance features
+            for i, cf in enumerate(cov_features):
+                cf['mean_riemannian_dist'] = mean_riem[i]
+                cf['mean_frobenius_dist'] = mean_frob[i]
+                cf['mean_cosine_sim'] = mean_cos[i]
+                cf['mahalanobis_dist'] = mahalanobis_dist[i]
+                cf['isolation_forest_score'] = iso_scores[i]
+                
+            # Re-save cf_df with new metrics
+            cf_df = pd.DataFrame(cov_features)
+            add_csv_metadata(cf_df).to_csv(stat_dir / "subject_covariance_features.csv", index=False)
+        except Exception as e:
+            print(f"  [FATAL ERROR] Outlier detection failed: {e}")
+            X_scaled = X  # Fallback
+            
         # PCA
         try:
             pca = PCA(n_components=2, random_state=42)
-            X_pca = pca.fit_transform(X)
+            X_pca = pca.fit_transform(X_scaled)
             explained_var = pca.explained_variance_ratio_
+            
+            # Print Top Loadings
+            pc1_loadings = pca.components_[0]
+            top_idx = np.argsort(np.abs(pc1_loadings))[::-1][:5]
+            print(f"  [PCA Diagnostics] Explained Variance: PC1={explained_var[0]:.2f}, PC2={explained_var[1]:.2f}")
+            print(f"  [PCA Diagnostics] Top PC1 Covariance Feature Indices: {top_idx}")
             
             plt.figure()
             plt.scatter(X_pca[:, 0], X_pca[:, 1])
@@ -311,7 +374,7 @@ def main():
         try:
             max_perp = max(1, min(config['tsne'].get('perplexity', 5), len(subs) - 1))
             tsne = TSNE(n_components=2, perplexity=max_perp, random_state=42)
-            X_tsne = tsne.fit_transform(X)
+            X_tsne = tsne.fit_transform(X_scaled)
             plt.figure()
             plt.scatter(X_tsne[:, 0], X_tsne[:, 1])
             for i, txt in enumerate(subs):
@@ -325,7 +388,7 @@ def main():
         if UMAP_AVAILABLE:
             try:
                 reducer = umap.UMAP(n_neighbors=config['umap'].get('n_neighbors', 5), random_state=42)
-                X_umap = reducer.fit_transform(X)
+                X_umap = reducer.fit_transform(X_scaled)
                 plt.figure()
                 plt.scatter(X_umap[:, 0], X_umap[:, 1])
                 for i, txt in enumerate(subs):
@@ -443,13 +506,34 @@ def main():
             f.write(f"- PCA Analysis completed. Explained Variance Ratio (PC1, PC2): {explained_var[0]:.2f}, {explained_var[1]:.2f}.\n")
             f.write("- Frobenius, Riemannian, and Cosine similarity matrices have been written to the statistics directory.\n\n")
             
-            f.write("## 8. Actionable Hypotheses\n")
-            if len(sig_corr) > 0:
-                top_feature = sig_corr.iloc[0]['feature']
-                r_val = sig_corr.iloc[0]['pearson_r']
-                f.write(f"- Hypothesis derived from data: {top_feature} exhibits a strong correlation (r={r_val:.2f}) with LOSO accuracy. Calibration algorithms targeting {top_feature} distribution matching may improve cross-subject generalization.\n")
+            f.write("## 8. Dual-Hypothesis Decision Test\n")
+            f.write("### A. Domain Shift Hypothesis\n")
+            domain_metrics = ['mean_riemannian_dist', 'mean_frobenius_dist', 'mean_cosine_sim', 'mahalanobis_dist', 'isolation_forest_score']
+            domain_corr = corr_df[corr_df['feature'].isin(domain_metrics)]
+            if len(domain_corr) > 0:
+                f.write(domain_corr[['feature', 'pearson_r', 'p_value_fdr']].to_markdown(index=False) + "\n\n")
             else:
-                f.write("- Hypothesis derived from data: Simple bandpower and standard covariance markers do not linearly separate Top from Bottom performers. Non-linear mapping or direct adaptation (e.g., CORAL/DANN) is strictly required to address the domain shift.\n")
+                f.write("*Domain metrics not computed.*\n\n")
+            
+            f.write("### B. Signal Quality Hypothesis\n")
+            signal_metrics = ['cov_stability', 'psd_stability', 'snr_estimate', 'avg_entropy', 'avg_var']
+            signal_corr = corr_df[corr_df['feature'].isin(signal_metrics)]
+            if len(signal_corr) > 0:
+                f.write(signal_corr[['feature', 'pearson_r', 'p_value_fdr']].to_markdown(index=False) + "\n\n")
+            else:
+                f.write("*Signal quality metrics not computed.*\n\n")
+            
+            # Auto-Decision
+            best_domain_r = domain_corr['pearson_r'].abs().max() if len(domain_corr) > 0 else 0
+            best_signal_r = signal_corr['pearson_r'].abs().max() if len(signal_corr) > 0 else 0
+            
+            f.write("### Final Assessment\n")
+            if best_domain_r > best_signal_r and best_domain_r > 0.4:
+                f.write("**Conclusion:** Domain Shift Metrics show stronger correlation with accuracy. Poor performers are likely Out-of-Distribution. \n**Next Action:** Prioritize CORAL, MMD, or DANN implementation.\n")
+            elif best_signal_r > best_domain_r and best_signal_r > 0.4:
+                f.write("**Conclusion:** Signal Quality Metrics show stronger correlation with accuracy. Poor performers simply have noisier/weaker attention signals. \n**Next Action:** Prioritize data cleaning, trial rejection, or SNR calibration over domain adaptation.\n")
+            else:
+                f.write("**Conclusion:** Neither hypothesis strongly correlates with accuracy (|r| < 0.4). \n**Next Action:** Latent space analysis or architecture-specific debugging is required.\n")
 
 if __name__ == "__main__":
         main()
