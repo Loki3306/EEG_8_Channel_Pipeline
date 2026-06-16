@@ -13,10 +13,16 @@ from sklearn.manifold import TSNE
 from sklearn.decomposition import PCA
 from sklearn.preprocessing import StandardScaler
 from sklearn.ensemble import IsolationForest
-from sklearn.covariance import MinCovDet
+from sklearn.covariance import MinCovDet, EmpiricalCovariance
 from statsmodels.stats.multitest import multipletests
 import time
 import traceback
+
+# --- DEBUG & SAFETY CONTROLS ---
+DEBUG_FAST = True
+RUN_UMAP = False if DEBUG_FAST else True
+RUN_ISOLATION_FOREST = False if DEBUG_FAST else True
+# -------------------------------
 
 class Timer:
     def __init__(self, name):
@@ -322,23 +328,48 @@ def main():
         X = np.array(cov_flat)
         
         try:
-            X_scaled = StandardScaler().fit_transform(X)
+            with Timer("StandardScaler"):
+                X_scaled = StandardScaler().fit_transform(X)
             
             # True Population Centroid Distance
-            cov_list = list(covariances.values())
-            population_centroid = np.mean(cov_list, axis=0)
+            with Timer("Centroid Distances"):
+                cov_list = list(covariances.values())
+                population_centroid = np.mean(cov_list, axis=0)
+                
+                centroid_riem = [riemannian_distance(c, population_centroid) for c in cov_list]
+                centroid_frob = [frobenius_distance(c, population_centroid) for c in cov_list]
+                centroid_cos = [cosine_similarity_cov(c, population_centroid) for c in cov_list]
             
-            centroid_riem = [riemannian_distance(c, population_centroid) for c in cov_list]
-            centroid_frob = [frobenius_distance(c, population_centroid) for c in cov_list]
-            centroid_cos = [cosine_similarity_cov(c, population_centroid) for c in cov_list]
-            
-            # Mahalanobis Distance
-            cov_estimator = MinCovDet(random_state=42).fit(X_scaled)
-            mahalanobis_dist = cov_estimator.mahalanobis(X_scaled)
+            # Covariance Estimator / Mahalanobis Distance
+            with Timer("MinCovDet (Mahalanobis)"):
+                n_samples, n_features = X_scaled.shape
+                print(f"  [Diagnostic] X_scaled shape: {X_scaled.shape}")
+                print(f"  [Diagnostic] Matrix rank: {np.linalg.matrix_rank(X_scaled)}")
+                print(f"  [Diagnostic] Condition number: {np.linalg.cond(X_scaled):.2e}")
+                
+                # Dimensionality safeguard: If p > n, MinCovDet will hang searching for full rank
+                if n_features > n_samples:
+                    print(f"  [Warning] n_features ({n_features}) > n_samples ({n_samples}). Applying PCA before covariance estimation.")
+                    n_components = min(10, n_samples - 2)
+                    X_cov_input = PCA(n_components=n_components, random_state=42).fit_transform(X_scaled)
+                else:
+                    X_cov_input = X_scaled
+                
+                if DEBUG_FAST:
+                    print("  [DEBUG_FAST] Using EmpiricalCovariance instead of MinCovDet")
+                    cov_estimator = EmpiricalCovariance().fit(X_cov_input)
+                else:
+                    cov_estimator = MinCovDet(random_state=42).fit(X_cov_input)
+                mahalanobis_dist = cov_estimator.mahalanobis(X_cov_input)
             
             # Isolation Forest
-            iso_forest = IsolationForest(random_state=42).fit(X_scaled)
-            iso_scores = iso_forest.decision_function(X_scaled)
+            if RUN_ISOLATION_FOREST:
+                with Timer("IsolationForest"):
+                    iso_forest = IsolationForest(random_state=42).fit(X_scaled)
+                    iso_scores = iso_forest.decision_function(X_scaled)
+            else:
+                print("  [DEBUG_FAST] Skipping IsolationForest")
+                iso_scores = np.zeros(n_samples)
             
             # Add to covariance features
             for i, cf in enumerate(cov_features):
@@ -357,54 +388,60 @@ def main():
             
         # PCA
         try:
-            pca = PCA(n_components=2, random_state=42)
-            X_pca = pca.fit_transform(X_scaled)
-            explained_var = pca.explained_variance_ratio_
-            
-            # Print Top Loadings
-            pc1_loadings = pca.components_[0]
-            top_idx = np.argsort(np.abs(pc1_loadings))[::-1][:5]
-            print(f"  [PCA Diagnostics] Explained Variance: PC1={explained_var[0]:.2f}, PC2={explained_var[1]:.2f}")
-            print(f"  [PCA Diagnostics] Top PC1 Covariance Feature Indices: {top_idx}")
-            
-            plt.figure()
-            plt.scatter(X_pca[:, 0], X_pca[:, 1])
-            for i, txt in enumerate(subs):
-                plt.annotate(txt, (X_pca[i, 0], X_pca[i, 1]))
-            plt.title(f"PCA of Subject Covariances (Status: Confirmed)\nExplained Var: {explained_var[0]:.2f}, {explained_var[1]:.2f}\nCommit: {get_git_commit()}")
-            plt.savefig(fig_dir / "pca_subjects.png")
-            plt.close()
+            with Timer("PCA"):
+                pca = PCA(n_components=2, random_state=42)
+                X_pca = pca.fit_transform(X_scaled)
+                explained_var = pca.explained_variance_ratio_
+                
+                # Print Top Loadings
+                pc1_loadings = pca.components_[0]
+                top_idx = np.argsort(np.abs(pc1_loadings))[::-1][:5]
+                print(f"  [PCA Diagnostics] Explained Variance: PC1={explained_var[0]:.2f}, PC2={explained_var[1]:.2f}")
+                print(f"  [PCA Diagnostics] Top PC1 Covariance Feature Indices: {top_idx}")
+                
+                plt.figure()
+                plt.scatter(X_pca[:, 0], X_pca[:, 1])
+                for i, txt in enumerate(subs):
+                    plt.annotate(txt, (X_pca[i, 0], X_pca[i, 1]))
+                plt.title(f"PCA of Subject Covariances (Status: Confirmed)\nExplained Var: {explained_var[0]:.2f}, {explained_var[1]:.2f}\nCommit: {get_git_commit()}")
+                plt.savefig(fig_dir / "pca_subjects.png")
+                plt.close()
         except Exception as e:
             print(f"  [FATAL ERROR] PCA failed: {e}")
         
         # t-SNE (Exploratory)
         try:
-            max_perp = max(1, min(config['tsne'].get('perplexity', 5), len(subs) - 1))
-            tsne = TSNE(n_components=2, perplexity=max_perp, random_state=42)
-            X_tsne = tsne.fit_transform(X_scaled)
-            plt.figure()
-            plt.scatter(X_tsne[:, 0], X_tsne[:, 1])
-            for i, txt in enumerate(subs):
-                plt.annotate(txt, (X_tsne[i, 0], X_tsne[i, 1]))
-            plt.title(f"t-SNE of Subject Covariances (Status: Exploratory)\nCommit: {get_git_commit()}")
-            plt.savefig(fig_dir / "tsne_subjects.png")
-            plt.close()
+            with Timer("t-SNE"):
+                max_perp = max(1, min(config['tsne'].get('perplexity', 5), len(subs) - 1))
+                n_iter = 250 if DEBUG_FAST else 1000
+                tsne = TSNE(n_components=2, perplexity=max_perp, random_state=42, n_iter=n_iter)
+                X_tsne = tsne.fit_transform(X_scaled)
+                plt.figure()
+                plt.scatter(X_tsne[:, 0], X_tsne[:, 1])
+                for i, txt in enumerate(subs):
+                    plt.annotate(txt, (X_tsne[i, 0], X_tsne[i, 1]))
+                plt.title(f"t-SNE of Subject Covariances (Status: Exploratory)\nCommit: {get_git_commit()}")
+                plt.savefig(fig_dir / "tsne_subjects.png")
+                plt.close()
         except Exception as e:
             print(f"  [FATAL ERROR] t-SNE failed: {e}")
         
-        if UMAP_AVAILABLE:
+        if RUN_UMAP and UMAP_AVAILABLE:
             try:
-                reducer = umap.UMAP(n_neighbors=config['umap'].get('n_neighbors', 5), random_state=42)
-                X_umap = reducer.fit_transform(X_scaled)
-                plt.figure()
-                plt.scatter(X_umap[:, 0], X_umap[:, 1])
-                for i, txt in enumerate(subs):
-                    plt.annotate(txt, (X_umap[i, 0], X_umap[i, 1]))
-                plt.title(f"UMAP of Subject Covariances (Status: Exploratory)\nCommit: {get_git_commit()}")
-                plt.savefig(fig_dir / "umap_subjects.png")
-                plt.close()
+                with Timer("UMAP"):
+                    reducer = umap.UMAP(n_neighbors=config['umap'].get('n_neighbors', 5), random_state=42)
+                    X_umap = reducer.fit_transform(X_scaled)
+                    plt.figure()
+                    plt.scatter(X_umap[:, 0], X_umap[:, 1])
+                    for i, txt in enumerate(subs):
+                        plt.annotate(txt, (X_umap[i, 0], X_umap[i, 1]))
+                    plt.title(f"UMAP of Subject Covariances (Status: Exploratory)\nCommit: {get_git_commit()}")
+                    plt.savefig(fig_dir / "umap_subjects.png")
+                    plt.close()
             except Exception as e:
                 print(f"  [FATAL ERROR] UMAP failed: {e}")
+        elif not RUN_UMAP:
+            print("  [DEBUG_FAST] Skipping UMAP")
             
     # 5. Feature Engineering and Correlation Analysis
     with Timer("Stage 4: Feature Correlation"):
