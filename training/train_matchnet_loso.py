@@ -175,7 +175,7 @@ def evaluate_model(model, X, Y_A, Y_B, device, window_sec=10, zero_eeg=False, sh
                 
     return n_correct, n_total
 
-def train_matchnet_loso(eeg_model, channels, lowcut, highcut, batch_size=128, num_workers=2, margin=0.1, dropout=0.1, checkpoint_path="", loss_type="contrastive", audio_model="standard"):
+def train_matchnet_loso(eeg_model, channels, lowcut, highcut, batch_size=128, num_workers=2, margin=0.1, dropout=0.1, checkpoint_path="", loss_type="contrastive", audio_model="standard", target_subjects=None):
     torch.backends.cudnn.benchmark = True
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Using device: {device} | MatchNet ({eeg_model}) | Channels: {channels}")
@@ -194,10 +194,12 @@ def train_matchnet_loso(eeg_model, channels, lowcut, highcut, batch_size=128, nu
     all_accs_zero_dict = {}
     all_accs_shuf_dict = {}
     
-    for held_out_path, train_paths in folds:
-        held_out_key = str(held_out_path)
-        print(f"\nEvaluating fold with held-out subject: {held_out_path.stem}")
-        print(f"  [Memory] Pre-fold RAM: {psutil.virtual_memory().percent}% ({psutil.virtual_memory().used / 1e9:.2f} GB used)")
+    for fold_idx, (held_out_path, train_paths) in enumerate(folds):
+        subj_id = held_out_path.stem.split('_')[0]
+        if target_subjects and subj_id not in target_subjects:
+            continue
+            
+        print(f"\n[{fold_idx+1}/{len(folds)}] Testing on Subject: {subj_id} ({held_out_path.name}) | [Memory] Pre-fold RAM: {psutil.virtual_memory().percent}% ({psutil.virtual_memory().used / 1e9:.2f} GB used)")
         
         train_exs = []
         for p in train_paths:
@@ -408,6 +410,7 @@ if __name__ == "__main__":
     parser.add_argument("--dropout", type=float, default=0.1, help="Input dropout probability")
     parser.add_argument("--checkpoint", type=str, default="", help="Path to pre-trained model for curriculum learning")
     parser.add_argument("--loss", type=str, default="contrastive", choices=["contrastive", "infonce"], help="Loss function")
+    parser.add_argument("--subjects", type=str, nargs='+', help="Specific subjects to train (e.g. S8 S9 S11)")
     args = parser.parse_args()
     
-    train_matchnet_loso(args.model, args.channels, args.lowcut, args.highcut, args.batch_size, args.num_workers, args.margin, args.dropout, args.checkpoint, args.loss, args.audio_model)
+    train_matchnet_loso(args.model, args.channels, args.lowcut, args.highcut, args.batch_size, args.num_workers, args.margin, args.dropout, args.checkpoint, args.loss, args.audio_model, args.subjects)
