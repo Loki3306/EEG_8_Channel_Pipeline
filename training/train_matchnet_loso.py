@@ -205,6 +205,7 @@ def train_matchnet_loso(eeg_model, channels, lowcut, highcut, batch_size=128, nu
         for p in train_paths:
             train_exs.extend(subject_examples[str(p)])
             
+        held_out_key = str(held_out_path)
         test_exs = subject_examples[held_out_key]
         
         np.random.seed(42)
