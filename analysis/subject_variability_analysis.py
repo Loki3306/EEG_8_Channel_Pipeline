@@ -81,15 +81,19 @@ def frobenius_distance(cov1, cov2):
     return np.linalg.norm(cov1 - cov2, ord='fro')
 
 def riemannian_distance(cov1, cov2):
-    from scipy.linalg import logm, sqrtm, inv
+    from scipy.linalg import eigvals
     try:
-        # Regularize to prevent singular logm issues
-        c1 = cov1 + 1e-6 * np.eye(cov1.shape[0])
-        c2 = cov2 + 1e-6 * np.eye(cov2.shape[0])
-        sq_inv = inv(sqrtm(c1))
-        mat = sq_inv @ c2 @ sq_inv
-        log_mat = logm(mat)
-        return np.linalg.norm(log_mat, ord='fro')
+        def ensure_spd(c):
+            w, v = np.linalg.eigh(c)
+            w = np.clip(w, 1e-6, None)
+            return v @ np.diag(w) @ v.T
+            
+        c1 = ensure_spd(cov1)
+        c2 = ensure_spd(cov2)
+        
+        gen_evals = eigvals(c2, c1)
+        gen_evals = np.clip(np.real(gen_evals), 1e-8, None)
+        return np.sqrt(np.sum(np.log(gen_evals)**2))
     except Exception as e:
         print(f"  [Warning] Riemannian distance failed: {e}")
         return np.nan
@@ -249,13 +253,13 @@ def main():
                 # PSD stability: variance of mean PSDs across trials
                 ss_dict["psd_stability"] = np.mean(np.var(trial_psds, axis=0))
                 
-                # SNR Estimate: Ratio of signal power to noise power
+                # Spectral Power Ratio: Ratio of low-frequency to high-frequency power
                 signal_bands = ['delta', 'theta', 'alpha']
                 noise_bands = ['beta', 'gamma']
                 
                 signal_power = np.mean([bp[f"avg_{b}_power"] for b in signal_bands if f"avg_{b}_power" in bp])
                 noise_power = np.mean([bp[f"avg_{b}_power"] for b in noise_bands if f"avg_{b}_power" in bp])
-                ss_dict["snr_estimate"] = signal_power / (noise_power + 1e-12)
+                ss_dict["spectral_power_ratio"] = signal_power / (noise_power + 1e-12)
                 # ------------------------------------------------------
                 
                 bandpowers.append(bp)
@@ -320,10 +324,13 @@ def main():
         try:
             X_scaled = StandardScaler().fit_transform(X)
             
-            # Distance to Population Centroid
-            mean_riem = np.mean(riem_dist, axis=1)
-            mean_frob = np.mean(frob_dist, axis=1)
-            mean_cos = np.mean(cos_sim, axis=1)
+            # True Population Centroid Distance
+            cov_list = list(covariances.values())
+            population_centroid = np.mean(cov_list, axis=0)
+            
+            centroid_riem = [riemannian_distance(c, population_centroid) for c in cov_list]
+            centroid_frob = [frobenius_distance(c, population_centroid) for c in cov_list]
+            centroid_cos = [cosine_similarity_cov(c, population_centroid) for c in cov_list]
             
             # Mahalanobis Distance
             cov_estimator = MinCovDet(random_state=42).fit(X_scaled)
@@ -335,9 +342,9 @@ def main():
             
             # Add to covariance features
             for i, cf in enumerate(cov_features):
-                cf['mean_riemannian_dist'] = mean_riem[i]
-                cf['mean_frobenius_dist'] = mean_frob[i]
-                cf['mean_cosine_sim'] = mean_cos[i]
+                cf['mean_riemannian_dist'] = centroid_riem[i]
+                cf['mean_frobenius_dist'] = centroid_frob[i]
+                cf['mean_cosine_sim'] = centroid_cos[i]
                 cf['mahalanobis_dist'] = mahalanobis_dist[i]
                 cf['isolation_forest_score'] = iso_scores[i]
                 
@@ -410,7 +417,8 @@ def main():
         merged = pd.merge(merged, _strip_meta(cf_df), on="subject")
         
         numeric_cols = merged.select_dtypes(include=[np.number])
-        feature_cols = [c for c in numeric_cols.columns if c not in ['accuracy', 'rank']]
+        # Exclude 'accuracy', 'rank', and all channel-specific features ('ch_X_...')
+        feature_cols = [c for c in numeric_cols.columns if c not in ['accuracy', 'rank'] and not c.startswith('ch_')]
         
         correlations = []
         for f in feature_cols:
@@ -509,31 +517,31 @@ def main():
             f.write("## 8. Dual-Hypothesis Decision Test\n")
             f.write("### A. Domain Shift Hypothesis\n")
             domain_metrics = ['mean_riemannian_dist', 'mean_frobenius_dist', 'mean_cosine_sim', 'mahalanobis_dist', 'isolation_forest_score']
-            domain_corr = corr_df[corr_df['feature'].isin(domain_metrics)]
+            domain_corr = corr_df[corr_df['feature'].isin(domain_metrics)].copy()
+            # Mark IsolationForest as exploratory
+            domain_corr.loc[domain_corr['feature'] == 'isolation_forest_score', 'feature'] = 'isolation_forest_score (Exploratory)'
             if len(domain_corr) > 0:
                 f.write(domain_corr[['feature', 'pearson_r', 'p_value_fdr']].to_markdown(index=False) + "\n\n")
             else:
                 f.write("*Domain metrics not computed.*\n\n")
             
             f.write("### B. Signal Quality Hypothesis\n")
-            signal_metrics = ['cov_stability', 'psd_stability', 'snr_estimate', 'avg_entropy', 'avg_var']
+            signal_metrics = ['cov_stability', 'psd_stability', 'spectral_power_ratio', 'avg_entropy', 'avg_var']
             signal_corr = corr_df[corr_df['feature'].isin(signal_metrics)]
             if len(signal_corr) > 0:
                 f.write(signal_corr[['feature', 'pearson_r', 'p_value_fdr']].to_markdown(index=False) + "\n\n")
             else:
                 f.write("*Signal quality metrics not computed.*\n\n")
             
-            # Auto-Decision
-            best_domain_r = domain_corr['pearson_r'].abs().max() if len(domain_corr) > 0 else 0
-            best_signal_r = signal_corr['pearson_r'].abs().max() if len(signal_corr) > 0 else 0
-            
-            f.write("### Final Assessment\n")
-            if best_domain_r > best_signal_r and best_domain_r > 0.4:
-                f.write("**Conclusion:** Domain Shift Metrics show stronger correlation with accuracy. Poor performers are likely Out-of-Distribution. \n**Next Action:** Prioritize CORAL, MMD, or DANN implementation.\n")
-            elif best_signal_r > best_domain_r and best_signal_r > 0.4:
-                f.write("**Conclusion:** Signal Quality Metrics show stronger correlation with accuracy. Poor performers simply have noisier/weaker attention signals. \n**Next Action:** Prioritize data cleaning, trial rejection, or SNR calibration over domain adaptation.\n")
-            else:
-                f.write("**Conclusion:** Neither hypothesis strongly correlates with accuracy (|r| < 0.4). \n**Next Action:** Latent space analysis or architecture-specific debugging is required.\n")
+            f.write("### Final Assessment & Evidence Summary\n")
+            f.write("The auto-decision engine has been disabled to prevent statistically unsafe conclusions. ")
+            f.write("Instead, please review the correlations above and determine:\n")
+            f.write("1. Are the correlations in Hypothesis A (Domain Shift) strong and statistically significant?\n")
+            f.write("2. Are the correlations in Hypothesis B (Signal Quality) strong and statistically significant?\n")
+            f.write("\n**Decision Matrix:**\n")
+            f.write("- If **A** dominates: Domain Adaptation (CORAL, MMD, DANN) is strongly justified.\n")
+            f.write("- If **B** dominates: Calibration, data cleaning, and trial-level SNR filtering are justified.\n")
+            f.write("- If neither dominates: Consider latent-space analysis or checking for dataset leakage.\n")
 
 if __name__ == "__main__":
         main()
