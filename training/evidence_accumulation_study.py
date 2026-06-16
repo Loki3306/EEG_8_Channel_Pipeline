@@ -99,7 +99,7 @@ def run_study():
         test_exs = load_subject_examples(test_path)
         X_te, YA_te, YB_te = prepare_dataset(test_exs, CHANNELS, LOWCUT, HIGHCUT, test_path.stem, mapping, envelopes)
         
-        model = ContrastiveMatchNet(eeg_model_type="eegnet", eeg_channels=len(CHANNELS), audio_channels=NUM_BANDS, latent_dim=64, lags=[], audio_model_type="standard").to(device)
+        model = ContrastiveMatchNet(eeg_model_type="eegnet", eeg_channels=len(CHANNELS), audio_channels=NUM_BANDS, latent_dim=64, audio_model_type="standard").to(device)
         model.load_state_dict(torch.load(ckpt, map_location=device, weights_only=True))
         model.eval()
         
