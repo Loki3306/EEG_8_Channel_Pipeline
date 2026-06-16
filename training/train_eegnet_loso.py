@@ -270,7 +270,6 @@ def train_eegnet_loso(lowcut, highcut):
 
     # Auto-save accuracy for downstream Subject Variability Analysis
     import pandas as pd
-    import os
     subject_names = [p.stem.split('_')[0] for p, _ in folds]
     df = pd.DataFrame({
         "subject": subject_names,

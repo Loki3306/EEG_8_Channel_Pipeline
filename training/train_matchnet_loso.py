@@ -257,7 +257,7 @@ def train_matchnet_loso(eeg_model, channels, lowcut, highcut, batch_size=128, nu
         # Model
         model = ContrastiveMatchNet(eeg_model_type=eeg_model, eeg_channels=len(channels), audio_channels=NUM_BANDS, latent_dim=64).to(device)
         optimizer = optim.Adam(model.parameters(), lr=1e-3, weight_decay=1e-4)
-        scaler = torch.cuda.amp.GradScaler()
+        scaler = torch.amp.GradScaler('cuda')
         
         best_val_acc = 0.0
         best_weights = deepcopy(model.state_dict())
@@ -278,7 +278,7 @@ def train_matchnet_loso(eeg_model, channels, lowcut, highcut, batch_size=128, nu
                 byb = byb.to(device, non_blocking=True)
                 
                 optimizer.zero_grad()
-                with torch.cuda.amp.autocast():
+                with torch.amp.autocast('cuda'):
                     z_eeg, z_a, z_b = model(bx, bya, byb)
                     loss, sa, sb = contrastive_loss(z_eeg, z_a, z_b, margin=0.1)
                 
@@ -382,7 +382,6 @@ def train_matchnet_loso(eeg_model, channels, lowcut, highcut, batch_size=128, nu
     # Auto-save 10s accuracy for downstream Subject Variability Analysis
     if 10 in all_accs_norm_dict:
         import pandas as pd
-        import os
         subject_names = [p.stem.split('_')[0] for p, _ in folds]
         df = pd.DataFrame({
             "subject": subject_names,
