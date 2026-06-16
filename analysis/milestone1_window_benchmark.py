@@ -16,7 +16,7 @@ from baselines.ridge_aad import subject_files, load_subject_examples
 FS = 64
 CHANNELS = [13, 46, 43, 23, 50, 0, 52, 14]
 LOWCUT = 1.0
-HIGHCUT = 32.0
+HIGHCUT = 6.0
 
 def pearson_corr(x, y, dim=1):
     x_centered = x - x.mean(dim=dim, keepdim=True)

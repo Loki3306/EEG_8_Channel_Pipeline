@@ -21,7 +21,7 @@ from torch.utils.data import TensorDataset, DataLoader
 FS = 64
 CHANNELS = [13, 46, 43, 23, 50, 0, 52, 14]
 LOWCUT = 1.0
-HIGHCUT = 32.0
+HIGHCUT = 6.0
 NUM_BANDS = 1 # Gammatone
 TRAIN_WINDOW_SEC = 2.0
 TRAIN_HOP_SEC = 1.0
