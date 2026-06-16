@@ -86,8 +86,13 @@ def prepare_dataset(examples, channels, lowcut, highcut, subject_id, mapping, en
         env_b = normalize_array(env_b.T).T
         
         X.append(x_norm)
-        Y_A.append(env_a)
-        Y_B.append(env_b)
+        # ex.label == 1 means wavA is attended, ex.label == 2 means wavB is attended
+        if ex.label == 1:
+            Y_A.append(env_a)
+            Y_B.append(env_b)
+        else:
+            Y_A.append(env_b)
+            Y_B.append(env_a)
         
     return X, Y_A, Y_B
 

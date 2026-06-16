@@ -74,19 +74,26 @@ def prepare_dataset(examples, lowcut, highcut):
         env_a = normalize_array(wav_a.reshape(-1, 1)).ravel()
         env_b = normalize_array(wav_b.reshape(-1, 1)).ravel()
         
-        # Target is ALWAYS env_a
-        target_env = env_a
-        
+        # Swap labels if needed
+        if ex.label == 1:
+            target_env = env_a
+            att_env = env_a
+            unatt_env = env_b
+        else:
+            target_env = env_b
+            att_env = env_b
+            unatt_env = env_a
+            
         min_len = min(x_norm.shape[1], len(target_env))
         x_norm = x_norm[:, :min_len]
         target_env = target_env[:min_len]
-        env_a = env_a[:min_len]
-        env_b = env_b[:min_len]
+        att_env = att_env[:min_len]
+        unatt_env = unatt_env[:min_len]
         
         X.append(x_norm)
         Y.append(target_env)
-        Y_A.append(env_a)
-        Y_B.append(env_b)
+        Y_A.append(att_env)
+        Y_B.append(unatt_env)
         
     return X, Y, Y_A, Y_B
 
