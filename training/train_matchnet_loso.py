@@ -173,7 +173,7 @@ def evaluate_model(model, X, Y_A, Y_B, device, window_sec=10, zero_eeg=False, sh
                 
     return n_correct, n_total
 
-def train_matchnet_loso(eeg_model, channels, lowcut, highcut, batch_size=128, num_workers=2, margin=0.1, dropout=0.1, checkpoint_path="", loss_type="contrastive"):
+def train_matchnet_loso(eeg_model, channels, lowcut, highcut, batch_size=128, num_workers=2, margin=0.1, dropout=0.1, checkpoint_path="", loss_type="contrastive", audio_model="standard"):
     torch.backends.cudnn.benchmark = True
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Using device: {device} | MatchNet ({eeg_model}) | Channels: {channels}")
@@ -255,7 +255,7 @@ def train_matchnet_loso(eeg_model, channels, lowcut, highcut, batch_size=128, nu
         )
             
         # Model
-        model = ContrastiveMatchNet(eeg_model_type=eeg_model, eeg_channels=len(channels), audio_channels=NUM_BANDS, latent_dim=64).to(device)
+        model = ContrastiveMatchNet(eeg_model_type=eeg_model, eeg_channels=len(channels), audio_channels=NUM_BANDS, latent_dim=64, audio_model_type=audio_model).to(device)
         
         if checkpoint_path and os.path.exists(checkpoint_path):
             print(f"Loading pre-trained checkpoint for fine-tuning: {checkpoint_path}")
@@ -395,7 +395,8 @@ def train_matchnet_loso(eeg_model, channels, lowcut, highcut, batch_size=128, nu
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Train Contrastive MatchNet")
-    parser.add_argument("--model", type=str, default="eegnet", choices=["eegnet", "atcnet"], help="Base EEG encoder")
+    parser.add_argument("--model", type=str, default="eegnet", choices=["eegnet", "atcnet", "eegnet_tcn"], help="Base EEG encoder")
+    parser.add_argument("--audio_model", type=str, default="standard", choices=["standard", "inception"], help="Audio encoder type")
     parser.add_argument("--channels", type=int, nargs='+', default=[13, 46, 43, 23, 50, 0, 52, 14])
     parser.add_argument("--lowcut", type=float, default=1.0)
     parser.add_argument("--highcut", type=float, default=6.0)
@@ -407,4 +408,4 @@ if __name__ == "__main__":
     parser.add_argument("--loss", type=str, default="contrastive", choices=["contrastive", "infonce"], help="Loss function")
     args = parser.parse_args()
     
-    train_matchnet_loso(args.model, args.channels, args.lowcut, args.highcut, args.batch_size, args.num_workers, args.margin, args.dropout, args.checkpoint, args.loss)
+    train_matchnet_loso(args.model, args.channels, args.lowcut, args.highcut, args.batch_size, args.num_workers, args.margin, args.dropout, args.checkpoint, args.loss, args.audio_model)
