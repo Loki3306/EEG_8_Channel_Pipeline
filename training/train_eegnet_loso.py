@@ -268,6 +268,18 @@ def train_eegnet_loso(lowcut, highcut):
     print(f" Shuffle EEG : {final_shuffle*100:.2f}%")
     print("="*50)
 
+    # Auto-save accuracy for downstream Subject Variability Analysis
+    import pandas as pd
+    import os
+    subject_names = [p.stem.split('_')[0] for p, _ in folds]
+    df = pd.DataFrame({
+        "subject": subject_names,
+        "accuracy": all_normal_accs
+    })
+    os.makedirs("results/statistics", exist_ok=True)
+    df.to_csv("results/statistics/loso_accuracy.csv", index=False)
+    print("\n[Auto-Saved] Normal EEG LOSO accuracies to results/statistics/loso_accuracy.csv")
+
 if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser()

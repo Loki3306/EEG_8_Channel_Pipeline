@@ -379,6 +379,19 @@ def train_matchnet_loso(eeg_model, channels, lowcut, highcut, batch_size=128, nu
         print(f" Window {w_sec:2d}s | Normal: {final_acc_norm*100:.2f}% | Zero-EEG: {final_acc_zero*100:.2f}% | Shuffled: {final_acc_shuf*100:.2f}%")
     print("="*50)
 
+    # Auto-save 10s accuracy for downstream Subject Variability Analysis
+    if 10 in all_accs_norm_dict:
+        import pandas as pd
+        import os
+        subject_names = [p.stem.split('_')[0] for p, _ in folds]
+        df = pd.DataFrame({
+            "subject": subject_names,
+            "accuracy": all_accs_norm_dict[10]
+        })
+        os.makedirs("results/statistics", exist_ok=True)
+        df.to_csv("results/statistics/loso_accuracy.csv", index=False)
+        print("\n[Auto-Saved] 10s LOSO accuracies to results/statistics/loso_accuracy.csv")
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Train Contrastive MatchNet")
     parser.add_argument("--model", type=str, default="eegnet", choices=["eegnet", "atcnet"], help="Base EEG encoder")
