@@ -29,7 +29,7 @@ LOWCUT = 1.0
 HIGHCUT = 6.0
 NUM_BANDS = 28
 
-def evaluate_model_version(model_lags, eeg_model, audio_model, loss_type, temporal_pooling, X_tr_full, YA_tr_full, YB_tr_full, X_va_full, YA_va_full, YB_va_full, X_te_full, YA_te_full, YB_te_full, device, epochs, batch_size):
+def evaluate_model_version(model_lags, eeg_model, audio_model, loss_type, temporal_pooling, late_attention, X_tr_full, YA_tr_full, YB_tr_full, X_va_full, YA_va_full, YB_va_full, X_te_full, YA_te_full, YB_te_full, device, epochs, batch_size):
     # Chunk training data
     X_tr, YA_tr, YB_tr = [], [], []
     for i in range(len(X_tr_full)):
@@ -44,6 +44,9 @@ def evaluate_model_version(model_lags, eeg_model, audio_model, loss_type, tempor
     train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, pin_memory=True)
         
     model = ContrastiveMatchNet(eeg_model_type=eeg_model, eeg_channels=len(CHANNELS), audio_channels=NUM_BANDS, latent_dim=64, lags=model_lags, audio_model_type=audio_model, temporal_pooling=temporal_pooling).to(device)
+    if late_attention:
+        model.enable_late_attention()
+        
     optimizer = optim.Adam(model.parameters(), lr=1e-3, weight_decay=1e-4)
     scaler = torch.amp.GradScaler('cuda' if torch.cuda.is_available() else 'cpu')
     
@@ -63,9 +66,9 @@ def evaluate_model_version(model_lags, eeg_model, audio_model, loss_type, tempor
             with torch.amp.autocast('cuda' if torch.cuda.is_available() else 'cpu'):
                 z_eeg, z_a, z_b = model(bx, bya, byb)
                 if loss_type == "infonce":
-                    loss, sa, sb = infonce_loss(z_eeg, z_a, z_b, temperature=0.1)
+                    loss, sa, sb = infonce_loss(z_eeg, z_a, z_b, temperature=0.1, model=model)
                 else:
-                    loss, sa, sb = contrastive_loss(z_eeg, z_a, z_b, margin=0.05)
+                    loss, sa, sb = contrastive_loss(z_eeg, z_a, z_b, margin=0.05, model=model)
             
             scaler.scale(loss).backward()
             scaler.step(optimizer)

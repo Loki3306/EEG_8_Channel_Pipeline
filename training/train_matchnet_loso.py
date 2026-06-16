@@ -162,8 +162,12 @@ def evaluate_model(model, X, Y_A, Y_B, device, window_sec=10, zero_eeg=False, sh
                     sim_a = pearson_corr(z_eeg, z_a, dim=1).mean().item()
                     sim_b = pearson_corr(z_eeg, z_b, dim=1).mean().item()
                 else:
-                    sim_a = F.cosine_similarity(z_eeg, z_a, dim=1).mean().item()
-                    sim_b = F.cosine_similarity(z_eeg, z_b, dim=1).mean().item()
+                    if hasattr(model, 'compute_similarity'):
+                        sim_a = model.compute_similarity(z_eeg, z_a).mean().item()
+                        sim_b = model.compute_similarity(z_eeg, z_b).mean().item()
+                    else:
+                        sim_a = F.cosine_similarity(z_eeg, z_a, dim=1).mean().item()
+                        sim_b = F.cosine_similarity(z_eeg, z_b, dim=1).mean().item()
                 
                 if sim_a > sim_b:
                     n_correct += 1.0
@@ -296,10 +300,10 @@ def train_matchnet_loso(eeg_model, channels, lowcut, highcut, batch_size=128, nu
                 optimizer.zero_grad()
                 with torch.cuda.amp.autocast():
                     z_eeg, z_a, z_b = model(bx, bya, byb)
-                    if loss_type == "infonce":
-                        loss, sa, sb = infonce_loss(z_eeg, z_a, z_b, temperature=0.1)
-                    else:
-                        loss, sa, sb = contrastive_loss(z_eeg, z_a, z_b, margin=margin)
+                    if loss_type == "contrastive":
+                        loss, sa, sb = contrastive_loss(z_eeg, z_a, z_b, margin, model=model)
+                    elif loss_type == "infonce":
+                        loss, sa, sb = infonce_loss(z_eeg, z_a, z_b, model=model, temperature=0.1)
                 
                 scaler.scale(loss).backward()
                 scaler.step(optimizer)
