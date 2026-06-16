@@ -12,6 +12,25 @@ from scipy.stats import skew, kurtosis, entropy, mannwhitneyu, pearsonr, ttest_i
 from sklearn.manifold import TSNE
 from sklearn.decomposition import PCA
 from statsmodels.stats.multitest import multipletests
+import time
+import traceback
+
+class Timer:
+    def __init__(self, name):
+        self.name = name
+    def __enter__(self):
+        print(f"[{self.name}] Started...")
+        self.start = time.time()
+        return self
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        duration = time.time() - self.start
+        if exc_type is None:
+            print(f"[{self.name}] Completed in {duration:.2f} sec")
+        else:
+            print(f"[FATAL ERROR] {self.name} failed after {duration:.2f} sec")
+            print(f"Exception: {exc_type.__name__}: {exc_val}")
+            traceback.print_exception(exc_type, exc_val, exc_tb)
+        return False
 
 try:
     import umap
@@ -60,11 +79,15 @@ def frobenius_distance(cov1, cov2):
 def riemannian_distance(cov1, cov2):
     from scipy.linalg import logm, sqrtm, inv
     try:
-        sq_inv = inv(sqrtm(cov1))
-        mat = sq_inv @ cov2 @ sq_inv
+        # Regularize to prevent singular logm issues
+        c1 = cov1 + 1e-6 * np.eye(cov1.shape[0])
+        c2 = cov2 + 1e-6 * np.eye(cov2.shape[0])
+        sq_inv = inv(sqrtm(c1))
+        mat = sq_inv @ c2 @ sq_inv
         log_mat = logm(mat)
         return np.linalg.norm(log_mat, ord='fro')
-    except Exception:
+    except Exception as e:
+        print(f"  [Warning] Riemannian distance failed: {e}")
         return np.nan
 
 def cosine_similarity_cov(cov1, cov2):
@@ -142,267 +165,287 @@ def main():
 
     print("Analyzing actual subject files...")
     
-    bandpowers = []
-    signal_stats = []
-    covariances = {}
-    
-    for p in paths:
-        sub = p.stem.split('_')[0]
-        examples = load_subject_examples(p)
+    with Timer("Stage 1: Feature Extraction"):
+        bandpowers = []
+        signal_stats = []
+        covariances = {}
         
-        # Aggregate EEG data for subject
-        all_eeg = np.concatenate([ex.eeg for ex in examples], axis=0) # [time, channels]
-        n_channels = all_eeg.shape[1]
+        for i, p in enumerate(paths):
+            sub = p.stem.split('_')[0]
+            print(f"  [{i+1}/{len(paths)}] Processing subject {sub}...")
+            try:
+                examples = load_subject_examples(p)
         
-        # Signal stats (Per Channel)
-        c_mean = np.mean(all_eeg, axis=0)
-        c_std = np.std(all_eeg, axis=0)
-        c_var = np.var(all_eeg, axis=0)
-        c_skew = skew(all_eeg, axis=0)
-        c_kurt = kurtosis(all_eeg, axis=0)
-        
-        c_ent = []
-        c_act, c_mob, c_comp = [], [], []
-        for ch in range(n_channels):
-            hist, _ = np.histogram(all_eeg[:, ch], bins=100, density=True)
-            c_ent.append(entropy(hist + 1e-12))
+                # Aggregate EEG data for subject
+                all_eeg = np.concatenate([ex.eeg for ex in examples], axis=0) # [time, channels]
+                n_channels = all_eeg.shape[1]
+                
+                # Signal stats (Per Channel)
+                c_mean = np.mean(all_eeg, axis=0)
+                c_std = np.std(all_eeg, axis=0)
+                c_var = np.var(all_eeg, axis=0)
+                c_skew = skew(all_eeg, axis=0)
+                c_kurt = kurtosis(all_eeg, axis=0)
+                
+                c_ent = []
+                c_act, c_mob, c_comp = [], [], []
+                for ch in range(n_channels):
+                    hist, _ = np.histogram(all_eeg[:, ch], bins=100, density=True)
+                    c_ent.append(entropy(hist + 1e-12))
+                    
+                    act, mob, comp = hjorth_parameters(all_eeg[:, ch])
+                    c_act.append(act)
+                    c_mob.append(mob)
+                    c_comp.append(comp)
+                    
+                ss_dict = {"subject": sub}
+                for ch in range(n_channels):
+                    ss_dict[f"ch_{ch}_var"] = c_var[ch]
+                    ss_dict[f"ch_{ch}_entropy"] = c_ent[ch]
+                    ss_dict[f"ch_{ch}_hjorth_activity"] = c_act[ch]
+                    ss_dict[f"ch_{ch}_hjorth_mobility"] = c_mob[ch]
+                    ss_dict[f"ch_{ch}_hjorth_complexity"] = c_comp[ch]
+                    
+                ss_dict["avg_var"] = np.mean(c_var)
+                ss_dict["avg_entropy"] = np.mean(c_ent)
+                ss_dict["avg_hjorth_mobility"] = np.mean(c_mob)
+                ss_dict["avg_hjorth_complexity"] = np.mean(c_comp)
+                
+                signal_stats.append(ss_dict)
+                
+                # Covariance
+                cov_mat = np.cov(all_eeg, rowvar=False)
+                covariances[sub] = cov_mat
+                
+                # PSD Analysis (Welch's method)
+                fs = 64
+                freqs, psd = welch(all_eeg, fs=fs, axis=0) # psd is [freqs, channels]
+                
+                bands = config['bands']
+                bp = {"subject": sub}
+                for band_name, (low, high) in bands.items():
+                    idx = np.logical_and(freqs >= low, freqs <= high)
+                    band_psd = np.mean(psd[idx, :], axis=0) # [channels]
+                    
+                    for ch in range(n_channels):
+                        bp[f"ch_{ch}_{band_name}_power"] = band_psd[ch]
+                bp[f"avg_{band_name}_power"] = np.mean(band_psd)
+                
+                bandpowers.append(bp)
+            except Exception as e:
+                print(f"  [FATAL ERROR] Failed processing {sub}: {e}")
+                traceback.print_exc()
+                continue
+                
+            # Intermediate Save
+            bp_df = pd.DataFrame(bandpowers)
+            add_csv_metadata(bp_df).to_csv(stat_dir / "subject_bandpower.csv", index=False)
             
-            act, mob, comp = hjorth_parameters(all_eeg[:, ch])
-            c_act.append(act)
-            c_mob.append(mob)
-            c_comp.append(comp)
-            
-        ss_dict = {"subject": sub}
-        for ch in range(n_channels):
-            ss_dict[f"ch_{ch}_var"] = c_var[ch]
-            ss_dict[f"ch_{ch}_entropy"] = c_ent[ch]
-            ss_dict[f"ch_{ch}_hjorth_activity"] = c_act[ch]
-            ss_dict[f"ch_{ch}_hjorth_mobility"] = c_mob[ch]
-            ss_dict[f"ch_{ch}_hjorth_complexity"] = c_comp[ch]
-            
-        ss_dict["avg_var"] = np.mean(c_var)
-        ss_dict["avg_entropy"] = np.mean(c_ent)
-        ss_dict["avg_hjorth_mobility"] = np.mean(c_mob)
-        ss_dict["avg_hjorth_complexity"] = np.mean(c_comp)
-        
-        signal_stats.append(ss_dict)
-        
-        # Covariance
-        cov_mat = np.cov(all_eeg, rowvar=False)
-        covariances[sub] = cov_mat
-        
-        # PSD Analysis (Welch's method)
-        fs = 64
-        freqs, psd = welch(all_eeg, fs=fs, axis=0) # psd is [freqs, channels]
-        
-        bands = config['bands']
-        bp = {"subject": sub}
-        for band_name, (low, high) in bands.items():
-            idx = np.logical_and(freqs >= low, freqs <= high)
-            band_psd = np.mean(psd[idx, :], axis=0) # [channels]
-            
-            for ch in range(n_channels):
-                bp[f"ch_{ch}_{band_name}_power"] = band_psd[ch]
-            bp[f"avg_{band_name}_power"] = np.mean(band_psd)
-            
-        bandpowers.append(bp)
-
-    bp_df = pd.DataFrame(bandpowers)
-    add_csv_metadata(bp_df).to_csv(stat_dir / "subject_bandpower.csv", index=False)
-    
-    ss_df = pd.DataFrame(signal_stats)
-    add_csv_metadata(ss_df).to_csv(stat_dir / "subject_signal_stats.csv", index=False)
+            ss_df = pd.DataFrame(signal_stats)
+            add_csv_metadata(ss_df).to_csv(stat_dir / "subject_signal_stats.csv", index=False)
     
     # 3. Covariance Features & Distance Matrix
-    subs = list(covariances.keys())
-    n_subs = len(subs)
-    
-    frob_dist = np.zeros((n_subs, n_subs))
-    riem_dist = np.zeros((n_subs, n_subs))
-    cos_sim = np.zeros((n_subs, n_subs))
-    
-    cov_flat = []
-    cov_features = []
-    
-    for i, s1 in enumerate(subs):
-        c1 = covariances[s1]
-        cov_flat.append(c1.flatten())
+    with Timer("Stage 2: Covariance Features & Distance Matrix"):
+        subs = list(covariances.keys())
+        n_subs = len(subs)
         
-        cf = {
-            "subject": s1,
-            "trace": np.trace(c1),
-            "determinant": np.linalg.det(c1),
-            "condition_number": np.linalg.cond(c1)
-        }
-        cov_features.append(cf)
+        frob_dist = np.zeros((n_subs, n_subs))
+        riem_dist = np.zeros((n_subs, n_subs))
+        cos_sim = np.zeros((n_subs, n_subs))
         
-        for j, s2 in enumerate(subs):
-            c2 = covariances[s2]
-            frob_dist[i, j] = frobenius_distance(c1, c2)
-            riem_dist[i, j] = riemannian_distance(c1, c2)
-            cos_sim[i, j] = cosine_similarity_cov(c1, c2)
+        cov_flat = []
+        cov_features = []
+        
+        for i, s1 in enumerate(subs):
+            c1 = covariances[s1]
+            cov_flat.append(c1.flatten())
             
-    frob_df = pd.DataFrame(frob_dist, index=subs, columns=subs)
-    add_csv_metadata(frob_df).to_csv(stat_dir / "subject_frobenius_distance.csv")
-    
-    riem_df = pd.DataFrame(riem_dist, index=subs, columns=subs)
-    add_csv_metadata(riem_df).to_csv(stat_dir / "subject_riemannian_distance.csv")
-    
-    cos_df = pd.DataFrame(cos_sim, index=subs, columns=subs)
-    add_csv_metadata(cos_df).to_csv(stat_dir / "subject_cosine_similarity.csv")
-    
-    cf_df = pd.DataFrame(cov_features)
-    add_csv_metadata(cf_df).to_csv(stat_dir / "subject_covariance_features.csv", index=False)
-    
+            cf = {
+                "subject": s1,
+                "trace": np.trace(c1),
+                "determinant": np.linalg.det(c1),
+                "condition_number": np.linalg.cond(c1)
+            }
+            cov_features.append(cf)
+            
+            for j, s2 in enumerate(subs):
+                c2 = covariances[s2]
+                frob_dist[i, j] = frobenius_distance(c1, c2)
+                riem_dist[i, j] = riemannian_distance(c1, c2)
+                cos_sim[i, j] = cosine_similarity_cov(c1, c2)
+                
+        frob_df = pd.DataFrame(frob_dist, index=subs, columns=subs)
+        add_csv_metadata(frob_df).to_csv(stat_dir / "subject_frobenius_distance.csv")
+        
+        riem_df = pd.DataFrame(riem_dist, index=subs, columns=subs)
+        add_csv_metadata(riem_df).to_csv(stat_dir / "subject_riemannian_distance.csv")
+        
+        cos_df = pd.DataFrame(cos_sim, index=subs, columns=subs)
+        add_csv_metadata(cos_df).to_csv(stat_dir / "subject_cosine_similarity.csv")
+        
+        cf_df = pd.DataFrame(cov_features)
+        add_csv_metadata(cf_df).to_csv(stat_dir / "subject_covariance_features.csv", index=False)
+        
     # 4. Dimensionality Reduction
-    X = np.array(cov_flat)
-    
-    # PCA
-    pca = PCA(n_components=2, random_state=42)
-    X_pca = pca.fit_transform(X)
-    explained_var = pca.explained_variance_ratio_
-    
-    plt.figure()
-    plt.scatter(X_pca[:, 0], X_pca[:, 1])
-    for i, txt in enumerate(subs):
-        plt.annotate(txt, (X_pca[i, 0], X_pca[i, 1]))
-    plt.title(f"PCA of Subject Covariances (Status: Confirmed)\nExplained Var: {explained_var[0]:.2f}, {explained_var[1]:.2f}\nCommit: {get_git_commit()}")
-    plt.savefig(fig_dir / "pca_subjects.png")
-    plt.close()
-    
-    # t-SNE (Exploratory)
-    tsne = TSNE(n_components=2, perplexity=config['tsne'].get('perplexity', 5), random_state=42)
-    X_tsne = tsne.fit_transform(X)
-    plt.figure()
-    plt.scatter(X_tsne[:, 0], X_tsne[:, 1])
-    for i, txt in enumerate(subs):
-        plt.annotate(txt, (X_tsne[i, 0], X_tsne[i, 1]))
-    plt.title(f"t-SNE of Subject Covariances (Status: Exploratory)\nCommit: {get_git_commit()}")
-    plt.savefig(fig_dir / "tsne_subjects.png")
-    plt.close()
-    
-    try:
-        reducer = umap.UMAP(n_neighbors=config['umap'].get('n_neighbors', 5), random_state=42)
-        X_umap = reducer.fit_transform(X)
-        plt.figure()
-        plt.scatter(X_umap[:, 0], X_umap[:, 1])
-        for i, txt in enumerate(subs):
-            plt.annotate(txt, (X_umap[i, 0], X_umap[i, 1]))
-        plt.title(f"UMAP of Subject Covariances (Status: Exploratory)\nCommit: {get_git_commit()}")
-        plt.savefig(fig_dir / "umap_subjects.png")
-        plt.close()
-    except NameError:
-        pass
+    with Timer("Stage 3: Dimensionality Reduction"):
+        X = np.array(cov_flat)
         
+        # PCA
+        try:
+            pca = PCA(n_components=2, random_state=42)
+            X_pca = pca.fit_transform(X)
+            explained_var = pca.explained_variance_ratio_
+            
+            plt.figure()
+            plt.scatter(X_pca[:, 0], X_pca[:, 1])
+            for i, txt in enumerate(subs):
+                plt.annotate(txt, (X_pca[i, 0], X_pca[i, 1]))
+            plt.title(f"PCA of Subject Covariances (Status: Confirmed)\nExplained Var: {explained_var[0]:.2f}, {explained_var[1]:.2f}\nCommit: {get_git_commit()}")
+            plt.savefig(fig_dir / "pca_subjects.png")
+            plt.close()
+        except Exception as e:
+            print(f"  [FATAL ERROR] PCA failed: {e}")
+        
+        # t-SNE (Exploratory)
+        try:
+            max_perp = max(1, min(config['tsne'].get('perplexity', 5), len(subs) - 1))
+            tsne = TSNE(n_components=2, perplexity=max_perp, random_state=42)
+            X_tsne = tsne.fit_transform(X)
+            plt.figure()
+            plt.scatter(X_tsne[:, 0], X_tsne[:, 1])
+            for i, txt in enumerate(subs):
+                plt.annotate(txt, (X_tsne[i, 0], X_tsne[i, 1]))
+            plt.title(f"t-SNE of Subject Covariances (Status: Exploratory)\nCommit: {get_git_commit()}")
+            plt.savefig(fig_dir / "tsne_subjects.png")
+            plt.close()
+        except Exception as e:
+            print(f"  [FATAL ERROR] t-SNE failed: {e}")
+        
+        try:
+            reducer = umap.UMAP(n_neighbors=config['umap'].get('n_neighbors', 5), random_state=42)
+            X_umap = reducer.fit_transform(X)
+            plt.figure()
+            plt.scatter(X_umap[:, 0], X_umap[:, 1])
+            for i, txt in enumerate(subs):
+                plt.annotate(txt, (X_umap[i, 0], X_umap[i, 1]))
+            plt.title(f"UMAP of Subject Covariances (Status: Exploratory)\nCommit: {get_git_commit()}")
+            plt.savefig(fig_dir / "umap_subjects.png")
+            plt.close()
+        except NameError:
+            pass
+        except Exception as e:
+            print(f"  [FATAL ERROR] UMAP failed: {e}")
+            
     # 5. Feature Engineering and Correlation Analysis
-    # Drop metadata columns before merging to prevent duplicate suffixes
-    def _strip_meta(d):
-        return d.drop(columns=['commit_hash', 'timestamp', 'dataset'], errors='ignore')
-        
-    merged = pd.merge(_strip_meta(loso_df), _strip_meta(bp_df), on="subject")
-    merged = pd.merge(merged, _strip_meta(ss_df), on="subject")
-    merged = pd.merge(merged, _strip_meta(cf_df), on="subject")
-    
-    numeric_cols = merged.select_dtypes(include=[np.number])
-    feature_cols = [c for c in numeric_cols.columns if c not in ['accuracy', 'rank']]
-    
-    correlations = []
-    for f in feature_cols:
-        r, p_val = pearsonr(merged[f], merged['accuracy'])
-        correlations.append({
-            "feature": f,
-            "pearson_r": r,
-            "p_value": p_val,
-            "sample_size": len(merged)
-        })
-        
-    corr_df = pd.DataFrame(correlations)
-    # Multiple comparison correction
-    reject, pvals_corrected, _, _ = multipletests(corr_df['p_value'], method='fdr_bh')
-    corr_df['p_value_fdr'] = pvals_corrected
-    corr_df['significant'] = reject
-    
-    corr_df = corr_df.sort_values('pearson_r', ascending=False)
-    add_csv_metadata(corr_df).to_csv(stat_dir / "performance_correlations.csv", index=False)
-    
-    # 6. Good vs Bad Subject Analysis (Mann-Whitney U)
-    q1_acc = np.percentile(merged['accuracy'], config.get('bottom_percentile', 25))
-    q3_acc = np.percentile(merged['accuracy'], 100 - config.get('top_percentile', 25))
-    
-    good_subs = merged[merged['accuracy'] >= q3_acc]
-    bad_subs = merged[merged['accuracy'] <= q1_acc]
-    
-    tests = []
-    for f in feature_cols:
-        good_vals = good_subs[f].values
-        bad_vals = bad_subs[f].values
-        
-        if len(good_vals) < 2 or len(bad_vals) < 2:
-            continue
+    with Timer("Stage 4: Feature Correlation"):
+        # Drop metadata columns before merging to prevent duplicate suffixes
+        def _strip_meta(d):
+            return d.drop(columns=['commit_hash', 'timestamp', 'dataset'], errors='ignore')
             
-        stat, p_val = mannwhitneyu(good_vals, bad_vals, alternative='two-sided')
-        d = cohens_d(good_vals, bad_vals)
+        merged = pd.merge(_strip_meta(loso_df), _strip_meta(bp_df), on="subject")
+        merged = pd.merge(merged, _strip_meta(ss_df), on="subject")
+        merged = pd.merge(merged, _strip_meta(cf_df), on="subject")
         
-        tests.append({
-            "feature": f,
-            "mann_whitney_u": stat,
-            "p_value": p_val,
-            "cohens_d": d,
-            "good_mean": np.mean(good_vals),
-            "bad_mean": np.mean(bad_vals)
-        })
+        numeric_cols = merged.select_dtypes(include=[np.number])
+        feature_cols = [c for c in numeric_cols.columns if c not in ['accuracy', 'rank']]
         
-    tests_df = pd.DataFrame(tests)
-    tests_df = tests_df.sort_values('p_value')
-    add_csv_metadata(tests_df).to_csv(stat_dir / "good_vs_bad_tests.csv", index=False)
-    
-    # 7. Generate Strict Report
-    report_file = report_dir / "subject_variability_report.md"
-    write_metadata_header(report_file, "Subject Variability Analysis")
-    
-    with open(report_file, 'a') as f:
-        f.write("## 1. Dataset Summary\n")
-        f.write(f"- Total Subjects Analyzed: {len(merged)}\n")
-        f.write(f"- Mean Accuracy: {merged['accuracy'].mean():.4f}\n")
-        f.write(f"- Median Accuracy: {merged['accuracy'].median():.4f}\n")
-        f.write(f"- Accuracy StdDev: {merged['accuracy'].std():.4f}\n\n")
-        
-        f.write("## 2. LOSO Ranking\n")
-        f.write(loso_df[['subject', 'accuracy']].to_markdown(index=False) + "\n\n")
-        
-        f.write("## 3. Best Subjects (Top Quartile)\n")
-        f.write(good_subs[['subject', 'accuracy']].to_markdown(index=False) + "\n\n")
-        
-        f.write("## 4. Worst Subjects (Bottom Quartile)\n")
-        f.write(bad_subs[['subject', 'accuracy']].to_markdown(index=False) + "\n\n")
-        
-        f.write("## 5. Statistical Tests (Good vs Bad)\n")
-        f.write("Comparing Top 25% vs Bottom 25% subjects using Mann-Whitney U tests.\n\n")
-        sig_tests = tests_df[tests_df['p_value'] < 0.05]
-        if len(sig_tests) > 0:
-            f.write(sig_tests[['feature', 'p_value', 'cohens_d', 'good_mean', 'bad_mean']].to_markdown(index=False) + "\n\n")
-        else:
-            f.write("*No statistically significant differences (p < 0.05) found between Good and Bad subjects for the computed features.*\n\n")
+        correlations = []
+        for f in feature_cols:
+            r, p_val = pearsonr(merged[f], merged['accuracy'])
+            correlations.append({
+                "feature": f,
+                "pearson_r": r,
+                "p_value": p_val,
+                "sample_size": len(merged)
+            })
             
-        f.write("## 6. Significant Correlations\n")
-        f.write("Pearson correlations between subject features and LOSO accuracy (FDR corrected).\n\n")
-        sig_corr = corr_df[corr_df['significant'] == True]
-        if len(sig_corr) > 0:
-            f.write(sig_corr[['feature', 'pearson_r', 'p_value_fdr', 'sample_size']].to_markdown(index=False) + "\n\n")
-        else:
-            f.write("*No statistically significant correlations found after FDR correction.*\n\n")
-            
-        f.write("## 7. Cluster Observations\n")
-        f.write(f"- PCA Analysis completed. Explained Variance Ratio (PC1, PC2): {explained_var[0]:.2f}, {explained_var[1]:.2f}.\n")
-        f.write("- Frobenius, Riemannian, and Cosine similarity matrices have been written to the statistics directory.\n\n")
+        corr_df = pd.DataFrame(correlations)
+        # Multiple comparison correction
+        reject, pvals_corrected, _, _ = multipletests(corr_df['p_value'], method='fdr_bh')
+        corr_df['p_value_fdr'] = pvals_corrected
+        corr_df['significant'] = reject
         
-        f.write("## 8. Actionable Hypotheses\n")
-        if len(sig_corr) > 0:
-            top_feature = sig_corr.iloc[0]['feature']
-            r_val = sig_corr.iloc[0]['pearson_r']
-            f.write(f"- Hypothesis derived from data: {top_feature} exhibits a strong correlation (r={r_val:.2f}) with LOSO accuracy. Calibration algorithms targeting {top_feature} distribution matching may improve cross-subject generalization.\n")
-        else:
-            f.write("- Hypothesis derived from data: Simple bandpower and standard covariance markers do not linearly separate Top from Bottom performers. Non-linear mapping or direct adaptation (e.g., CORAL/DANN) is strictly required to address the domain shift.\n")
+        corr_df = corr_df.sort_values('pearson_r', ascending=False)
+        add_csv_metadata(corr_df).to_csv(stat_dir / "performance_correlations.csv", index=False)
+        
+        # 6. Good vs Bad Subject Analysis (Mann-Whitney U)
+        q1_acc = np.percentile(merged['accuracy'], config.get('bottom_percentile', 25))
+        q3_acc = np.percentile(merged['accuracy'], 100 - config.get('top_percentile', 25))
+        
+        good_subs = merged[merged['accuracy'] >= q3_acc]
+        bad_subs = merged[merged['accuracy'] <= q1_acc]
+        
+        tests = []
+        for f in feature_cols:
+            good_vals = good_subs[f].values
+            bad_vals = bad_subs[f].values
+            
+            if len(good_vals) < 2 or len(bad_vals) < 2:
+                continue
+                
+            stat, p_val = mannwhitneyu(good_vals, bad_vals, alternative='two-sided')
+            d = cohens_d(good_vals, bad_vals)
+            
+            tests.append({
+                "feature": f,
+                "mann_whitney_u": stat,
+                "p_value": p_val,
+                "cohens_d": d,
+                "good_mean": np.mean(good_vals),
+                "bad_mean": np.mean(bad_vals)
+            })
+            
+        tests_df = pd.DataFrame(tests)
+        tests_df = tests_df.sort_values('p_value')
+        add_csv_metadata(tests_df).to_csv(stat_dir / "good_vs_bad_tests.csv", index=False)
+        
+        # 7. Generate Strict Report
+        report_file = report_dir / "subject_variability_report.md"
+        write_metadata_header(report_file, "Subject Variability Analysis")
+        
+        with open(report_file, 'a') as f:
+            f.write("## 1. Dataset Summary\n")
+            f.write(f"- Total Subjects Analyzed: {len(merged)}\n")
+            f.write(f"- Mean Accuracy: {merged['accuracy'].mean():.4f}\n")
+            f.write(f"- Median Accuracy: {merged['accuracy'].median():.4f}\n")
+            f.write(f"- Accuracy StdDev: {merged['accuracy'].std():.4f}\n\n")
+            
+            f.write("## 2. LOSO Ranking\n")
+            f.write(loso_df[['subject', 'accuracy']].to_markdown(index=False) + "\n\n")
+            
+            f.write("## 3. Best Subjects (Top Quartile)\n")
+            f.write(good_subs[['subject', 'accuracy']].to_markdown(index=False) + "\n\n")
+            
+            f.write("## 4. Worst Subjects (Bottom Quartile)\n")
+            f.write(bad_subs[['subject', 'accuracy']].to_markdown(index=False) + "\n\n")
+            
+            f.write("## 5. Statistical Tests (Good vs Bad)\n")
+            f.write("Comparing Top 25% vs Bottom 25% subjects using Mann-Whitney U tests.\n\n")
+            sig_tests = tests_df[tests_df['p_value'] < 0.05]
+            if len(sig_tests) > 0:
+                f.write(sig_tests[['feature', 'p_value', 'cohens_d', 'good_mean', 'bad_mean']].to_markdown(index=False) + "\n\n")
+            else:
+                f.write("*No statistically significant differences (p < 0.05) found between Good and Bad subjects for the computed features.*\n\n")
+                
+            f.write("## 6. Significant Correlations\n")
+            f.write("Pearson correlations between subject features and LOSO accuracy (FDR corrected).\n\n")
+            sig_corr = corr_df[corr_df['significant'] == True]
+            if len(sig_corr) > 0:
+                f.write(sig_corr[['feature', 'pearson_r', 'p_value_fdr', 'sample_size']].to_markdown(index=False) + "\n\n")
+            else:
+                f.write("*No statistically significant correlations found after FDR correction.*\n\n")
+                
+            f.write("## 7. Cluster Observations\n")
+            f.write(f"- PCA Analysis completed. Explained Variance Ratio (PC1, PC2): {explained_var[0]:.2f}, {explained_var[1]:.2f}.\n")
+            f.write("- Frobenius, Riemannian, and Cosine similarity matrices have been written to the statistics directory.\n\n")
+            
+            f.write("## 8. Actionable Hypotheses\n")
+            if len(sig_corr) > 0:
+                top_feature = sig_corr.iloc[0]['feature']
+                r_val = sig_corr.iloc[0]['pearson_r']
+                f.write(f"- Hypothesis derived from data: {top_feature} exhibits a strong correlation (r={r_val:.2f}) with LOSO accuracy. Calibration algorithms targeting {top_feature} distribution matching may improve cross-subject generalization.\n")
+            else:
+                f.write("- Hypothesis derived from data: Simple bandpower and standard covariance markers do not linearly separate Top from Bottom performers. Non-linear mapping or direct adaptation (e.g., CORAL/DANN) is strictly required to address the domain shift.\n")
 
 if __name__ == "__main__":
-    main()
+        main()
