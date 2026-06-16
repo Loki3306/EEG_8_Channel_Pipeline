@@ -34,7 +34,8 @@ def get_git_commit():
 
 def write_metadata_header(filepath, title):
     commit = get_git_commit()
-    timestamp = datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S UTC')
+    from datetime import timezone
+    timestamp = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')
     dataset = "DTU/KUL Auditory Attention"
     script = os.path.basename(__file__)
     
@@ -48,7 +49,8 @@ def write_metadata_header(filepath, title):
 
 def add_csv_metadata(df, dataset_name="DTU/KUL"):
     df['commit_hash'] = get_git_commit()
-    df['timestamp'] = datetime.utcnow().isoformat()
+    from datetime import timezone
+    df['timestamp'] = datetime.now(timezone.utc).isoformat()
     df['dataset'] = dataset_name
     return df
 
@@ -293,9 +295,13 @@ def main():
         pass
         
     # 5. Feature Engineering and Correlation Analysis
-    merged = pd.merge(loso_df, bp_df, on="subject")
-    merged = pd.merge(merged, ss_df, on="subject")
-    merged = pd.merge(merged, cf_df, on="subject")
+    # Drop metadata columns before merging to prevent duplicate suffixes
+    def _strip_meta(d):
+        return d.drop(columns=['commit_hash', 'timestamp', 'dataset'], errors='ignore')
+        
+    merged = pd.merge(_strip_meta(loso_df), _strip_meta(bp_df), on="subject")
+    merged = pd.merge(merged, _strip_meta(ss_df), on="subject")
+    merged = pd.merge(merged, _strip_meta(cf_df), on="subject")
     
     numeric_cols = merged.select_dtypes(include=[np.number])
     feature_cols = [c for c in numeric_cols.columns if c not in ['accuracy', 'rank']]
