@@ -13,7 +13,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from models.matchnet import MatchNet
 from training.train_matchnet_loso import get_mapping_data, prepare_dataset, chunk_trial
-from dataset.utils import subject_files, load_subject_examples
+from baselines.ridge_aad import subject_files, load_subject_examples
 
 FS = 64
 CHANNELS = [13, 46, 43, 23, 50, 0, 52, 14]

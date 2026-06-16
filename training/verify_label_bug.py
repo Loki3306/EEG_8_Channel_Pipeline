@@ -13,7 +13,7 @@ import matplotlib.pyplot as plt
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from models.matchnet import ContrastiveMatchNet, contrastive_loss
-from dataset.utils import load_subject_examples, subject_files, iter_leave_one_subject_out
+from baselines.ridge_aad import load_subject_examples, subject_files, iter_leave_one_subject_out
 from training.train_matchnet_loso import get_mapping_data, chunk_trial, evaluate_model, normalize_array
 from scipy.signal import butter, filtfilt
 from torch.utils.data import TensorDataset, DataLoader
