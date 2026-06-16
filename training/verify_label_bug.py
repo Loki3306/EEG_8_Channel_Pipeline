@@ -22,9 +22,9 @@ FS = 64
 CHANNELS = [13, 46, 43, 23, 50, 0, 52, 14]
 LOWCUT = 1.0
 HIGHCUT = 6.0
-NUM_BANDS = 1 # Gammatone
-TRAIN_WINDOW_SEC = 2.0
-TRAIN_HOP_SEC = 1.0
+NUM_BANDS = 28 # Gammatone
+TRAIN_WINDOW_SEC = 5.0
+TRAIN_HOP_SEC = 2.0
 EVAL_WINDOW_SEC = 10.0
 
 def butter_bandpass_filter(data, lowcut, highcut, fs, order=4, axis=-1):
