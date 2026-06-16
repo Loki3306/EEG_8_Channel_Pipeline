@@ -29,7 +29,7 @@ LOWCUT = 1.0
 HIGHCUT = 6.0
 NUM_BANDS = 28
 
-def evaluate_model_version(model_lags, eeg_model, audio_model, loss_type, X_tr_full, YA_tr_full, YB_tr_full, X_va_full, YA_va_full, YB_va_full, X_te_full, YA_te_full, YB_te_full, device, epochs, batch_size):
+def evaluate_model_version(model_lags, eeg_model, audio_model, loss_type, temporal_pooling, X_tr_full, YA_tr_full, YB_tr_full, X_va_full, YA_va_full, YB_va_full, X_te_full, YA_te_full, YB_te_full, device, epochs, batch_size):
     # Chunk training data
     X_tr, YA_tr, YB_tr = [], [], []
     for i in range(len(X_tr_full)):
@@ -43,7 +43,7 @@ def evaluate_model_version(model_lags, eeg_model, audio_model, loss_type, X_tr_f
     train_dataset = TensorDataset(X_tr_t, YA_tr_t, YB_tr_t)
     train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, pin_memory=True)
         
-    model = ContrastiveMatchNet(eeg_model_type=eeg_model, eeg_channels=len(CHANNELS), audio_channels=NUM_BANDS, latent_dim=64, lags=model_lags, audio_model_type=audio_model).to(device)
+    model = ContrastiveMatchNet(eeg_model_type=eeg_model, eeg_channels=len(CHANNELS), audio_channels=NUM_BANDS, latent_dim=64, lags=model_lags, audio_model_type=audio_model, temporal_pooling=temporal_pooling).to(device)
     optimizer = optim.Adam(model.parameters(), lr=1e-3, weight_decay=1e-4)
     scaler = torch.amp.GradScaler('cuda' if torch.cuda.is_available() else 'cpu')
     
@@ -133,42 +133,37 @@ def quick_loso(target_subjects, epochs, batch_size):
         X_te_full, YA_te_full, YB_te_full = prepare_dataset(test_exs, CHANNELS, LOWCUT, HIGHCUT, held_out_path.stem, mapping, envelopes)
         
         print("Running Baseline...")
-        b_val, b_test, b_time = evaluate_model_version([], "eegnet", "standard", "contrastive", X_tr_full, YA_tr_full, YB_tr_full, X_va_full, YA_va_full, YB_va_full, X_te_full, YA_te_full, YB_te_full, device, epochs, batch_size)
+        b_val, b_test, b_time = evaluate_model_version([], "eegnet", "standard", "contrastive", False, X_tr_full, YA_tr_full, YB_tr_full, X_va_full, YA_va_full, YB_va_full, X_te_full, YA_te_full, YB_te_full, device, epochs, batch_size)
         
-        print("Running InfoNCE Loss...")
-        i_val, i_test, i_time = evaluate_model_version([], "eegnet", "standard", "infonce", X_tr_full, YA_tr_full, YB_tr_full, X_va_full, YA_va_full, YB_va_full, X_te_full, YA_te_full, YB_te_full, device, epochs, batch_size)
+        print("Running Temporal Attention...")
+        a_val, a_test, a_time = evaluate_model_version([], "eegnet", "standard", "contrastive", True, X_tr_full, YA_tr_full, YB_tr_full, X_va_full, YA_va_full, YB_va_full, X_te_full, YA_te_full, YB_te_full, device, epochs, batch_size)
 
-        print("Running EEGNetTCN Encoder...")
-        t_val, t_test, t_time = evaluate_model_version([], "eegnet_tcn", "standard", "contrastive", X_tr_full, YA_tr_full, YB_tr_full, X_va_full, YA_va_full, YB_va_full, X_te_full, YA_te_full, YB_te_full, device, epochs, batch_size)
+        print("Running Multi-Scale EEGNet (with Attention)...")
+        m_val, m_test, m_time = evaluate_model_version([], "eegnet_multiscale", "standard", "contrastive", True, X_tr_full, YA_tr_full, YB_tr_full, X_va_full, YA_va_full, YB_va_full, X_te_full, YA_te_full, YB_te_full, device, epochs, batch_size)
 
-        print("Running InceptionAudioEncoder...")
-        a_val, a_test, a_time = evaluate_model_version([], "eegnet", "inception", "contrastive", X_tr_full, YA_tr_full, YB_tr_full, X_va_full, YA_va_full, YB_va_full, X_te_full, YA_te_full, YB_te_full, device, epochs, batch_size)
-        
         results[held_out_subj] = {
             "baseline": b_test,
-            "infonce": i_test,
-            "tcn": t_test,
-            "inception": a_test
+            "attention": a_test,
+            "multiscale": m_test
         }
-        print(f"  Baseline  : {b_test*100:.2f}%")
-        print(f"  InfoNCE   : {i_test*100:.2f}%")
-        print(f"  EEGNetTCN : {t_test*100:.2f}%")
-        print(f"  Inception : {a_test*100:.2f}%")
+        print(f"  Baseline   : {b_test*100:.2f}%")
+        print(f"  Attention  : {a_test*100:.2f}%")
+        print(f"  MultiScale : {m_test*100:.2f}%")
         
     print("\n\n" + "="*80)
     print("SMOKE TEST SUMMARY (Accuracy %)")
     print("="*80)
-    print("| Subject | Baseline | InfoNCE  | EEGNetTCN | Inception |")
-    print("| ------- | -------- | -------- | --------- | --------- |")
+    print("| Subject | Baseline | Attention | MultiScale |")
+    print("| ------- | -------- | --------- | ---------- |")
     
-    b_list, i_list, t_list, a_list = [], [], [], []
+    b_list, a_list, m_list = [], [], []
     for subj, res in results.items():
-        b, i, t, a = res['baseline']*100, res['infonce']*100, res['tcn']*100, res['inception']*100
-        b_list.append(b); i_list.append(i); t_list.append(t); a_list.append(a)
-        print(f"| {subj:7s} | {b:8.2f} | {i:8.2f} | {t:9.2f} | {a:9.2f} |")
+        b, a, m = res['baseline']*100, res['attention']*100, res['multiscale']*100
+        b_list.append(b); a_list.append(a); m_list.append(m)
+        print(f"| {subj:7s} | {b:8.2f} | {a:9.2f} | {m:10.2f} |")
         
-    print("| ------- | -------- | -------- | --------- | --------- |")
-    print(f"| Mean    | {np.mean(b_list):8.2f} | {np.mean(i_list):8.2f} | {np.mean(t_list):9.2f} | {np.mean(a_list):9.2f} |")
+    print("| ------- | -------- | --------- | ---------- |")
+    print(f"| Mean    | {np.mean(b_list):8.2f} | {np.mean(a_list):9.2f} | {np.mean(m_list):10.2f} |")
     
     def recommend(name, mean_acc, base_acc):
         delta = mean_acc - base_acc
@@ -180,9 +175,8 @@ def quick_loso(target_subjects, epochs, batch_size):
             return f"✅ {name}: {delta:+.2f}% (PROMOTE)"
             
     print("\nDECISION RECOMMENDATIONS:")
-    print(recommend("InfoNCE", np.mean(i_list), np.mean(b_list)))
-    print(recommend("EEGNetTCN", np.mean(t_list), np.mean(b_list)))
-    print(recommend("Inception", np.mean(a_list), np.mean(b_list)))
+    print(recommend("Attention", np.mean(a_list), np.mean(b_list)))
+    print(recommend("MultiScale", np.mean(m_list), np.mean(b_list)))
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Quick LOSO Smoke Test")

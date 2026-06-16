@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from models.eegnet import EEGNet
+from models.eegnet import EEGNet, MultiScaleEEGNet
 from models.atcnet import ATCNet
 from models.eegnet_tcn import EEGNetTCN
 
@@ -78,14 +78,33 @@ class InceptionAudioEncoder(nn.Module):
         
         return self.proj(out)
 
+class TemporalAttentionPooling(nn.Module):
+    """
+    Learns to dynamically weight time steps based on their informativeness.
+    Replaces uniform averaging with attention.
+    """
+    def __init__(self, in_features):
+        super().__init__()
+        # 1x1 conv acting as a linear layer across the time dimension
+        self.attn = nn.Conv1d(in_features, 1, kernel_size=1)
+        
+    def forward(self, x):
+        # x: [B, D, T]
+        scores = self.attn(x) # [B, 1, T]
+        weights = F.softmax(scores, dim=2) # [B, 1, T]
+        # Keep time dimension = 1 for backward compatibility with cosine/pearson functions
+        pooled = torch.sum(x * weights, dim=2, keepdim=True) # [B, D, 1]
+        return pooled
+
 class ContrastiveMatchNet(nn.Module):
     """
     A Siamese network that explicitly learns a matching function between EEG and Audio.
     Includes explicit auditory delay modeling.
     """
-    def __init__(self, eeg_model_type="eegnet", eeg_channels=8, audio_channels=28, latent_dim=64, lags=[3, 6, 10, 13, 16], audio_model_type="standard"):
+    def __init__(self, eeg_model_type="eegnet", eeg_channels=8, audio_channels=28, latent_dim=64, lags=[3, 6, 10, 13, 16], audio_model_type="standard", temporal_pooling=False):
         super().__init__()
         self.lags = lags
+        self.temporal_pooling = temporal_pooling
         
         # 1. EEG Encoder
         if eeg_model_type.lower() == "eegnet":
@@ -102,6 +121,9 @@ class ContrastiveMatchNet(nn.Module):
             self.eeg_encoder = EEGNetTCN(in_channels=eeg_channels)
             # Override the final projection. EEGNetTCN output_proj takes F2 channels (default 16)
             self.eeg_encoder.output_proj = nn.Conv1d(16, latent_dim, kernel_size=1)
+        elif eeg_model_type.lower() == "eegnet_multiscale":
+            self.eeg_encoder = MultiScaleEEGNet(in_channels=eeg_channels)
+            self.eeg_encoder.output_proj = nn.Conv1d(16, latent_dim, kernel_size=1)
         else:
             raise ValueError(f"Unknown eeg_model_type: {eeg_model_type}")
             
@@ -113,16 +135,26 @@ class ContrastiveMatchNet(nn.Module):
             self.audio_encoder = AudioEncoder(in_channels=audio_channels * num_lags, latent_dim=latent_dim)
         
         self.latent_dim = latent_dim
+        
+        if self.temporal_pooling:
+            self.eeg_pool = TemporalAttentionPooling(latent_dim)
+            self.audio_pool = TemporalAttentionPooling(latent_dim)
 
     def encode_eeg(self, eeg):
         """ Returns [B, latent_dim, Time] """
-        return self.eeg_encoder(eeg)
+        x = self.eeg_encoder(eeg)
+        if self.temporal_pooling:
+            x = self.eeg_pool(x)
+        return x
         
     def encode_audio(self, audio):
         """ Returns [B, latent_dim, Time] """
         if self.lags:
             audio = create_lagged_audio(audio, self.lags)
-        return self.audio_encoder(audio)
+        x = self.audio_encoder(audio)
+        if self.temporal_pooling:
+            x = self.audio_pool(x)
+        return x
 
     def forward(self, eeg, audio_a, audio_b):
         """
