@@ -145,13 +145,7 @@ def run_study():
         print(f"\n--- Processing Subject {held_out_subj} ---")
         
         train_paths = [p for p in all_paths if p.stem.split('_')[0] != held_out_subj]
-        
-        train_exs = []
-        for p in train_paths: train_exs.extend(subject_examples[str(p)])
         test_exs = subject_examples[str(held_out_path)]
-        
-        np.random.seed(42)
-        np.random.shuffle(train_exs)
         
         for set_name, channels in CHANNEL_SETS.items():
             print(f"  Training {set_name}...")
@@ -231,23 +225,22 @@ def run_study():
     print("DECISION LOGIC")
     print("="*60)
     
-    best_2s_set = max(means_2s, key=means_2s.get)
-    best_5s_set = max(means_5s, key=means_5s.get)
-    
-    print(f"Best 2s Set: {best_2s_set}")
-    print(f"Best 5s Set: {best_5s_set}")
-    
-    print("\nRecommendations based on 2s Mean Gain vs Baseline:")
+    print("\nRecommendations based on Average Mean Gain (2s + 5s) vs Baseline:")
     base_2s = means_2s["Baseline"]
+    base_5s = means_5s["Baseline"]
+    
     for set_name in ["Set A", "Set B", "Set C"]:
-        gain = means_2s[set_name] - base_2s
-        if gain < 1.0:
+        gain_2s = means_2s[set_name] - base_2s
+        gain_5s = means_5s[set_name] - base_5s
+        avg_gain = (gain_2s + gain_5s) / 2.0
+        
+        if avg_gain < 1.0:
             rec = "KILL"
-        elif gain <= 2.0:
+        elif avg_gain <= 2.0:
             rec = "CONSIDER"
         else:
             rec = "PROMOTE"
-        print(f"{set_name}: {gain:+.2f}% -> {rec}")
+        print(f"{set_name}: {avg_gain:+.2f}% (2s: {gain_2s:+.2f}%, 5s: {gain_5s:+.2f}%) -> {rec}")
 
 if __name__ == "__main__":
     run_study()
