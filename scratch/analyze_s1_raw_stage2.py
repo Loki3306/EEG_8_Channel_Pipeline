@@ -166,12 +166,12 @@ def run_stage2_analysis(mat_path, out_dir):
                     plt.plot(f_psd, 10 * np.log10(avg_Pxx), label=name)
                     
                     valid_idx = f_psd <= 80
-                    total_power = np.trapz(avg_Pxx[valid_idx], f_psd[valid_idx])
+                    total_power = np.trapezoid(avg_Pxx[valid_idx], f_psd[valid_idx])
                     
                     if total_power > 0:
                         for b_name, (low, high) in bands.items():
                             b_idx = np.logical_and(f_psd >= low, f_psd <= high)
-                            b_power = np.trapz(avg_Pxx[b_idx], f_psd[b_idx])
+                            b_power = np.trapezoid(avg_Pxx[b_idx], f_psd[b_idx])
                             band_results[b_name].append((b_power / total_power) * 100)
                 
                 plt.title(f"{title} - Sampled PSD (0-100 Hz)")
