@@ -133,6 +133,13 @@ def run_analysis(mat_path, out_dir):
     
     struct_report_path = out_dir / "s1_structure.txt"
     
+    if not mat_path.exists():
+        print(f"ERROR: The file {mat_path} does not exist.")
+        print(f"Please verify the dataset path.")
+        with open(struct_report_path, "w") as f_out:
+            f_out.write(f"ERROR: {mat_path} not found.\n")
+        return
+    
     with open(struct_report_path, "w") as f_out:
         print_and_write(f_out, f"File: {mat_path.name}")
         print_and_write(f_out, f"Size: {mat_path.stat().st_size / (1024**2):.2f} MB\n")
@@ -155,7 +162,7 @@ def run_analysis(mat_path, out_dir):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--s1_path", type=str, default="/kaggle/input/raw-eeh/S1.mat", help="Path to raw S1.mat")
+    parser.add_argument("--s1_path", type=str, default="/kaggle/input/datasets/lowk1ee/raw-eeh/S1.mat", help="Path to raw S1.mat")
     parser.add_argument("--out_dir", type=str, default="/kaggle/working/reports", help="Directory to save reports")
     args = parser.parse_args()
     
