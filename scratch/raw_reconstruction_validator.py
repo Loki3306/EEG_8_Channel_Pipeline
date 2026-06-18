@@ -49,9 +49,6 @@ def get_references(chunk, labels):
     return refs
 
 def run_validator():
-    raw_path = Path("/kaggle/input/datasets/lowk1ee/raw-eeh/S1.mat")
-    preproc_path = Path("/kaggle/input/dtu-eeg-data/S1_data_preproc.mat")
-
     out_dir = Path("/kaggle/working/reports")
     out_dir.mkdir(parents=True, exist_ok=True)
     report_path = out_dir / "raw_reconstruction_report.md"
@@ -60,11 +57,13 @@ def run_validator():
         print_and_write(f_out, "# Raw ↔ Preprocessed Reconstruction Validator\n")
         
         # 1. Load Preprocessed Data
-        if not preproc_path.exists():
-            print_and_write(f_out, f"ERROR: {preproc_path} not found.")
+        preproc_candidates = list(Path("/kaggle/input").rglob("S1_data_preproc.mat"))
+        if not preproc_candidates:
+            print_and_write(f_out, "ERROR: S1_data_preproc.mat not found in /kaggle/input")
             return
+        preproc_path = preproc_candidates[0]
             
-        print("Loading preprocessed data...")
+        print("Loading preprocessed data from", preproc_path, "...")
         mat_pre = sio.loadmat(preproc_path, squeeze_me=True, struct_as_record=False)
         data_pre = mat_pre.get('data')
         
@@ -81,6 +80,16 @@ def run_validator():
         print_and_write(f_out, f"**Duration**: {n_pre_samples / fs_pre:.2f} sec\n")
         
         # 2. Load Raw Data
+        raw_candidates = list(Path("/kaggle/input").rglob("S1.mat"))
+        # Filter out preprocessed by accident
+        raw_candidates = [p for p in raw_candidates if "preproc" not in p.name]
+        if not raw_candidates:
+            print_and_write(f_out, "ERROR: S1.mat not found in /kaggle/input")
+            return
+        raw_path = raw_candidates[0]
+            
+        print("Loading raw data from", raw_path, "...")
+        
         if not raw_path.exists():
             print_and_write(f_out, f"ERROR: {raw_path} not found.")
             return
