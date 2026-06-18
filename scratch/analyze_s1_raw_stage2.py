@@ -138,12 +138,16 @@ def run_stage2_analysis(mat_path, out_dir):
             print_and_write(f_out, f"Extracting {n_segments} segments of 60 seconds for PSD estimation...\n")
             
             bands = {
+                "Drift (0-1 Hz)": (0, 1),
                 "Delta (1-4 Hz)": (1, 4),
                 "Theta (4-8 Hz)": (4, 8),
                 "Alpha (8-12 Hz)": (8, 12),
                 "Beta (12-30 Hz)": (12, 30),
                 "Low Gamma (30-50 Hz)": (30, 50),
-                "High Gamma (50-80 Hz)": (50, 80)
+                "High Gamma (50-80 Hz)": (50, 80),
+                "Ultra Gamma 1 (80-120 Hz)": (80, 120),
+                "Ultra Gamma 2 (120-200 Hz)": (120, 200),
+                "High Freq Noise (200+ Hz)": (200, 256)
             }
             
             def compute_psd_sampled(ch_list, title, filename):
@@ -165,7 +169,7 @@ def run_stage2_analysis(mat_path, out_dir):
                     
                     plt.plot(f_psd, 10 * np.log10(avg_Pxx), label=name)
                     
-                    valid_idx = f_psd <= 80
+                    valid_idx = f_psd <= 256
                     total_power = np.trapezoid(avg_Pxx[valid_idx], f_psd[valid_idx])
                     
                     if total_power > 0:
@@ -174,16 +178,16 @@ def run_stage2_analysis(mat_path, out_dir):
                             b_power = np.trapezoid(avg_Pxx[b_idx], f_psd[b_idx])
                             band_results[b_name].append((b_power / total_power) * 100)
                 
-                plt.title(f"{title} - Sampled PSD (0-100 Hz)")
+                plt.title(f"{title} - Sampled PSD (0-256 Hz)")
                 plt.xlabel("Frequency (Hz)")
                 plt.ylabel("Power (dB)")
-                plt.xlim(0, 100)
+                plt.xlim(0, 256)
                 plt.legend()
                 plt.tight_layout()
                 plt.savefig(out_dir / filename)
                 plt.close()
                 
-                print_and_write(f_out, "Average Band Energy (0-80Hz = 100%):")
+                print_and_write(f_out, "Average Band Energy (0-256Hz = 100%):")
                 for b_name in bands:
                     mean_pct = np.mean(band_results[b_name]) if band_results[b_name] else 0
                     print_and_write(f_out, f"- **{b_name}**: {mean_pct:.2f}%")
