@@ -45,7 +45,7 @@ def run_stage2_analysis(mat_path, out_dir):
         print(f"Failed to load MAT file: {e}")
         return
         
-    data_struct = getattr(mat, 'data', None)
+    data_struct = mat.get('data')
     if not data_struct:
         print("ERROR: Could not find 'data' struct in MAT file.")
         return
