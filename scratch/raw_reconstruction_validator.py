@@ -71,7 +71,11 @@ def run_validator():
             print_and_write(f_out, "ERROR: Invalid preprocessed struct.")
             return
             
-        pre_trial_0 = np.asarray(data_pre.eeg[0, 0], dtype=float) # (channels, time)
+        if data_pre.eeg.ndim == 1:
+            pre_trial_0 = np.asarray(data_pre.eeg[0], dtype=float) # (channels, time)
+        else:
+            pre_trial_0 = np.asarray(data_pre.eeg[0, 0], dtype=float)
+            
         fs_pre = 64.0
         n_pre_samples = pre_trial_0.shape[1]
         
