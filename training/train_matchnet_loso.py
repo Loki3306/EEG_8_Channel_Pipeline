@@ -179,7 +179,7 @@ def evaluate_model(model, X, Y_A, Y_B, device, window_sec=10, zero_eeg=False, sh
                 
     return n_correct, n_total
 
-def train_matchnet_loso(eeg_model, channels, lowcut, highcut, batch_size=128, num_workers=2, margin=0.1, dropout=0.1, checkpoint_path="", loss_type="contrastive", audio_model="standard", target_subjects=None):
+def train_matchnet_loso(eeg_model, channels, lowcut, highcut, batch_size=128, num_workers=2, margin=0.1, dropout=0.1, checkpoint_path="", loss_type="contrastive", audio_model="standard", target_subjects=None, subject_examples_cache=None):
     torch.backends.cudnn.benchmark = True
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Using device: {device} | MatchNet ({eeg_model}) | Channels: {channels}")
@@ -191,7 +191,11 @@ def train_matchnet_loso(eeg_model, channels, lowcut, highcut, batch_size=128, nu
         print("No subjects found.")
         return
         
-    subject_examples = {str(p): load_subject_examples(p) for p in all_paths}
+    if subject_examples_cache is not None:
+        subject_examples = subject_examples_cache
+    else:
+        subject_examples = {str(p): load_subject_examples(p) for p in all_paths}
+        
     folds = list(iter_leave_one_subject_out(all_paths))
     
     all_accs_norm_dict = {}
@@ -401,6 +405,8 @@ def train_matchnet_loso(eeg_model, channels, lowcut, highcut, batch_size=128, nu
         final_acc_shuf = np.mean(all_accs_shuf_dict[w_sec])
         print(f" Window {w_sec:2d}s | Normal: {final_acc_norm*100:.2f}% | Zero-EEG: {final_acc_zero*100:.2f}% | Shuffled: {final_acc_shuf*100:.2f}%")
     print("="*50)
+    
+    return all_accs_norm_dict, all_accs_zero_dict, all_accs_shuf_dict
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Train Contrastive MatchNet")
