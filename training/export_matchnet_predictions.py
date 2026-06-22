@@ -67,7 +67,7 @@ def export_predictions(checkpoint_dir, out_csv, eeg_model="eegnet", channels=[13
             
         print(f"Processing Subject {subject_id} using checkpoint {checkpoint_path.name}")
         
-        model = ContrastiveMatchNet(eeg_model_type=eeg_model, eeg_channels=len(channels), audio_channels=28, latent_dim=64, audio_model_type="standard").to(device)
+        model = ContrastiveMatchNet(eeg_model_type=eeg_model, eeg_channels=len(channels), audio_channels=28, latent_dim=64).to(device)
         model.load_state_dict(torch.load(checkpoint_path, map_location=device))
         model.eval()
         
