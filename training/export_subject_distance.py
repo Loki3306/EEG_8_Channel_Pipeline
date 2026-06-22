@@ -68,7 +68,7 @@ def get_train_distribution(model, train_paths, subject_examples, channels, lowcu
             with torch.no_grad():
                 z_eeg = model.eeg_encoder(x_batch) # Shape: (batch, embed_dim)
                 if z_eeg.dim() > 2:
-                    z_eeg = z_eeg.view(z_eeg.shape[0], -1)
+                    z_eeg = z_eeg.mean(dim=-1)
                 all_z.append(z_eeg.cpu().numpy())
                 
     if not all_z:
@@ -158,7 +158,7 @@ def export_distances(checkpoint_dir, out_csv, eeg_model="eegnet", channels=[13, 
                     z_eeg, z_a, z_b = model(x_t, ya_t, yb_t)
                     
                     if z_eeg.dim() > 2:
-                        z_eeg_flat = z_eeg.view(z_eeg.shape[0], -1)
+                        z_eeg_flat = z_eeg.mean(dim=-1)
                     else:
                         z_eeg_flat = z_eeg
                         
