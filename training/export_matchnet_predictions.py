@@ -48,7 +48,7 @@ def pearson_corr(x, y, dim=1):
     var_y = (y_centered ** 2).sum(dim=dim)
     return cov / torch.sqrt(var_x * var_y + 1e-8)
 
-def export_predictions(checkpoint_dir, out_csv, eeg_model="eegnet", channels=[13, 46, 43, 23, 50, 0, 52, 14], lowcut=1.0, highcut=6.0, window_sec=2.0):
+def export_predictions(checkpoint_dir, out_csv, eeg_model="eegnet", channels=[13, 46, 43, 23, 50, 0, 52, 14], lowcut=1.0, highcut=6.0, window_sec=10.0):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Exporting predictions using device: {device}")
     
@@ -132,6 +132,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--checkpoint_dir", type=str, default="checkpoints")
     parser.add_argument("--out_csv", type=str, default="matchnet_predictions.csv")
+    parser.add_argument("--window_sec", type=float, default=10.0, help="Window duration in seconds")
     args = parser.parse_args()
     
-    export_predictions(args.checkpoint_dir, args.out_csv)
+    export_predictions(args.checkpoint_dir, args.out_csv, window_sec=args.window_sec)
