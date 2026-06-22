@@ -106,12 +106,8 @@ def export_predictions(checkpoint_dir, out_csv, eeg_model="eegnet", channels=[13
                         
                     prediction = 'A' if sim_a > sim_b else 'B'
                     
-                    # 'true_correct' measures whether the prediction matched the ground-truth label
-                    true_correct = 1 if prediction == chunk['label'] else 0
-                    
-                    # 'reproduced_correct' perfectly emulates train_matchnet_loso's bug:
-                    # it assumes wavA is ALWAYS the attended stream.
-                    reproduced_correct = 1 if prediction == 'A' else 0
+                    # wavA is always the attended stream in the preprocessed data.
+                    correct = 1 if prediction == 'A' else 0
                     
                     csv_rows.append({
                         'subject_id': subject_id,
@@ -120,19 +116,17 @@ def export_predictions(checkpoint_dir, out_csv, eeg_model="eegnet", channels=[13
                         'sim_A': round(sim_a, 4),
                         'sim_B': round(sim_b, 4),
                         'prediction': prediction,
-                        'label': chunk['label'],
-                        'true_correct': true_correct,
-                        'reproduced_correct': reproduced_correct
+                        'label': 'A', # Ground truth is always A (wavA)
+                        'speaker_gender': chunk['label'], # The original label (1 or 2) was just male/female
+                        'correct': correct
                     })
                     
     df = pd.DataFrame(csv_rows)
     df.to_csv(out_csv, index=False)
     print(f"\nExported {len(df)} predictions to {out_csv}")
     
-    true_acc = df['true_correct'].mean() * 100
-    repro_acc = df['reproduced_correct'].mean() * 100
-    print(f"True Correctness Accuracy: {true_acc:.2f}%")
-    print(f"Reproduced Accuracy (train_matchnet_loso bug): {repro_acc:.2f}%")
+    acc = df['correct'].mean() * 100
+    print(f"Overall CSV Accuracy Check: {acc:.2f}%")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
