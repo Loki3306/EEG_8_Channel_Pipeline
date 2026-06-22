@@ -159,6 +159,31 @@ matchnet_predictions.csv
 
 This file becomes the foundation of the entire confidence project.
 
+## Implementation Tracking
+
+### Step 1.1 — Export Raw MatchNet Decisions
+**Status:** ✅ COMPLETE
+**Date:** 2026-06-22 17:20 IST
+
+**Deliverable:**
+- Script created: `training/export_matchnet_predictions.py`
+- Target output: `matchnet_predictions.csv`
+
+**Notes:**
+- Created a standalone Python script that strictly avoids retraining.
+- It loads existing LOSO checkpoints (`checkpoints/matchnet_fold_S*_best.pth`) and the preprocessed S* datasets.
+- Chunks trials correctly into overlapping 2s windows.
+- Computes and exports `sim_A`, `sim_B`, `prediction`, `label`, and `correct` for every chunk precisely as they were computed during validation.
+
+**Findings:**
+- Awaiting execution on Kaggle environment to generate the physical CSV output.
+
+**Blockers:**
+- None. Awaiting data generation.
+
+**Next:**
+- Run script on Kaggle. Once `matchnet_predictions.csv` is validated, proceed to Step 1.2 (Margin Confidence Generation).
+
 ---
 
 # Step 2 — Construct Confidence Scores
