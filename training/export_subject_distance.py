@@ -125,6 +125,10 @@ def export_distances(checkpoint_dir, out_csv, eeg_model="eegnet", channels=[13, 
         checkpoint_path = Path(checkpoint_dir) / f"matchnet_fold_{subject_id}_best.pth"
         
         if not checkpoint_path.exists():
+            clean_id = subject_id.replace('_data_preproc', '')
+            checkpoint_path = Path(checkpoint_dir) / f"matchnet_fold_{clean_id}_best.pth"
+            
+        if not checkpoint_path.exists():
             print(f"WARNING: Checkpoint {checkpoint_path} not found. Skipping subject {subject_id}.")
             continue
             
