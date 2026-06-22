@@ -9,7 +9,7 @@ import sys
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from models.matchnet import MatchNet
+from models.matchnet import ContrastiveMatchNet
 from utils.data_loading import load_bids_dataset_lazy, prepare_dataset
 from utils.chunking import chunk_trial_with_metadata
 from utils.loss import pearson_corr
@@ -93,7 +93,7 @@ def export_distances(checkpoint_dir, out_csv):
         all_subjs = list(subject_examples.keys())
         train_subjs = [s for s in all_subjs if s != held_out_path]
         
-        model = MatchNet(in_channels=len(channels)).to(device)
+        model = ContrastiveMatchNet("eegnet", eeg_channels=len(channels)).to(device)
         model.load_state_dict(torch.load(ckpt_path, map_location=device, weights_only=True))
         model.eval()
         
