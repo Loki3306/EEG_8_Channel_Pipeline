@@ -82,14 +82,12 @@ def export_predictions(checkpoint_dir, out_csv, eeg_model="eegnet", channels=[13
         test_exs = subject_examples[str(held_out_path)]
         
         with torch.no_grad():
-            for trial_idx, ex in enumerate(test_exs):
-                # Prepare single trial
-                tX, tYA, tYB = prepare_dataset([ex], channels, lowcut, highcut, subject_id, mapping, envelopes)
-                
-                if len(tX) == 0:
-                    continue
-                    
-                x_np, ya_np, yb_np = tX[0], tYA[0], tYB[0]
+            # Pass all examples at once to preserve trial index for audio mapping
+            tX, tYA, tYB = prepare_dataset(test_exs, channels, lowcut, highcut, subject_id, mapping, envelopes)
+            
+            for trial_idx in range(len(tX)):
+                x_np, ya_np, yb_np = tX[trial_idx], tYA[trial_idx], tYB[trial_idx]
+                ex = test_exs[trial_idx]
                 
                 chunks = chunk_trial_with_metadata(x_np, ya_np, yb_np, subject_id, trial_idx, ex.label, window_sec, window_sec, fs=64.0)
                 
@@ -100,7 +98,6 @@ def export_predictions(checkpoint_dir, out_csv, eeg_model="eegnet", channels=[13
                     
                     z_eeg, z_a, z_b = model(x_t, ya_t, yb_t)
                     
-                    # Compute similarity EXACTLY like train_matchnet_loso does for Pearson metrics
                     sim_a = pearson_corr(z_eeg, z_a, dim=1).mean().item()
                     sim_b = pearson_corr(z_eeg, z_b, dim=1).mean().item()
                         
