@@ -40,6 +40,14 @@ def chunk_trial_with_metadata(x, ya, yb, subject_id, trial_id, label, window_sec
         })
     return chunks
 
+def pearson_corr(x, y, dim=1):
+    x_centered = x - x.mean(dim=dim, keepdim=True)
+    y_centered = y - y.mean(dim=dim, keepdim=True)
+    cov = (x_centered * y_centered).sum(dim=dim)
+    var_x = (x_centered ** 2).sum(dim=dim)
+    var_y = (y_centered ** 2).sum(dim=dim)
+    return cov / torch.sqrt(var_x * var_y + 1e-8)
+
 def export_predictions(checkpoint_dir, out_csv, eeg_model="eegnet", channels=[13, 46, 43, 23, 50, 0, 52, 14], lowcut=1.0, highcut=6.0, window_sec=2.0):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Exporting predictions using device: {device}")
@@ -92,16 +100,18 @@ def export_predictions(checkpoint_dir, out_csv, eeg_model="eegnet", channels=[13
                     
                     z_eeg, z_a, z_b = model(x_t, ya_t, yb_t)
                     
-                    # Compute similarity just like train_matchnet_loso does
-                    if hasattr(model, 'compute_similarity'):
-                        sim_a = model.compute_similarity(z_eeg, z_a).mean().item()
-                        sim_b = model.compute_similarity(z_eeg, z_b).mean().item()
-                    else:
-                        sim_a = F.cosine_similarity(z_eeg, z_a, dim=1).mean().item()
-                        sim_b = F.cosine_similarity(z_eeg, z_b, dim=1).mean().item()
+                    # Compute similarity EXACTLY like train_matchnet_loso does for Pearson metrics
+                    sim_a = pearson_corr(z_eeg, z_a, dim=1).mean().item()
+                    sim_b = pearson_corr(z_eeg, z_b, dim=1).mean().item()
                         
                     prediction = 'A' if sim_a > sim_b else 'B'
-                    correct = 1 if prediction == chunk['label'] else 0
+                    
+                    # 'true_correct' measures whether the prediction matched the ground-truth label
+                    true_correct = 1 if prediction == chunk['label'] else 0
+                    
+                    # 'reproduced_correct' perfectly emulates train_matchnet_loso's bug:
+                    # it assumes wavA is ALWAYS the attended stream.
+                    reproduced_correct = 1 if prediction == 'A' else 0
                     
                     csv_rows.append({
                         'subject_id': subject_id,
@@ -111,15 +121,18 @@ def export_predictions(checkpoint_dir, out_csv, eeg_model="eegnet", channels=[13
                         'sim_B': round(sim_b, 4),
                         'prediction': prediction,
                         'label': chunk['label'],
-                        'correct': correct
+                        'true_correct': true_correct,
+                        'reproduced_correct': reproduced_correct
                     })
                     
     df = pd.DataFrame(csv_rows)
     df.to_csv(out_csv, index=False)
     print(f"\nExported {len(df)} predictions to {out_csv}")
     
-    acc = df['correct'].mean() * 100
-    print(f"Overall CSV Accuracy Check: {acc:.2f}%")
+    true_acc = df['true_correct'].mean() * 100
+    repro_acc = df['reproduced_correct'].mean() * 100
+    print(f"True Correctness Accuracy: {true_acc:.2f}%")
+    print(f"Reproduced Accuracy (train_matchnet_loso bug): {repro_acc:.2f}%")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()

@@ -184,6 +184,23 @@ This file becomes the foundation of the entire confidence project.
 **Next:**
 - Run script on Kaggle. Once `matchnet_predictions.csv` is validated, proceed to Step 1.2 (Margin Confidence Generation).
 
+### Step 1.1A — Export Validation Debugging
+**Status:** ✅ COMPLETE
+**Date:** 2026-06-22 17:35 IST
+
+**Audit Findings:**
+1. **Label Mapping:** `export_matchnet_predictions.py` checked `prediction == chunk['label']` (where label is 1 or 2). However, `train_matchnet_loso.py` completely ignores the ground-truth label. It hardcodes `Y_A` to `wavA` and ALWAYS considers a prediction correct if `sim_A > sim_B`.
+2. **Prediction Rule:** The original evaluation pipeline literally evaluates `if sim_a > sim_b: n_correct += 1.0`. Because it ignores the true `label` (which is balanced 534 to 546), the 68.5% LOSO accuracy is actually measuring *how often the model successfully pulls EEG towards wavA*, rather than the attended speaker.
+3. **Similarity Metric:** The published 68.5% results used `metric="pearson"` during the ablation step (`nc_norm, nt_norm = evaluate_model(..., metric="pearson")`). The first export script defaulted to `F.cosine_similarity`.
+
+**Resolution:**
+- Modified `export_matchnet_predictions.py` to use `pearson_corr` precisely as defined in `train_matchnet_loso.py`.
+- Added a `reproduced_correct` column that strictly emulates the original pipeline (`1 if prediction == 'A' else 0`) to achieve the ~68.5% reproduction target.
+- Preserved the `true_correct` column (`1 if prediction == chunk['label'] else 0`) which yields ~50.09%, revealing the true accuracy when ground-truth labels are respected.
+
+**Next:**
+- Rerun the updated `export_matchnet_predictions.py` to verify the ~68.5% target is met via the reproduced logic, then review implications for the confidence study.
+
 ---
 
 # Step 2 — Construct Confidence Scores
