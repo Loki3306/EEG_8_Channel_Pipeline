@@ -70,8 +70,11 @@ def diagnostic_b_pca(checkpoint_dir):
     all_paths = subject_files()
     
     # We load just one model to see the latent space it learned
-    subject_id = all_paths[0].stem.replace('_data_preproc', '')
-    checkpoint_path = Path(checkpoint_dir) / f"matchnet_fold_{subject_id}_best.pth"
+    subj_stem = all_paths[0].stem
+    checkpoint_path = Path(checkpoint_dir) / f"matchnet_fold_{subj_stem}_best.pth"
+    if not checkpoint_path.exists():
+        clean_id = subj_stem.replace('_data_preproc', '')
+        checkpoint_path = Path(checkpoint_dir) / f"matchnet_fold_{clean_id}_best.pth"
     
     if not checkpoint_path.exists():
         print(f"Cannot find checkpoint {checkpoint_path}. Skipping PCA.")
@@ -128,7 +131,7 @@ def diagnostic_b_pca(checkpoint_dir):
     
     plt.figure(figsize=(12, 8))
     sns.scatterplot(data=df_pca, x='PC1', y='PC2', hue='Subject', palette='tab20', alpha=0.6)
-    plt.title(f"PCA of Latent Space (z_pool) from Fold {subject_id} Model")
+    plt.title(f"PCA of Latent Space (z_pool) from Fold {subj_stem} Model")
     plt.tight_layout()
     out_path = Path.cwd() / "latent_pca.png"
     plt.savefig(out_path)
