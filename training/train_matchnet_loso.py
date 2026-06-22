@@ -47,7 +47,19 @@ def normalize_array_global(arr):
 
 def get_mapping_data():
     map_file = REPO_ROOT / "data" / "audio_mapping.json"
-    env_file = REPO_ROOT / "data" / "gammatone_envelopes.pkl"
+    
+    # Check if the exact Kaggle dataset folder exists
+    kaggle_dir = Path("/kaggle/input/datasets/lokeshgile/gammatone-envelope")
+    if kaggle_dir.exists():
+        # Find any .pkl file in this folder to bypass exact filename mismatch
+        env_files = list(kaggle_dir.glob("*.pkl"))
+        if env_files:
+            env_file = env_files[0]
+        else:
+            env_file = REPO_ROOT / "data" / "gammatone_envelopes.pkl"
+    else:
+        env_file = REPO_ROOT / "data" / "gammatone_envelopes.pkl"
+        
     with open(map_file, 'r') as f:
         mapping = json.load(f)
     with open(env_file, 'rb') as f:
