@@ -79,8 +79,18 @@ def get_train_distribution(model, train_paths, subject_examples, channels, lowcu
     
     mu = np.mean(all_z, axis=0)
     cov = np.cov(all_z, rowvar=False)
+    
+    # Check original rank and condition
+    rank = np.linalg.matrix_rank(cov)
+    cond = np.linalg.cond(cov)
+    print(f"  [Covariance] Original Rank: {rank}/{embed_dim}, Condition Number: {cond:.2e}")
+    
     # Add small ridge to prevent singular matrix
-    cov += np.eye(cov.shape[0]) * 1e-6
+    ridge = 1e-6
+    cov += np.eye(cov.shape[0]) * ridge
+    
+    new_cond = np.linalg.cond(cov)
+    print(f"  [Covariance] Regularized with {ridge}*I. New Condition Number: {new_cond:.2e}")
     
     return mu, cov, embed_dim
 
