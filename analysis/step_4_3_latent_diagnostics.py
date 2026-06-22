@@ -61,6 +61,30 @@ def diagnostic_a_c(csv_path):
         print("  -> Weak/No correlation. Mean distance doesn't strongly predict confidence reliability.")
         
     print("\n--------------------------------------------------------------")
+    print("Generating Diagnostic Scatter Plots...")
+    fig, axes = plt.subplots(1, 2, figsize=(15, 6))
+    
+    # Plot 1: Acc vs Mahalanobis
+    sns.scatterplot(data=stats_df, x='mean_mah', y='acc', ax=axes[0], s=100)
+    for i, row in stats_df.iterrows():
+        axes[0].annotate(row['subject_id'], (row['mean_mah'], row['acc']), textcoords="offset points", xytext=(5,5), ha='left')
+    axes[0].set_title(f"Accuracy vs Mean Mahalanobis\n(r = {r_acc:.3f}, p = {p_acc:.4f})")
+    axes[0].set_xlabel("Mean Mahalanobis Distance")
+    axes[0].set_ylabel("Subject Accuracy")
+    
+    # Plot 2: AUROC vs Mahalanobis
+    sns.scatterplot(data=stats_df, x='mean_mah', y='auroc', ax=axes[1], s=100, color='orange')
+    for i, row in stats_df.iterrows():
+        axes[1].annotate(row['subject_id'], (row['mean_mah'], row['auroc']), textcoords="offset points", xytext=(5,5), ha='left')
+    axes[1].set_title(f"Margin AUROC vs Mean Mahalanobis\n(r = {r_auc:.3f}, p = {p_auc:.4f})")
+    axes[1].set_xlabel("Mean Mahalanobis Distance")
+    axes[1].set_ylabel("Margin AUROC")
+    
+    plt.tight_layout()
+    out_path = Path.cwd() / "distance_scatter_plots.png"
+    plt.savefig(out_path)
+    print(f"Scatter plots saved to {out_path}")
+    print("--------------------------------------------------------------")
 
 def diagnostic_b_pca(checkpoint_dir):
     print("\n--- Diagnostic B: PCA Visualization of Latent Space ---\n")
@@ -128,6 +152,12 @@ def diagnostic_b_pca(checkpoint_dir):
         'PC2': z_pca[:, 1],
         'Subject': subject_labels
     })
+    
+    print("\n--- PCA Subject Centroids ---")
+    print(f"{'Subject':<10} | {'Mean PC1':<10} | {'Mean PC2':<10}")
+    print("-" * 35)
+    for subj_id, group in df_pca.groupby('Subject'):
+        print(f"{subj_id:<10} | {group['PC1'].mean():<10.4f} | {group['PC2'].mean():<10.4f}")
     
     plt.figure(figsize=(12, 8))
     sns.scatterplot(data=df_pca, x='PC1', y='PC2', hue='Subject', palette='tab20', alpha=0.6)
