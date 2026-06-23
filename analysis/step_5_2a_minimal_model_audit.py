@@ -41,7 +41,10 @@ def compute_e_aurc(y_true, y_prob):
         risks.append(risk)
         
     # Area under risk-coverage curve
-    e_aurc = np.trapz(risks, coverages)
+    if hasattr(np, 'trapezoid'):
+        e_aurc = np.trapezoid(risks, coverages)
+    else:
+        e_aurc = np.trapz(risks, coverages)
     return e_aurc
 
 def evaluate_predictions(y_true, y_prob):
