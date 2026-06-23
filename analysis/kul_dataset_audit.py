@@ -66,7 +66,7 @@ def analyze_structure(obj, name="root", depth=0, max_depth=10, meta_hunt_keyword
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--mat", type=str, required=True, help="Path to S1.mat")
+    parser.add_argument("--mat", type=str, default="/kaggle/input/datasets/lowk1ee/s1-klu/S1_KLU.mat", help="Path to S1.mat")
     args = parser.parse_args()
     
     mat_path = args.mat
