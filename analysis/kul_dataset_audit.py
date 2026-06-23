@@ -70,20 +70,19 @@ def main():
     args = parser.parse_args()
     
     mat_path = args.mat
-    if not os.path.exists(mat_path):
-        print(f"File {mat_path} not found.")
-        # If it's a directory, maybe find the .mat file
-        if os.path.isdir(mat_path):
-            print("Provided path is a directory. Searching for .mat files...")
-            for f in os.listdir(mat_path):
-                if f.endswith('.mat'):
-                    print(f"Found {f}, trying to load it...")
-                    mat_path = os.path.join(mat_path, f)
-                    break
-            else:
-                return
+    if os.path.isdir(mat_path):
+        print("Provided path is a directory. Searching for .mat files...")
+        for f in os.listdir(mat_path):
+            if f.endswith('.mat'):
+                print(f"Found {f}, using it...")
+                mat_path = os.path.join(mat_path, f)
+                break
         else:
+            print("No .mat files found in directory.")
             return
+    elif not os.path.exists(mat_path):
+        print(f"File {mat_path} not found.")
+        return
         
     print(f"Loading MAT file: {mat_path}")
     try:
