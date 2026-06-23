@@ -29,7 +29,7 @@ def get_audio_envelope(audio_data, fs_in, fs_out):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--mat", type=str, default="/kaggle/input/datasets/lowk1ee/s1-klu/S1_KLU.mat")
-    parser.add_argument("--wav_dir", type=str, default="/kaggle/input/datasets/lowk1ee/s1-klu")
+    parser.add_argument("--wav_dir", type=str, default="/kaggle/input/datasets/lowk1ee/audio-klu")
     args = parser.parse_args()
     
     mat_path = args.mat
@@ -113,8 +113,13 @@ def main():
     att_wav_path = find_wav(str(att_wav_name))
     unatt_wav_path = find_wav(str(unatt_wav_name))
     
+    print("\n   [DIAGNOSTICS]")
+    print(f"   Audio directory exists: {os.path.exists(wav_dir)}")
+    print(f"   Target attended path  : {att_wav_path}")
+    print(f"   Target unattended path: {unatt_wav_path}")
+    
     if not att_wav_path or not unatt_wav_path:
-        print("   ERROR: Could not find WAV files. Checking directory structure:")
+        print("\n   ERROR: Could not find WAV files. Checking directory structure:")
         for root, dirs, files in os.walk(wav_dir):
             for f in files:
                 if f.endswith('.wav'): print("Found:", f)
