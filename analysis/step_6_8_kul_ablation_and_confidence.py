@@ -230,23 +230,27 @@ def main():
         with torch.no_grad():
             for t_idx, eeg_norm, env_att, env_unatt in preprocessed_trials:
                 min_len = eeg_norm.shape[0]
-                trial_corrects = []
-                window_id = 0
                 
+                x_list, ya_list, yb_list = [], [], []
                 for start in range(0, min_len - win_samples + 1, stride_samples):
-                    x = eeg_norm[start:start+win_samples].T 
-                    ya = env_att[:, start:start+win_samples] 
-                    yb = env_unatt[:, start:start+win_samples]
+                    x_list.append(eeg_norm[start:start+win_samples].T)
+                    ya_list.append(env_att[:, start:start+win_samples])
+                    yb_list.append(env_unatt[:, start:start+win_samples])
                     
-                    x_t = torch.FloatTensor(x).unsqueeze(0).to(device)
-                    ya_t = torch.FloatTensor(ya).unsqueeze(0).to(device)
-                    yb_t = torch.FloatTensor(yb).unsqueeze(0).to(device)
-                    
-                    z_eeg, z_a, z_b = model(x_t, ya_t, yb_t)
-                    
-                    sim_a = pearson_corr(z_eeg, z_a, dim=1).mean().item()
-                    sim_b = pearson_corr(z_eeg, z_b, dim=1).mean().item()
-                    
+                if not x_list: continue
+                
+                # Push full batch of trial windows to GPU at once
+                x_t = torch.FloatTensor(np.array(x_list)).to(device)
+                ya_t = torch.FloatTensor(np.array(ya_list)).to(device)
+                yb_t = torch.FloatTensor(np.array(yb_list)).to(device)
+                
+                z_eeg, z_a, z_b = model(x_t, ya_t, yb_t)
+                
+                sim_a_batch = pearson_corr(z_eeg, z_a, dim=1).mean(dim=1).cpu().numpy()
+                sim_b_batch = pearson_corr(z_eeg, z_b, dim=1).mean(dim=1).cpu().numpy()
+                
+                trial_corrects = []
+                for window_id, (sim_a, sim_b) in enumerate(zip(sim_a_batch, sim_b_batch)):
                     prediction = 'A' if sim_a > sim_b else 'B'
                     correct = 1 if prediction == 'A' else 0
                     margin = abs(sim_a - sim_b)
@@ -255,15 +259,14 @@ def main():
                         'subject_id': 'S1_KUL',
                         'trial_id': t_idx,
                         'window_id': window_id,
-                        'sim_A': sim_a,
-                        'sim_B': sim_b,
-                        'margin': margin,
+                        'sim_A': float(sim_a),
+                        'sim_B': float(sim_b),
+                        'margin': float(margin),
                         'prediction': prediction,
                         'correct': correct
                     })
                     
                     trial_corrects.append(correct)
-                    window_id += 1
                     
                 if np.mean(trial_corrects) > 0.5:
                     total_trials_correct += 1
