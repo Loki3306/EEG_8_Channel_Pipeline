@@ -55,7 +55,7 @@ def step_4_4_s11_ablation(csv_path):
     evaluate_correlations(stats_df, "WITH S11 (Original)")
     
     # 4. WITHOUT S11
-    stats_no_s11 = stats_df[stats_df['subject_id'] != 'S11']
+    stats_no_s11 = stats_df[~stats_df['subject_id'].str.contains('S11')]
     evaluate_correlations(stats_no_s11, "WITHOUT S11 (Ablated)")
     
     print("\n===========================================")
