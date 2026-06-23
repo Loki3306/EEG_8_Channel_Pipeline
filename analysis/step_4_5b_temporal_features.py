@@ -54,7 +54,26 @@ def main():
     print("STEP 4.5B: TEMPORAL CONFIDENCE FEATURES")
     print("===========================================")
     print(f"Sanitized feature set: {features}")
-    print(f"Running strict nested LOSO across {len(subjects)} subjects...\n")
+    
+    # ----------------------------------------------------
+    # PHASE 4.5B.1: FEATURE AUDIT
+    # ----------------------------------------------------
+    print("\n--- PHASE 4.5B.1: INDIVIDUAL FEATURE AUROC AUDIT ---")
+    print(f"{'Feature':<25} | {'AUROC':<10} | {'Direction':<25}")
+    print("-" * 65)
+    for feat in features:
+        auc = roc_auc_score(df['correct'], df[feat])
+        if auc < 0.5:
+            auc = 1.0 - auc
+            direction = "Negative (Lower=More Confident)"
+        else:
+            direction = "Positive (Higher=More Confident)"
+        print(f"{feat:<25} | {auc:<10.4f} | {direction:<25}")
+    print("-" * 65)
+    print("\nProceeding to Nested LOSO evaluation...")
+    # ----------------------------------------------------
+    
+    print(f"\nRunning strict nested LOSO across {len(subjects)} subjects...\n")
     
     df['prob_lr_margin'] = 0.0
     df['prob_lr_features'] = 0.0
