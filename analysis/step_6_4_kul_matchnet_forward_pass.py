@@ -11,8 +11,8 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 try:
     from models.matchnet import MatchNet
-except ImportError:
-    print("Could not import MatchNet. Please ensure models/matchnet.py exists.")
+except ImportError as e:
+    print(f"Could not import MatchNet: {e}")
     MatchNet = None
 
 from scipy.signal import resample, butter, filtfilt
@@ -54,9 +54,13 @@ def main():
     print("Generating tensors for S1 Trial 0...")
     try:
         mat = sio.loadmat(mat_path, squeeze_me=True, struct_as_record=False)
-        trials = mat.get('trials') or mat.get('trial')
-        if trials is None and 'trials' in mat: trials = mat['trials']
-        elif trials is None and 'trial' in mat: trials = mat['trial']
+        if 'trials' in mat:
+            trials = mat['trials']
+        elif 'trial' in mat:
+            trials = mat['trial']
+        else:
+            print("No trials found.")
+            return
         trial = trials[0]
     except Exception as e:
         print(f"Error loading MAT: {e}")
