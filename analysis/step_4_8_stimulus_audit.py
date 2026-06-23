@@ -117,7 +117,7 @@ def generate_report(df):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--dir", type=str, default="/kaggle/input/datasets/lokeshgile/eeg-audio")
+    parser.add_argument("--dir", type=str, default="/kaggle/input")
     args = parser.parse_args()
     
     mat_files = find_mat_files(args.dir)
