@@ -38,13 +38,13 @@ def compute_rc_metrics(correct_labels, confidences):
     accuracies = np.cumsum(sorted_labels) / np.arange(1, n + 1)
     risks = 1.0 - accuracies
     
-    aurc = np.trapz(risks, coverages)
+    aurc = np.trapezoid(risks, coverages)
     
     optimal_indices = np.argsort(-correct_labels.values)
     optimal_labels = correct_labels.values[optimal_indices]
     optimal_accuracies = np.cumsum(optimal_labels) / np.arange(1, n + 1)
     optimal_risks = 1.0 - optimal_accuracies
-    optimal_aurc = np.trapz(optimal_risks, coverages)
+    optimal_aurc = np.trapezoid(optimal_risks, coverages)
     
     e_aurc = aurc - optimal_aurc
     
