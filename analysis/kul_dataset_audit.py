@@ -24,9 +24,9 @@ def get_fields(obj):
 
 def get_value(obj, field):
     if is_mat_struct(obj):
-        return getattr(obj, field)
+        return getattr(obj, field, None)
     elif isinstance(obj, dict):
-        return obj[field]
+        return obj.get(field)
     return None
 
 def analyze_structure(obj, name="root", depth=0, max_depth=10, meta_hunt_keywords=None, found_meta=None):
