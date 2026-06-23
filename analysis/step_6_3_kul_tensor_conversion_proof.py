@@ -42,7 +42,13 @@ def main():
     print(f"Loading {mat_path}...")
     try:
         mat = sio.loadmat(mat_path, squeeze_me=True, struct_as_record=False)
-        trials = mat.get('trials') or mat.get('trial')
+        if 'trials' in mat:
+            trials = mat['trials']
+        elif 'trial' in mat:
+            trials = mat['trial']
+        else:
+            print("No trials found.")
+            return
         trial = trials[0]
     except Exception as e:
         print(f"Error loading MAT: {e}")
