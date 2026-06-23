@@ -113,9 +113,15 @@ def main():
     # --- Plotting ---
     os.makedirs('analysis/figures', exist_ok=True)
     
-    thresholds_fine = np.linspace(0.5, 0.99, 50)
+    thresholds_fine = np.linspace(0.0, 0.99, 100)
     covs = []
     accs = []
+    rand_covs = []
+    rand_accs = []
+    
+    # Random baseline
+    df['prob_rand'] = np.random.rand(len(df))
+    
     for thr in thresholds_fine:
         mask = df['prob_xgb'] >= thr
         n_acc = mask.sum()
@@ -126,13 +132,25 @@ def main():
             covs.append(0)
             accs.append(np.nan)
             
+        # Random mask
+        rmask = df['prob_rand'] >= thr
+        r_acc = rmask.sum()
+        if r_acc > 0:
+            rand_covs.append(r_acc / len(df))
+            rand_accs.append(df.loc[rmask, 'correct'].mean())
+        else:
+            rand_covs.append(0)
+            rand_accs.append(np.nan)
+            
     # Figure 1: Coverage vs Accuracy
     plt.figure(figsize=(8, 6))
-    plt.plot([c*100 for c in covs], [a*100 for a in accs], 'b-', linewidth=2)
+    plt.plot([c*100 for c in covs], [a*100 for a in accs], 'b-', linewidth=2, label='XGBoost')
+    plt.plot([c*100 for c in rand_covs], [a*100 for a in rand_accs], 'k--', linewidth=2, label='Random Baseline')
     plt.xlabel('Coverage (%)')
     plt.ylabel('Accepted Accuracy (%)')
     plt.title('Coverage vs Accuracy')
     plt.grid(True, linestyle='--')
+    plt.legend()
     plt.gca().invert_xaxis()
     plt.savefig('analysis/figures/coverage_vs_accuracy_4_10.png', dpi=300)
     plt.close()
@@ -158,7 +176,7 @@ def main():
     plt.close()
     
     # Figure 4: Reliability Diagram
-    valid_bins = bin_stats[bin_stats['count'] > 0]
+    valid_bins = bin_stats[bin_stats['count'] > 10] # Filter out noise
     plt.figure(figsize=(8, 8))
     plt.plot([0, 1], [0, 1], "k:", label="Perfect Calibration")
     plt.plot(valid_bins['mean_conf'], valid_bins['actual_acc'], 's-', color='purple', label="XGBoost Empirical")
