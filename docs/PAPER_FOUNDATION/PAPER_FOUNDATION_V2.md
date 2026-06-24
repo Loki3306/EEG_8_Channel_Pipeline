@@ -26,14 +26,16 @@ We propose a two-stage framework that separates **decoding** from **confidence e
 
 | Metric | Value | Evidence |
 |--------|-------|----------|
-| MatchNet Window Accuracy (10s) | 69.02% | Phase 2 export, 5,400 windows |
+| MatchNet Window Accuracy (10s) | 69.02% (95% CI: [67.76%, 70.28%]) | Phase 2 export, 5,400 windows |
 | MatchNet Window Accuracy (3s) | 69.02% | Archive per-subject table |
 | Ridge Regression Baseline (8ch) | ~65–69% | LOSO evaluation |
 | TCN Reconstruction Baseline | ~50–55% | LOSO evaluation (failure) |
 | Margin-Only Confidence AUROC | 0.6601 | Phase 2 reliability |
-| Full 5-Feature Confidence AUROC | 0.8057 | Nested LOSO evaluation |
-| Selective Accuracy @ 70% Coverage | 81.55% | Behavior audit |
-| Selective Accuracy @ 50% Coverage | 86% | Behavior audit |
+| Full 5-Feature Confidence AUROC | 0.8057 (95% CI: [0.7936, 0.8182]) | Nested LOSO evaluation |
+| Selective Accuracy @ 70% Coverage | 81.55% (95% CI: [80.28%, 82.79%]) | Behavior audit |
+| Selective Gain @ 70% Coverage | +12.53% | Calculated |
+| Area Under Risk-Coverage (AURC) | 0.1320 | Integrated Risk |
+| Excess AURC (E-AURC) | 0.0781 | (AURC - Optimal 0.0539) |
 | Information Limit (failure prediction) | AUROC ≈ 0.59 | Audit-The-Audit |
 
 ## 1.4 Contributions
