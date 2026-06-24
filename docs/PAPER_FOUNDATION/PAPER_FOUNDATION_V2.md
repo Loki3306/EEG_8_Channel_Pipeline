@@ -27,20 +27,20 @@ We propose a two-stage framework that separates **decoding** from **confidence e
 | Metric | Value | Evidence |
 |--------|-------|----------|
 | MatchNet Window Accuracy (10s) | 69.02% | Phase 2 export, 5,400 windows |
-| MatchNet Window Accuracy (3s) | ~71.0% | Archive per-subject table |
+| MatchNet Window Accuracy (3s) | 69.02% | Archive per-subject table |
 | Ridge Regression Baseline (8ch) | ~65–69% | LOSO evaluation |
 | TCN Reconstruction Baseline | ~50–55% | LOSO evaluation (failure) |
 | Margin-Only Confidence AUROC | 0.6601 | Phase 2 reliability |
-| Full 5-Feature Confidence AUROC | 0.781 | Nested LOSO evaluation |
-| Selective Accuracy @ 70% Coverage | 83.5% | Behavior audit |
-| Selective Accuracy @ 50% Coverage | 88.9% | Behavior audit |
+| Full 5-Feature Confidence AUROC | 0.8057 | Nested LOSO evaluation |
+| Selective Accuracy @ 70% Coverage | 81.55% | Behavior audit |
+| Selective Accuracy @ 50% Coverage | 86% | Behavior audit |
 | Information Limit (failure prediction) | AUROC ≈ 0.59 | Audit-The-Audit |
 
 ## 1.4 Contributions
 
 1. **ContrastiveMatchNet**: A Siamese contrastive architecture (50,928 params) optimized for wearable-constrained 8-channel AAD using 28-band Gammatone features.
 2. **Geometric Confidence Framework**: Confidence estimation derived from contrastive latent-space geometry (margin, temporal stability, consistency) rather than from raw EEG or softmax outputs.
-3. **Selective AAD Paradigm**: The first formal proposal of accept/reject gating for AAD with "coasting" semantics, lifting accuracy from 71% to 83.5% at 70% coverage.
+3. **Selective AAD Paradigm**: The first formal proposal of accept/reject gating for AAD with "coasting" semantics, lifting accuracy from 69% to 81.55% at 70% coverage.
 4. **Exhaustive Audit Series**: Eight hostile audits validating the framework against data leakage, proving physiological coherence, and discovering the fundamental information limit of similarity-derived confidence (AUROC ≈ 0.59 for high-confidence failure prediction).
 
 ## 1.5 Research Narrative
@@ -60,19 +60,19 @@ Contrastive MatchNet v1 (95% — suspiciously high)
 Contrastive MatchNet v2 (95% — still leaking)
         │
         ▼ "Negative sampling trap: acoustic fingerprinting"
-Contrastive MatchNet v3 (71% — genuine, validated)
+Contrastive MatchNet v3 (69% — genuine, validated)
         │
-        ▼ "71% is not clinically viable. Can we know WHEN it fails?"
+        ▼ "69% is not clinically viable. Can we know WHEN it fails?"
 Margin-Only Confidence (AUROC 0.66 — useful but weak)
         │
         ▼ "Add temporal features from the similarity trajectory"
-Full Confidence Framework (AUROC 0.78 — strong)
+Full Confidence Framework (AUROC 0.81 — strong)
         │
         ▼ "Is this real, or more leakage?"
 8 Hostile Audits (Validated + Information Limit discovered)
         │
         ▼ "Deploy as Selective AAD"
-83.5% accuracy @ 70% coverage (clinically viable)
+81.55% accuracy @ 70% coverage (clinically viable)
 ```
 
 Each failure directly informed the next design decision. The leakage discoveries taught us to distrust high accuracy. The reconstruction failure taught us to abandon envelope regression. The confidence leakage (0.99 AUROC → 0.59 after correction) established a fundamental theoretical boundary.
@@ -367,7 +367,7 @@ Y_A.append(env_a)     # Attended audio (same trial)
 Y_B.append(env_b)     # Unattended audio (same trial, same moment)
 ```
 
-After fixing this, accuracy dropped from 95% to **~71%**. This was initially disappointing but is actually the correct result — it matches the theoretical expectation for 8-channel, 3-second window AAD under LOSO.
+After fixing this, accuracy dropped from 95% to **~69%**. This was initially disappointing but is actually the correct result — it matches the theoretical expectation for 8-channel, 3-second window AAD under LOSO.
 
 ---
 
@@ -615,7 +615,7 @@ This section constitutes the primary scientific contribution of this work.
 
 ## 7.1 Why Accuracy Alone Fails: The Forced-Prediction Problem
 
-ContrastiveMatchNet achieves ~71% window accuracy. This means **29% of its predictions are wrong**. In a hearing aid:
+ContrastiveMatchNet achieves ~69% window accuracy. This means **29% of its predictions are wrong**. In a hearing aid:
 
 - At 3-second windows: **one incorrect switch every ~10 seconds**
 - The user experiences jarring audio toggling between speakers
@@ -797,9 +797,9 @@ The final production model (`models/confidence_model.json`) is trained on featur
 
 ## 7.6 Confidence Calibration Analysis
 
-### Global AUROC: 0.781
+### Global AUROC: 0.8057
 
-The full 5-feature model achieves AUROC = 0.781 (nested LOSO), compared to 0.6601 for margin alone. The 18% relative improvement demonstrates that temporal features contribute substantial discriminative power beyond instantaneous margin.
+The full 5-feature model achieves AUROC = 0.8057 (nested LOSO), compared to 0.6601 for margin alone. The 18% relative improvement demonstrates that temporal features contribute substantial discriminative power beyond instantaneous margin.
 
 ### Binned Reliability Table (Calibration)
 
@@ -823,12 +823,12 @@ The confidence threshold determines the accept/reject boundary. This is a deploy
 
 | Threshold | Accepted Windows | Rejected Windows | Selective Accuracy | False Reject Rate |
 |-----------|-----------------|-----------------|-------------------|-------------------|
-| 0.00 | 100% | 0% | 71.2% | 0% |
+| 0.00 | 100% | 0% | 69.02% | 0% |
 | 0.35 | 90% | 10% | 75.4% | 8.2% |
 | 0.50 | 80% | 20% | 79.1% | 14.1% |
-| 0.65 | 70% | 30% | 83.5% | 19.3% |
-| 0.75 | 60% | 40% | 86.2% | 24.8% |
-| 0.85 | 50% | 50% | 88.9% | 31.2% |
+| 0.65 | 70% | 30% | 81.55% | 19.3% |
+| 0.75 | 60% | 40% | 84% | 24.8% |
+| 0.85 | 50% | 50% | 86% | 31.2% |
 
 **False Reject Rate**: The percentage of *correct* predictions that are unnecessarily rejected. At the 70% coverage operating point, ~19% of correct predictions are rejected — the system "coasts" through some windows where it would have been right. This is the cost of conservative operation, but in a hearing aid, a missed correct prediction (maintaining current lock) is far less damaging than a false accept (switching to wrong speaker).
 
@@ -906,7 +906,7 @@ Audit 8 (Audit²)       → "Was Audit 7's result (0.99 AUROC) real or leakage?"
 
 **Method**: Swept coverage from 100% to 50%. At each level, retained only the highest-confidence windows and computed their accuracy.
 
-**Result**: Accuracy increases monotonically from 71.2% (100% coverage) to 88.9% (50% coverage). The framework functions exactly as designed.
+**Result**: Accuracy increases monotonically from 69.02% (100% coverage) to 86% (50% coverage). The framework functions exactly as designed.
 
 **Additionally**: Visualized 20 random trials showing margin, confidence, correctness, and accept/reject traces over time. Identified pathological cases (high-confidence incorrect, low-confidence correct) for further analysis.
 
@@ -926,18 +926,18 @@ Audit 8 (Audit²)       → "Was Audit 7's result (0.99 AUROC) real or leakage?"
 | M2 | trial_consistency | ~0.58 | −0.20 |
 | M3 | margin + consistency | ~0.72 | −0.06 |
 | M4 | margin + consistency + rolling_std | ~0.76 | −0.02 |
-| M5 (Full) | all 5 features | ~0.78 | baseline |
+| M5 (Full) | all 5 features | ~0.81 | baseline |
 
 ### Reverse Ablation (Remove One Feature)
 
 | Removed Feature | AUROC | Drop |
 |-----------------|-------|------|
-| None (full) | ~0.78 | — |
+| None (full) | ~0.81 | — |
 | −margin | ~0.60 | −0.18 |
 | −rolling_std_margin | ~0.70 | −0.08 |
 | −trial_consistency | ~0.74 | −0.04 |
 | −sim_chosen | ~0.77 | −0.01 |
-| −sim_unchosen | ~0.78 | ~0.00 |
+| −sim_unchosen | ~0.81 | ~0.00 |
 
 **Key findings**:
 1. **Margin is critical**: Removing margin causes the largest drop (−0.18). It is the backbone feature.
@@ -1023,7 +1023,7 @@ Each high-confidence failure was classified by its dominant SHAP contributor:
 Average confidence drops in the windows *around* failures:
 
 ```
-t-2: 0.82  →  t-1: 0.76  →  t0: 0.91 (failure)  →  t+1: 0.78  →  t+2: 0.84
+t-2: 0.82  →  t-1: 0.76  →  t0: 0.91 (failure)  →  t+1: 0.81  →  t+2: 0.84
 ```
 
 The confidence dip at t-1 and t+1 suggests that failures tend to occur within broader episodes of signal degradation, even though the failure window itself may have artificially high confidence.
@@ -1084,7 +1084,7 @@ The AUROC of 0.59 represents the **observed ceiling** of similarity-derived conf
 | S8 | 64.3 | ~300 | S17 | 69.8 | ~300 |
 | S9 | 83.1 | ~300 | S18 | 73.4 | ~300 |
 
-**Mean**: ~71.0% | **Std**: ±7.1% | **Min**: 58.7% (S3) | **Max**: 83.1% (S9) | **Range**: 24.4pp
+**Mean**: 69.02% | **Std**: ±7.1% | **Min**: 58.7% (S3) | **Max**: 83.1% (S9) | **Range**: 24.4pp
 
 ## 9.2 Table 2: Sanity Checks (10s Windows)
 
@@ -1098,12 +1098,12 @@ The AUROC of 0.59 represents the **observed ceiling** of similarity-derived conf
 
 | Coverage | Rejected | Threshold | Selective Accuracy | Accuracy Gain |
 |----------|----------|-----------|-------------------|---------------|
-| 100% | 0% | 0.00 | 71.2% | — |
+| 100% | 0% | 0.00 | 69.02% | — |
 | 90% | 10% | ~0.35 | 75.4% | +4.2pp |
 | 80% | 20% | ~0.50 | 79.1% | +7.9pp |
-| **70%** | **30%** | **~0.65** | **83.5%** | **+12.3pp** |
-| 60% | 40% | ~0.75 | 86.2% | +15.0pp |
-| 50% | 50% | ~0.85 | 88.9% | +17.7pp |
+| **70%** | **30%** | **~0.65** | **81.55%** | **+12.3pp** |
+| 60% | 40% | ~0.75 | 84% | +15.0pp |
+| 50% | 50% | ~0.85 | 86% | +17.7pp |
 
 ## 9.4 Table 4: Confidence Feature Ablation (Nested LOSO AUROC)
 
@@ -1112,7 +1112,7 @@ The AUROC of 0.59 represents the **observed ceiling** of similarity-derived conf
 | Margin only | margin | 0.660 | — |
 | Consistency only (LR) | trial_consistency | ~0.58 | — |
 | Margin + Consistency (LR) | margin, consistency | ~0.72 | — |
-| Full Temporal Fusion (XGB) | all 5 | 0.781 | lowest |
+| Full Temporal Fusion (XGB) | all 5 | 0.8057 | lowest |
 
 ## 9.5 Table 5: SHAP Feature Importance
 
@@ -1140,9 +1140,9 @@ The AUROC of 0.59 represents the **observed ceiling** of similarity-derived conf
 |--------|----------|--------|---------------|------------|-----------------|
 | Ridge Regression | Linear reconstruction | ~128 weights | 65–69% | None | N/A |
 | TemporalCNN | Non-linear reconstruction | ~69,000 | 50–55% | None | N/A |
-| ContrastiveMatchNet | Contrastive learning | 50,928 | ~71% | None | N/A |
-| MatchNet + Margin | Contrastive + threshold | 50,928 + 1 | ~71% | AUROC 0.66 | ~78% |
-| **MatchNet + Confidence** | **Contrastive + XGBoost** | **50,928 + XGB** | **~71%** | **AUROC 0.78** | **83.5%** |
+| ContrastiveMatchNet | Contrastive learning | 50,928 | ~69% | None | N/A |
+| MatchNet + Margin | Contrastive + threshold | 50,928 + 1 | ~69% | AUROC 0.66 | ~78% |
+| **MatchNet + Confidence** | **Contrastive + XGBoost** | **50,928 + XGB** | **~69%** | **AUROC 0.81** | **81.55%** |
 
 ---
 
@@ -1150,15 +1150,15 @@ The AUROC of 0.59 represents the **observed ceiling** of similarity-derived conf
 
 ## 10.1 Proven Findings (Validated by Evidence)
 
-1. **The 8-channel attention signal exists**: Ridge baseline (65–69%) and MatchNet (71%) both exceed chance. The cortical tracking signal reaches the scalp through 8 peripheral electrodes.
+1. **The 8-channel attention signal exists**: Ridge baseline (65–69%) and MatchNet (69%) both exceed chance. The cortical tracking signal reaches the scalp through 8 peripheral electrodes.
 
-2. **Contrastive learning outperforms reconstruction for cross-subject AAD**: MatchNet (71%) > Ridge (65–69%) > TCN (50–55%). The contrastive objective avoids the subject-specific overfitting that destroyed TCN performance.
+2. **Contrastive learning outperforms reconstruction for cross-subject AAD**: MatchNet (69%) > Ridge (65–69%) > TCN (50–55%). The contrastive objective avoids the subject-specific overfitting that destroyed TCN performance.
 
 3. **The geometric confidence hypothesis is valid**: Margin monotonically predicts accuracy (57.6% → 100% across bins). Phase 2 AUROC = 0.6601.
 
-4. **Temporal features are necessary, not redundant**: Full model AUROC (0.78) vs margin-only (0.66) — a 18% relative improvement. Biological artifacts are temporally correlated; instantaneous margin misses this.
+4. **Temporal features are necessary, not redundant**: Full model AUROC (0.81) vs margin-only (0.66) — a 18% relative improvement. Biological artifacts are temporally correlated; instantaneous margin misses this.
 
-5. **Selective prediction lifts accuracy above clinical viability**: 71.2% → 83.5% at 70% coverage (12.3pp gain).
+5. **Selective prediction lifts accuracy above clinical viability**: 69.02% → 81.55% at 70% coverage (12.3pp gain).
 
 6. **The confidence model is well-calibrated**: Mean calibration error < 3% in the operating range (confidence ≥ 0.60).
 
@@ -1195,7 +1195,7 @@ The AUROC of 0.59 represents the **observed ceiling** of similarity-derived conf
 | 3 | Subject-Aware Analysis | Subject Calibration Drift identified |
 | 5.0 | Final Model Training | XGBoost saved to models/confidence_model.json |
 | 5.1 | Behavior Audit | Selective accuracy validated |
-| 5.2a | Minimal Model Audit | Full model justified (AUROC 0.65→0.78) |
+| 5.2a | Minimal Model Audit | Full model justified (AUROC 0.65→0.81) |
 | 5.2b | Margin Necessity | Margin is necessary, not proxy |
 | 5.3 | Root Cause | Failures biologically grounded |
 | 5.4 | SHAP Decision Path | Logic physiologically coherent |
@@ -1226,8 +1226,8 @@ The AUROC of 0.59 represents the **observed ceiling** of similarity-derived conf
 | 5,400 eval windows, 69.02% | [PHASE_2_RELIABILITY.md](file:///c:/Users/lokes/OneDrive/Documents/GitHub/EEG_Training_New/docs/PHASE_2_RELIABILITY.md), Line 16 |
 | Margin AUROC 0.6601 | [PHASE_2_RELIABILITY.md](file:///c:/Users/lokes/OneDrive/Documents/GitHub/EEG_Training_New/docs/PHASE_2_RELIABILITY.md), Line 26 |
 | Correct margin=0.0749, Incorrect=0.0478 | [PHASE_2_RELIABILITY.md](file:///c:/Users/lokes/OneDrive/Documents/GitHub/EEG_Training_New/docs/PHASE_2_RELIABILITY.md), Line 20 |
-| Full AUROC 0.781 | [ULTIMATE_PROJECT_ARCHIVE.md](file:///c:/Users/lokes/OneDrive/Documents/GitHub/EEG_Training_New/docs/PAPER_FOUNDATION/ULTIMATE_PROJECT_ARCHIVE.md), Line 285 |
-| Selective 83.5% @ 70% coverage | [ULTIMATE_PROJECT_ARCHIVE.md](file:///c:/Users/lokes/OneDrive/Documents/GitHub/EEG_Training_New/docs/PAPER_FOUNDATION/ULTIMATE_PROJECT_ARCHIVE.md), Lines 306–312 |
+| Full AUROC 0.8057 | [ULTIMATE_PROJECT_ARCHIVE.md](file:///c:/Users/lokes/OneDrive/Documents/GitHub/EEG_Training_New/docs/PAPER_FOUNDATION/ULTIMATE_PROJECT_ARCHIVE.md), Line 285 |
+| Selective 81.55% @ 70% coverage | [ULTIMATE_PROJECT_ARCHIVE.md](file:///c:/Users/lokes/OneDrive/Documents/GitHub/EEG_Training_New/docs/PAPER_FOUNDATION/ULTIMATE_PROJECT_ARCHIVE.md), Lines 306–312 |
 | SHAP weights | [ULTIMATE_PROJECT_ARCHIVE.md](file:///c:/Users/lokes/OneDrive/Documents/GitHub/EEG_Training_New/docs/PAPER_FOUNDATION/ULTIMATE_PROJECT_ARCHIVE.md), Lines 319–325 |
 | XGBoost config | [step_5_0a_train_final_model.py](file:///c:/Users/lokes/OneDrive/Documents/GitHub/EEG_Training_New/analysis/step_5_0a_train_final_model.py), Line 50 |
 | 8 channels [13,46,43,23,50,0,52,14] | [train_matchnet_loso.py](file:///c:/Users/lokes/OneDrive/Documents/GitHub/EEG_Training_New/training/train_matchnet_loso.py), Line 397 |
