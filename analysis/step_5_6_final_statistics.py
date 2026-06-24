@@ -49,17 +49,24 @@ def bootstrap_ci(metric_fn, y_true, y_pred, n_resamples=10000, ci=0.95):
 def accuracy_score_fn(y_true, y_pred):
     return np.mean(y_true == y_pred)
 
+import argparse
+
 def main():
-    csv_file = "subject_distance_predictions.csv"
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--csv_file', type=str, default='subject_distance_predictions.csv')
+    parser.add_argument('--model_path', type=str, default='models/confidence_model.json')
+    args = parser.parse_args()
+    
+    csv_file = args.csv_file
     if not os.path.exists(csv_file):
-        print(f"Error: {csv_file} not found.")
+        print(f"Error: {csv_file} not found. Are you in the right Kaggle directory?")
         return
         
     df = pd.read_csv(csv_file)
     df = df[np.isfinite(df['margin'])].reset_index(drop=True)
     df = add_temporal_features(df)
     
-    model_path = "models/confidence_model.json"
+    model_path = args.model_path
     if not os.path.exists(model_path):
         print(f"Error: {model_path} not found.")
         return

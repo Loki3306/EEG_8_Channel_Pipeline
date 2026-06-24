@@ -33,11 +33,18 @@ def add_temporal_features(df):
     df = df.groupby(['subject_id', 'trial_id'], group_keys=False).apply(compute_consistency)
     return df
 
+import argparse
+
 def generate_figures():
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--csv_file', type=str, default='subject_distance_predictions.csv')
+    parser.add_argument('--model_path', type=str, default='models/confidence_model.json')
+    args = parser.parse_args()
+
     os.makedirs('analysis/figures/publication', exist_ok=True)
     
     # 1. Load Data
-    csv_file = "subject_distance_predictions.csv"
+    csv_file = args.csv_file
     if not os.path.exists(csv_file):
         print(f"Error: {csv_file} not found.")
         return
@@ -47,7 +54,7 @@ def generate_figures():
     df = add_temporal_features(df)
     
     # Load Model
-    model_path = "models/confidence_model.json"
+    model_path = args.model_path
     model = xgb.XGBClassifier()
     model.load_model(model_path)
     
