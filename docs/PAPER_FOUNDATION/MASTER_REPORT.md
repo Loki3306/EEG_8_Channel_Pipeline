@@ -1,3 +1,20 @@
+# MASTER REPORT: EEG Auditory Attention Decoding Confidence Framework
+
+## Table of Contents
+1. [Executive Overview](#part-1--executive-overview)
+2. [Project Journey](#part-2--project-journey)
+3. [Final MatchNet System](#part-3--final-matchnet-system)
+4. [Dataset Deep Dive](#part-4--dataset-deep-dive)
+5. [Confidence Framework](#part-5--confidence-framework)
+6. [Audit Series](#part-6--audit-series)
+7. [Selective AAD](#part-7--selective-aad)
+8. [Runtime System](#part-8--runtime-system)
+9. [Complete Results Repository](#part-9--complete-results-repository)
+10. [Lessons Learned](#part-10--lessons-learned)
+11. [Current Status](#part-11--current-status)
+
+---
+
 # PART 1 — EXECUTIVE OVERVIEW
 
 ## What Problem We Are Solving
@@ -134,6 +151,7 @@ The most insidious bug occurred within the contrastive InfoNCE loss formulation.
 - **Impact**: The neural network quickly learned to ignore the subtle attention signatures. Instead, it noticed that the positive audio and the EEG always came from the exact same trial (sharing the same background noise, mastering volume, and electrical artifacts). It achieved 95% accuracy simply by matching the "acoustic fingerprint" of the trial, completely bypassing the biological attention signal.
 - **Fix**: The pipeline was rigidly restructured to enforce **Strict Negative Sampling**. The `z_b` (unattended audio) must *always* be the concurrent, parallel audio track playing in the subject's opposite ear at the exact same millisecond. This forced the network to actually solve the AAD problem, dropping the inflated 95% accuracy back to a mathematically sound 71%.
 
+---
 
 # PART 3 — FINAL MATCHNET SYSTEM
 
@@ -217,14 +235,11 @@ loss = max(0, -sim_a + sim_b + margin)
 *Note: The mathematical margin used in the loss function (e.g., 0.1) is distinct from the downstream dynamic confidence `margin` feature.*
 - *Purpose*: This loss explicitly forces the network to manipulate the weights of both encoders such that `z_eeg` is pulled closer to `z_a` (attended) and pushed away from `z_b` (unattended).
 
-
 ---
 
 # PART 4 — DATASET DEEP DIVE
 
-The framework's robustness was tested across two entirely independent AAD datasets: DTU and KUL. Understanding their structural nuances was critical to solving the zero-shot transfer problem.
-
-## 1. DTU Dataset (Primary Training Set)
+## DTU Dataset
 The DTU dataset formed the backbone of the MatchNet training and LOSO evaluations.
 
 ### Trial Structure
@@ -241,29 +256,7 @@ The DTU dataset formed the backbone of the MatchNet training and LOSO evaluation
 ### Audio Preprocessing & Target Labels
 DTU provided pre-extracted acoustic envelopes. 
 - **Method**: The raw stereo audio was passed through a 28-band Gammatone filterbank. The absolute value of each band was extracted and then subjected to a power compression of `^0.3` to mimic the non-linear loudness perception of the human cochlea.
-- **Labels**: DTU's structuring was opaque. A deep investigation (`audio_feature_audit.md`) revealed that the provided `.mat` files mapped the trials not to 'Left/Right', but directly to `wavA` and `wavB`. The training pipeline dynamically loads `wavA` as the attended stream if the trial label is `1`, and `wavB` if the label is `2`.
-
-## 2. KUL Dataset (Zero-Shot Transfer Set)
-The KUL dataset was introduced in Phase 6 to test if a model trained exclusively on DTU could generalize to completely unseen data.
-
-### Trial Structure
-- **Subjects**: 16 subjects (Phase 6 focused entirely on `S1` for the transfer proof).
-- **Trials**: 20 trials per subject.
-- **Duration**: Unlike DTU's short 50-second bursts, KUL trials are massive continuous blocks of ~389 seconds (6.5 minutes).
-- **Audio**: Dutch audiobooks presented dichotically.
-
-### Metadata Discoveries and Audio Mapping
-Unlike DTU, KUL provided raw `.wav` files rather than pre-extracted 28-band envelopes. Mapping the correct audio to the EEG was a massive forensic task documented in `KUL_DATASET_AUDIT.md`.
-- **`attended_ear`**: A string `'L'` or `'R'` indicating the physical ear the subject was instructed to focus on.
-- **`stimuli`**: A 1x2 cell array containing the filenames of the audio tracks playing in that trial.
-- **The Mapping Logic**: The attended audio is determined purely by the physical ear. If `attended_ear == 'L'`, the attended stream is always `stimuli[0]`. If `'R'`, it is `stimuli[1]`. The tracks frequently swap ears between trials, so hardcoding an index guarantees a 0% accuracy rate.
-
-### KUL Preprocessing Alignment
-To feed KUL data into the DTU-trained MatchNet, the entire preprocessing pipeline had to be mathematically rebuilt from scratch in Python:
-1. **Channel Selection**: The BioSemi 64-channel nomenclature of KUL was mapped directly to the DTU 8-channel subset.
-2. **EEG Resampling**: KUL's raw 128 Hz EEG was filtered and downsampled to 64 Hz.
-3. **The 28-Band Reconstruction**: The KUL `.wav` files were processed using a custom ERB-spaced filterbank (50Hz to 8000Hz). Butterworth filters extracted the envelopes, which were then subjected to the critical `^0.3` power compression before being downsampled to 64 Hz.
-4. **Global Normalization**: KUL trials were normalized using global trial means and standard deviations to perfectly match the tensor scaling expected by MatchNet.
+- **Labels**: DTU's structuring was opaque. A deep investigation revealed that the provided `.mat` files mapped the trials not to 'Left/Right', but directly to `wavA` and `wavB`. The training pipeline dynamically loads `wavA` as the attended stream if the trial label is `1`, and `wavB` if the label is `2`.
 
 
 # PART 5 — CONFIDENCE FRAMEWORK
@@ -313,7 +306,7 @@ These 5 lightweight features are fed into an XGBoost classifier.
 ## Reliability and Calibration
 The true test of a confidence model is its calibration. Does a confidence score of 0.8 mean it is actually correct 80% of the time?
 - **Results**: The XGBoost model achieved an AUROC of ~0.78 across the DTU dataset. 
-- **Reliability Plot**: A generated reliability diagram (`reliability_diagram.png`) showed the predicted probabilities tracking the empirical accuracy almost perfectly along the `y = x` axis. 
+- **Reliability Plot**: A generated reliability diagram showed the predicted probabilities tracking the empirical accuracy almost perfectly along the `y = x` axis. 
 
 ---
 
@@ -351,6 +344,7 @@ To ensure the confidence model wasn't exploiting trivial artifacts or data leaka
 - **Results**: The L2 norms of the embeddings remain structurally stable during failures. However, the correlation (`sim_chosen`) collapses to near zero. PSD analysis showed that low-confidence windows often corresponded to massive spikes in broadband noise (muscle artifacts).
 - **Conclusion**: The neural network isn't "breaking" mathematically; the biological signal is simply gone. The confidence framework successfully detects this "Information Gap."
 
+---
 
 # PART 7 — SELECTIVE AAD
 
@@ -403,33 +397,7 @@ Deep learning inference (MatchNet) is computationally heavy. Feature extraction 
 
 ---
 
-# PART 9 — CROSS DATASET GENERALIZATION
-
-To prove that MatchNet hadn't just memorized the DTU recording equipment, we attempted Zero-Shot Transfer to the KUL dataset.
-
-## The Transfer Failure and the 28-Band Reconstruction
-Initial attempts to feed KUL data into the DTU-trained MatchNet failed entirely (accuracy near 50%). 
-An aggressive audit revealed the issue was purely mechanical. The DTU MatchNet audio encoder expects an input of shape `(Batch, 28, 192)`. KUL provided raw audio. Standard single-band envelope extraction resulted in catastrophic domain shift because the neural network was expecting 28 distinct, frequency-localized amplitude modulations.
-
-To fix this, a mathematically precise replication of the DTU MATLAB preprocessing was built in Python (`analysis/step_6_5_kul_audio_28_band_proof.py`).
-1. **ERB Filterbank**: Generated 28 Gammatone center frequencies from 50Hz to 8000Hz.
-2. **Extraction**: Applied Butterworth filters and extracted the absolute Hilbert envelopes.
-3. **Power Compression**: Raised the envelope to `^0.3`.
-4. **Resampling**: Downsampled to 64Hz.
-
-## Forward Pass Validation (Phase 4.5 Audits)
-Before retraining anything, a comprehensive distribution audit (`step_6_9_kul_vs_dtu_distribution_audit.py`) was run. 
-- It proved that the reconstructed KUL envelopes possessed the exact same statistical mean and standard deviation as the DTU envelopes. 
-- Passing both through the frozen MatchNet revealed that the L2 norms of the latent embeddings (`z_eeg`, `z_a`) aligned perfectly.
-
-## Success
-Once the 28-band geometry was aligned, the zero-shot transfer was executed on all 20 trials of KUL Subject 1 (`step_6_8_kul_ablation_and_confidence.py`). 
-- **Result**: The frozen, DTU-trained model achieved **100% Trial Accuracy** on KUL S1 at a 30-second window length, and **71.4% Window Accuracy** at 20-second windows. The confidence model maintained an AUROC of **0.952**.
-- **Implication**: ContrastiveMatchNet generalizes beautifully to novel acoustic environments and unseen subjects, provided the preprocessing domain is mechanically aligned.
-
----
-
-# PART 10 — COMPLETE RESULTS REPOSITORY
+# PART 9 — COMPLETE RESULTS REPOSITORY
 
 ### Base MatchNet LOSO Accuracy (DTU Dataset)
 | Subject | Acc | Subject | Acc |
@@ -464,19 +432,9 @@ Once the 28-band geometry was aligned, the zero-shot transfer was executed on al
 | `trial_consistency` | 0.08 |
 | `sim_unchosen` | 0.03 |
 
-### KUL S1 Transfer Ablation (Zero-Shot)
-| Window Length | Window Accuracy | Trial Accuracy | Confidence AUROC |
-|---------------|-----------------|----------------|------------------|
-| 30s           | 75.8%           | 100.0%         | NaN              |
-| 20s           | 71.4%           | 95.0%          | 0.952            |
-| 15s           | 69.1%           | 95.0%          | 0.814            |
-| 10s           | 66.8%           | 90.0%          | 0.812            |
-| 5s            | 60.1%           | 90.0%          | 0.729            |
-| 2s            | 54.3%           | 75.0%          | 0.612            |
-
 ---
 
-# PART 11 — LESSONS LEARNED
+# PART 10 — LESSONS LEARNED
 
 ## What Hypotheses Survived
 - **The Margin is King**: The geometrical distance in the latent space (`margin`) perfectly encapsulates the certainty of the model. 
@@ -486,20 +444,17 @@ Once the 28-band geometry was aligned, the zero-shot transfer was executed on al
 ## What Hypotheses Were Wrong
 - **Deep Confidence Networks**: The initial assumption that predicting confidence required passing raw EEG into a secondary deep neural network was entirely incorrect and led to spatial leakage.
 - **Continuous AAD is Required**: The field assumes AAD must be continuous. Our results show that treating AAD as a sparse, stateful update mechanism is far superior for realistic applications.
-- **Cross-Dataset Failure is Architectural**: When transfer to KUL failed, we assumed MatchNet was brittle. We proved the failure was actually just improper acoustic preprocessing. 
 
 ---
 
-# PART 12 — CURRENT STATUS
+# PART 11 — CURRENT STATUS
 
 ## What is Proven (Facts)
-- ContrastiveMatchNet can decode auditory attention using only 8 specific EEG channels at ~71% accuracy.
+- ContrastiveMatchNet can decode auditory attention using only 8 specific EEG channels at ~71% accuracy on the DTU dataset.
 - The derived Confidence Framework is highly calibrated (AUROC ~0.78) and significantly boosts effective accuracy (>85%) when deployed selectively.
-- The model exhibits zero-shot generalization capabilities across completely independent datasets provided the preprocessing geometries (e.g., 28-band filterbanks) are rigorously enforced.
 
 ## What Remains Future Work
-- **Generalized Cross-Subject KUL Transfer**: The zero-shot evaluation was rigorously proven on KUL S1. Running the evaluation across all KUL subjects to establish global transfer metrics remains.
-- **Real-Time Switching Evaluation**: Both DTU and KUL consist of continuous attention trials. Evaluating the framework on an explicit "attention switching" dataset to map the latency of the confidence drop/recovery cycle is critical.
+- **Real-Time Switching Evaluation**: The DTU dataset consists of continuous attention trials. Evaluating the framework on an explicit "attention switching" dataset to map the latency of the confidence drop/recovery cycle is critical.
 - **Real-Time Hardware Deployment**: While the XGBoost feature engine is theoretically lightweight, deploying the full EEGNet + 1DCNN + XGBoost pipeline onto ultra-low-power DSP hardware (e.g., inside an actual hearing aid) requires extensive quantization and optimization.
 
 
