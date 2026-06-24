@@ -260,7 +260,6 @@ For fold i ∈ {1, ..., 18}:
         - Per-window predictions with similarity scores
 ```
 
-**Why LOSO?** This is the most conservative cross-validation protocol for EEG. It simulates real-world deployment where a new user puts on a hearing aid with **zero calibration data**. The model must generalize across the massive inter-subject variability in skull geometry, neural anatomy, electrode impedance, and cognitive style. Any within-subject data leakage (even at the trial level) would produce artificially inflated results.
 
 ---
 
@@ -631,7 +630,6 @@ The fundamental problem: the system has no mechanism to distinguish between a co
 
 **Hypothesis**: Build a secondary CNN that examines the raw 8-channel EEG window and predicts whether it contains EMG artifacts (muscle noise from blinking, jaw clenching, swallowing).
 
-**Result**: The artifact CNN suffered from **massive spatial leakage**. Instead of learning generic artifact waveforms, it learned to recognize the background baseline noise profile of specific subjects (each person's skull geometry produces a unique spectral signature). It failed completely under LOSO evaluation.
 
 **Lesson**: Raw EEG features are too subject-specific for cross-subject confidence estimation.
 
@@ -1070,7 +1068,7 @@ The AUROC of 0.59 represents the **observed ceiling** of similarity-derived conf
 
 # 8. Experimental Results: Complete Tables
 
-## 9.1 Table 1: Per-Subject MatchNet Accuracy (LOSO, 3s Windows)
+## 8.1 Table 1: Per-Subject MatchNet Accuracy (LOSO, 3s Windows)
 
 | Subject | Accuracy (%) | N Windows | Subject | Accuracy (%) | N Windows |
 |---------|--------------|-----------|---------|--------------|-----------|
@@ -1086,7 +1084,7 @@ The AUROC of 0.59 represents the **observed ceiling** of similarity-derived conf
 
 **Mean**: 69.02% | **Std**: ±7.1% | **Min**: 58.7% (S3) | **Max**: 83.1% (S9) | **Range**: 24.4pp
 
-## 9.2 Table 2: Sanity Checks (10s Windows)
+## 8.2 Table 2: Sanity Checks (10s Windows)
 
 | Condition | Expected | Observed | Status |
 |-----------|----------|----------|--------|
@@ -1094,7 +1092,7 @@ The AUROC of 0.59 represents the **observed ceiling** of similarity-derived conf
 | Zero-EEG (all channels zeroed) | ~50% | ~50% | ✓ PASS |
 | Shuffled labels | ~50% | ~50% | ✓ PASS |
 
-## 9.3 Table 3: Selective Accuracy vs Coverage
+## 8.3 Table 3: Selective Accuracy vs Coverage
 
 | Coverage | Rejected | Threshold | Selective Accuracy | Accuracy Gain |
 |----------|----------|-----------|-------------------|---------------|
@@ -1105,7 +1103,7 @@ The AUROC of 0.59 represents the **observed ceiling** of similarity-derived conf
 | 60% | 40% | ~0.75 | 84% | +15.0pp |
 | 50% | 50% | ~0.85 | 86% | +17.7pp |
 
-## 9.4 Table 4: Confidence Feature Ablation (Nested LOSO AUROC)
+## 8.4 Table 4: Confidence Feature Ablation (Nested LOSO AUROC)
 
 | Model | Features | AUROC | E-AURC |
 |-------|----------|-------|--------|
@@ -1114,7 +1112,7 @@ The AUROC of 0.59 represents the **observed ceiling** of similarity-derived conf
 | Margin + Consistency (LR) | margin, consistency | ~0.72 | — |
 | Full Temporal Fusion (XGB) | all 5 | 0.8057 | lowest |
 
-## 9.5 Table 5: SHAP Feature Importance
+## 8.5 Table 5: SHAP Feature Importance
 
 | Feature | Mean |SHAP| | Relative Weight | Direction |
 |---------|-------------|-----------------|-----------|
@@ -1124,7 +1122,7 @@ The AUROC of 0.59 represents the **observed ceiling** of similarity-derived conf
 | `trial_consistency` | 0.08 | 8% | High → Correct |
 | `sim_unchosen` | 0.03 | 3% | Negligible |
 
-## 9.6 Table 6: Reliability Calibration
+## 8.6 Table 6: Reliability Calibration
 
 | Confidence Bin | Predicted Accuracy | Empirical Accuracy | Absolute Error |
 |----------------|--------------------|--------------------|----------------|
@@ -1134,7 +1132,7 @@ The AUROC of 0.59 represents the **observed ceiling** of similarity-derived conf
 | 0.60–0.70 | 65% | 69.2% | 4.2% |
 | 0.50–0.60 | 55% | 61.5% | 6.5% |
 
-## 9.7 Table 7: Method Comparison Summary
+## 8.7 Table 7: Method Comparison Summary
 
 | Method | Approach | Params | LOSO Accuracy | Confidence | Selective @ 70% |
 |--------|----------|--------|---------------|------------|-----------------|
@@ -1240,6 +1238,5 @@ The AUROC of 0.59 represents the **observed ceiling** of similarity-derived conf
 
 ---
 
-*Document reconstructed from complete repository archaeology. All numerical values verified against source code, training logs, and experimental output files. 100% DTU-focused. No KUL data, no transfer learning, no fabricated results.*
 
 *Last updated: June 2026*
