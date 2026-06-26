@@ -171,6 +171,9 @@ def main():
     trial_results = []
     all_window_margins = []
     
+    # Memoize audio envelopes to avoid recomputing the same 4 audio files 20 times!
+    audio_cache = {}
+    
     print(f"\nProcessing {len(trials)} trials...")
     
     with torch.no_grad():
@@ -200,14 +203,17 @@ def main():
                 print(f"    WARNING: Missing audio for Trial {t_idx}. Skipping.")
                 continue
                 
-            fs_att, audio_att = wavfile.read(att_wav_path)
-            fs_unatt, audio_unatt = wavfile.read(unatt_wav_path)
-            
-            if len(audio_att.shape) > 1: audio_att = audio_att.mean(axis=1)
-            if len(audio_unatt.shape) > 1: audio_unatt = audio_unatt.mean(axis=1)
-            
-            env_att = extract_28_band_envelope(audio_att, fs_att, fs_out=64, num_bands=28)
-            env_unatt = extract_28_band_envelope(audio_unatt, fs_unatt, fs_out=64, num_bands=28)
+            def get_cached_env(wav_path):
+                if wav_path in audio_cache:
+                    return audio_cache[wav_path]
+                fs, audio = wavfile.read(wav_path)
+                if len(audio.shape) > 1: audio = audio.mean(axis=1)
+                env = extract_28_band_envelope(audio, fs, fs_out=64, num_bands=28)
+                audio_cache[wav_path] = env
+                return env
+                
+            env_att = get_cached_env(att_wav_path)
+            env_unatt = get_cached_env(unatt_wav_path)
             
             min_len = min(len(eeg_64), env_att.shape[1], env_unatt.shape[1])
             eeg_64 = eeg_64[:min_len]
