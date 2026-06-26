@@ -76,7 +76,7 @@ class EALayerInspector:
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.model = ContrastiveMatchNet(eeg_model_type="eegnet", eeg_channels=8, audio_channels=28, latent_dim=64).to(self.device)
         self.model.load_state_dict(torch.load(chk_path, map_location=self.device))
-        self.datasets = ["DTU", "KUL", "KUL_EA", "KUL_EA_DTU"]
+        self.datasets = ["DTU", "KUL_Base", "KUL_EA", "KUL_EA_DTU"]
         self.activations = {d: {} for d in self.datasets}
         self.current_dataset = "DTU"
         
