@@ -59,8 +59,14 @@ def extract_28_band_envelope(audio_data, fs_in, fs_out=64, num_bands=28):
     )
         
     envelopes = np.array(envelopes)
-    num_samples_out = int(envelopes.shape[1] * fs_out / fs_in)
-    return resample(envelopes, num_samples_out, axis=1)
+    
+    import math
+    from scipy.signal import resample_poly
+    g = math.gcd(fs_out, fs_in)
+    up = fs_out // g
+    down = fs_in // g
+    
+    return resample_poly(envelopes, up, down, axis=1)
 
 # --- Normalization ---
 def normalize_array(arr):
