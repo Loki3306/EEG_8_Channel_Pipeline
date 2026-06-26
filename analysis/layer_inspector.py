@@ -285,10 +285,21 @@ class LayerInspector:
 if __name__ == "__main__":
     # Locate best checkpoint
     candidates = []
-    for r, d, f in os.walk(REPO_ROOT / "checkpoints"):
-        for file in f:
-            if 'best' in file.lower() or 'matchnet' in file.lower():
-                candidates.append(os.path.join(r, file))
+    
+    # 1. Check kaggle inputs for uploaded models
+    if Path("/kaggle/input").exists():
+        for r, d, f in os.walk("/kaggle/input"):
+            for file in f:
+                if file.endswith('.pth') or file.endswith('.pt'):
+                    if 'matchnet' in file.lower() or 'best' in file.lower():
+                        candidates.append(os.path.join(r, file))
+                        
+    # 2. Check local repo
+    if not candidates:
+        for r, d, f in os.walk(REPO_ROOT / "checkpoints"):
+            for file in f:
+                if 'best' in file.lower() or 'matchnet' in file.lower():
+                    candidates.append(os.path.join(r, file))
     
     if not candidates:
         print("ERROR: Could not find checkpoint!")
