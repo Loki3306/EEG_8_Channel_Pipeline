@@ -14,6 +14,7 @@ sys.path.append(str(REPO_ROOT))
 
 from models.matchnet import ContrastiveMatchNet
 from preprocessing.euclidean_alignment import prepare_alignment_matrices, apply_alignment
+from baselines.ridge_aad import load_subject_examples
 
 def normalize_array(arr):
     return (arr - arr.mean(axis=0, keepdims=True)) / (arr.std(axis=0, keepdims=True) + 1e-12)
@@ -110,12 +111,11 @@ def load_dtu_eeg_data():
         if not os.path.exists(dtu_path):
             return []
             
-    mat = sio.loadmat(dtu_path, squeeze_me=True, struct_as_record=False)
-    trials = mat['data']
+    examples = load_subject_examples(dtu_path)
     channels = [13, 46, 43, 23, 50, 0, 52, 14]
     
     eegs = []
-    for ex in trials:
+    for ex in examples:
         eeg = ex.eeg[:, channels].T
         nyq = 0.5 * 64
         b, a = butter(2, [1.0/nyq, 6.0/nyq], btype='band')
