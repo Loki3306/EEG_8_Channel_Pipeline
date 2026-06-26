@@ -160,8 +160,9 @@ class DatasetComparisonPipeline:
                     # (T, 8)
                     eeg = normalize_array(ex.eeg)
                     
-                    fname_a = mapping[sub][ex.id]["wavA"]["filename"]
-                    fname_b = mapping[sub][ex.id]["wavB"]["filename"]
+                    trial_key = f"trial_{ex.trial_index}"
+                    fname_a = mapping[sub][trial_key]["wavA"]["filename"]
+                    fname_b = mapping[sub][trial_key]["wavB"]["filename"]
                     env_a = envelopes[fname_a].T
                     env_b = envelopes[fname_b].T
                     
