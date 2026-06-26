@@ -102,14 +102,16 @@ class EALayerInspector:
         mat_path = "/kaggle/input/datasets/lowk1ee/s1-klu/S1_KLU.mat"
         if not os.path.exists(mat_path): mat_path = str(REPO_ROOT / "data" / "S1_KLU.mat")
         mat = sio.loadmat(mat_path, squeeze_me=True, struct_as_record=False)
-        trials = mat['trials'] if 'trials' in mat else mat['data']
+        trials = mat['trials'] if 'trials' in mat else mat['trial']
         
         kul_eegs_raw = []
         for trial in trials[:2]:
-            fs_eeg = 128
-            eeg_data = trial.EEG
-            if len(eeg_data.shape) > 2: eeg_data = eeg_data[0]
-            kul_eeg = eeg_data[:, dtu_channels]
+            fs_eeg = trial.FileHeader.SampleRate
+            ch_names = [ch.Label for ch in trial.FileHeader.Channels]
+            target_channels = ['Fp1', 'Fp2', 'F7', 'F8', 'T7', 'T8', 'P7', 'P8']
+            selected_indices = [ch_names.index(tc) if tc in ch_names else [c.upper() for c in ch_names].index(tc.upper()) for tc in target_channels]
+            
+            kul_eeg = trial.RawData.EegData[:, selected_indices]
             nyq = 0.5 * fs_eeg
             b, a = butter(2, [1.0/nyq, 6.0/nyq], btype='band')
             kul_eeg = filtfilt(b, a, kul_eeg, axis=0)

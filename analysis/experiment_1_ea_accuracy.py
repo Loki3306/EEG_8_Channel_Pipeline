@@ -53,16 +53,18 @@ def load_all_kul_data():
             raise FileNotFoundError("KUL dataset not found.")
             
     mat_data = sio.loadmat(mat_path, squeeze_me=True, struct_as_record=False)
-    trials = mat_data['data']
+    trials = mat_data['trials'] if 'trials' in mat_data else mat_data['trial']
     
-    fs_eeg = 128
     fs_dtu = 64
-    selected_indices = [13, 46, 43, 23, 50, 0, 52, 14]
     
     all_trials = []
     for t_idx, trial in enumerate(trials):
-        eeg_data = trial.EEG
-        if len(eeg_data.shape) > 2: eeg_data = eeg_data[0]
+        fs_eeg = trial.FileHeader.SampleRate
+        ch_names = [ch.Label for ch in trial.FileHeader.Channels]
+        target_channels = ['Fp1', 'Fp2', 'F7', 'F8', 'T7', 'T8', 'P7', 'P8']
+        selected_indices = [ch_names.index(tc) if tc in ch_names else [c.upper() for c in ch_names].index(tc.upper()) for tc in target_channels]
+        
+        eeg_data = trial.RawData.EegData
         eeg_8 = eeg_data[:, selected_indices]
         
         nyq = 0.5 * fs_eeg
