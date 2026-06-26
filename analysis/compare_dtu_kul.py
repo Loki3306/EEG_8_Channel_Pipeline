@@ -157,8 +157,10 @@ class DatasetComparisonPipeline:
                     sub_path = Path(sub)
                 examples = load_subject_examples(sub_path)
                 for ex in examples:
-                    # (T, 8)
-                    eeg = normalize_array(ex.eeg)
+                    # Extract the 8 target channels used for MatchNet training
+                    dtu_channels = [13, 46, 43, 23, 50, 0, 52, 14]
+                    eeg = ex.eeg[:, dtu_channels] if ex.eeg.shape[1] > 8 else ex.eeg
+                    eeg = normalize_array(eeg)
                     
                     trial_key = f"trial_{ex.trial_index}"
                     fname_a = mapping[sub][trial_key]["wavA"]["filename"]
