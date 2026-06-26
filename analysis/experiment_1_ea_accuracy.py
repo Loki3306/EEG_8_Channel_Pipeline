@@ -44,16 +44,19 @@ def apply_bandpass(data, low, high, fs, order=2):
     b, a = butter(order, [low, high], btype='band')
     return filtfilt(b, a, data)
 
+def _process_band(audio_data, low, high, fs_in):
+    band_audio = apply_bandpass(audio_data, low, high, fs_in)
+    return np.abs(band_audio) ** 0.3
+
 def extract_28_band_envelope(audio_data, fs_in, fs_out=64, num_bands=28):
     cfs = erb_space(50, 8000, num_bands)
     lows, highs = get_erb_bands(cfs)
     
-    envelopes = []
-    for i in range(num_bands):
-        band_audio = apply_bandpass(audio_data, lows[i], highs[i], fs_in)
-        env = np.abs(band_audio)
-        env = env ** 0.3
-        envelopes.append(env)
+    from joblib import Parallel, delayed
+    envelopes = Parallel(n_jobs=-1, backend="threading")(
+        delayed(_process_band)(audio_data, lows[i], highs[i], fs_in) 
+        for i in range(num_bands)
+    )
         
     envelopes = np.array(envelopes)
     num_samples_out = int(envelopes.shape[1] * fs_out / fs_in)
