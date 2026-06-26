@@ -150,7 +150,12 @@ class DatasetComparisonPipeline:
             
             subs = self.subjects if self.subjects != ['ALL'] else ['S1'] # Simplified for script safety
             for sub in subs:
-                examples = load_subject_examples(sub)
+                if isinstance(sub, str):
+                    kaggle_path = Path(f"/kaggle/input/datasets/lokeshgile/dataset-eeg/{sub}_data_preproc.mat")
+                    sub_path = kaggle_path if kaggle_path.exists() else REPO_ROOT / "data" / f"{sub}_data_preproc.mat"
+                else:
+                    sub_path = Path(sub)
+                examples = load_subject_examples(sub_path)
                 for ex in examples:
                     # (T, 8)
                     eeg = normalize_array(ex.eeg)
@@ -184,8 +189,8 @@ class DatasetComparisonPipeline:
             
             target_channels = ['Fp1', 'Fp2', 'F7', 'F8', 'T7', 'T8', 'P7', 'P8']
             
-            # For simplicity, we just load Subject 1's trials
-            for trial in tqdm(trials, desc="KUL Trials"):
+            # For speed, we just load 2 trials (otherwise 28-band extraction takes minutes)
+            for trial in tqdm(trials[:2], desc="KUL Trials"):
                 fs_eeg = trial.FileHeader.SampleRate
                 ch_names = [ch.Label for ch in trial.FileHeader.Channels]
                 sel_idx = [ch_names.index(tc) if tc in ch_names else [c.upper() for c in ch_names].index(tc.upper()) for tc in target_channels]
