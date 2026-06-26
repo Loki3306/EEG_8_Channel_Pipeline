@@ -56,7 +56,7 @@ def extract_28_band_envelope(audio_data, fs_in, fs_out=64, num_bands=28):
     lows, highs = get_erb_bands(cfs)
     
     from joblib import Parallel, delayed
-    envelopes = Parallel(n_jobs=-1, backend="threading")(
+    envelopes = Parallel(n_jobs=-1)(
         delayed(_process_band)(audio_data, lows[i], highs[i], fs_in) 
         for i in range(num_bands)
     )
