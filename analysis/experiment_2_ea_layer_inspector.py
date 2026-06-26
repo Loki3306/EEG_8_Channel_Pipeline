@@ -233,7 +233,7 @@ class EALayerInspector:
 
         run_batch("DTU", self.dtu_eeg, self.dtu_aa, self.dtu_ab)
         if len(self.kul_base_eeg) > 0:
-            run_batch("KUL", self.kul_base_eeg, self.kul_aa, self.kul_ab)
+            run_batch("KUL_Base", self.kul_base_eeg, self.kul_aa, self.kul_ab)
             run_batch("KUL_EA", self.kul_ea_eeg, self.kul_aa, self.kul_ab)
             run_batch("KUL_EA_DTU", self.kul_ea_dtu_eeg, self.kul_aa, self.kul_ab)
             self._analyze_activations()
@@ -244,12 +244,14 @@ class EALayerInspector:
         layers = ["EEG_Block1", "EEG_Block2", "EEG_Embedding"]
         
         for layer in layers:
-            dtu_act = torch.cat(self.activations["DTU"][layer], dim=0).numpy().reshape(200, -1)
+            dtu_act = torch.cat(self.activations["DTU"][layer], dim=0).numpy()
+            dtu_act = dtu_act.reshape(dtu_act.shape[0], -1)
             dtu_norm = np.linalg.norm(dtu_act, axis=1).mean()
             dtu_avg_vec = dtu_act.mean(axis=0)
             
             for ds in ["KUL_Base", "KUL_EA", "KUL_EA_DTU"]:
-                kul_act = torch.cat(self.activations[ds][layer], dim=0).numpy().reshape(200, -1)
+                kul_act = torch.cat(self.activations[ds][layer], dim=0).numpy()
+                kul_act = kul_act.reshape(kul_act.shape[0], -1)
                 kul_norm = np.linalg.norm(kul_act, axis=1).mean()
                 kul_avg_vec = kul_act.mean(axis=0)
                 
