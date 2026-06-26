@@ -308,6 +308,6 @@ if __name__ == "__main__":
     else:
         chk_path = candidates[0]
         print(f"Using checkpoint: {chk_path}")
-        inspector = LayerInspector(chk_path)
+        inspector = EALayerInspector(candidates[0])
         inspector.load_data()
         inspector.inspect_layers()
