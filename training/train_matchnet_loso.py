@@ -46,17 +46,16 @@ def normalize_array_global(arr):
     return arr / scale
 
 def get_mapping_data():
-    map_file = REPO_ROOT / "data" / "audio_mapping.json"
+    kaggle_map_dir = Path("/kaggle/input/datasets/lokeshgile/dataset-eeg")
+    if (kaggle_map_dir / "audio_mapping.json").exists():
+        map_file = kaggle_map_dir / "audio_mapping.json"
+    else:
+        map_file = REPO_ROOT / "data" / "audio_mapping.json"
     
-    # Check if the exact Kaggle dataset folder exists
-    kaggle_dir = Path("/kaggle/input/datasets/lokeshgile/gammatone-envelope")
-    if kaggle_dir.exists():
-        # Find any .pkl file in this folder to bypass exact filename mismatch
-        env_files = list(kaggle_dir.glob("*.pkl"))
-        if env_files:
-            env_file = env_files[0]
-        else:
-            env_file = REPO_ROOT / "data" / "gammatone_envelopes.pkl"
+    # Check kaggle paths first for pkl
+    kaggle_env_dir = Path("/kaggle/input/datasets/lokeshgile/gammatone-envelope")
+    if kaggle_env_dir.exists() and list(kaggle_env_dir.glob("*.pkl")):
+        env_file = list(kaggle_env_dir.glob("*.pkl"))[0]
     else:
         env_file = REPO_ROOT / "data" / "gammatone_envelopes.pkl"
         
@@ -198,8 +197,10 @@ def train_matchnet_loso(eeg_model, channels, lowcut, highcut, batch_size=128, nu
         return
         
     subject_examples = {str(p): load_subject_examples(p) for p in all_paths}
-    folds = list(iter_leave_one_subject_out(all_paths))
+    # ONLY RUN FOLD 1 to save time (we just need one trained model for the inspector)
+    folds = list(iter_leave_one_subject_out(all_paths))[:1]
     
+    os.makedirs(REPO_ROOT / "checkpoints", exist_ok=True)
     all_accs_norm_dict = {}
     all_accs_zero_dict = {}
     all_accs_shuf_dict = {}
@@ -397,8 +398,8 @@ if __name__ == "__main__":
     parser.add_argument("--channels", type=int, nargs='+', default=[13, 46, 43, 23, 50, 0, 52, 14])
     parser.add_argument("--lowcut", type=float, default=1.0)
     parser.add_argument("--highcut", type=float, default=6.0)
-    parser.add_argument("--batch_size", type=int, default=128, help="Training batch size")
-    parser.add_argument("--num_workers", type=int, default=2, help="Dataloader num_workers")
+    parser.add_argument("--batch_size", type=int, default=512, help="Training batch size")
+    parser.add_argument("--num_workers", type=int, default=4, help="Dataloader num_workers")
     args = parser.parse_args()
     
     train_matchnet_loso(args.model, args.channels, args.lowcut, args.highcut, args.batch_size, args.num_workers)
