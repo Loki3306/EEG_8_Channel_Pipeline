@@ -286,13 +286,20 @@ if __name__ == "__main__":
     # Locate best checkpoint
     candidates = []
     
-    # 1. Check kaggle inputs for uploaded models
+    # 1. Check kaggle inputs for uploaded models (strict match)
     if Path("/kaggle/input").exists():
         for r, d, f in os.walk("/kaggle/input"):
             for file in f:
                 if file.endswith('.pth') or file.endswith('.pt'):
                     if 'matchnet' in file.lower() or 'best' in file.lower():
                         candidates.append(os.path.join(r, file))
+                        
+    # 1b. Check kaggle inputs (loose match - grab any model)
+    if not candidates and Path("/kaggle/input").exists():
+        for r, d, f in os.walk("/kaggle/input"):
+            for file in f:
+                if file.endswith('.pth') or file.endswith('.pt'):
+                    candidates.append(os.path.join(r, file))
                         
     # 2. Check local repo
     if not candidates:
