@@ -313,8 +313,9 @@ if __name__ == "__main__":
     if not candidates:
         for r, d, f in os.walk(REPO_ROOT / "checkpoints"):
             for file in f:
-                if 'best' in file.lower() or 'matchnet' in file.lower():
-                    candidates.append(os.path.join(r, file))
+                if file.endswith('.pth') or file.endswith('.pt'):
+                    if 'best' in file.lower() or 'matchnet' in file.lower():
+                        candidates.append(os.path.join(r, file))
     
     if not candidates:
         print("ERROR: Could not find checkpoint!")
