@@ -87,10 +87,15 @@ def run_emulation():
         return
 
     # Load KUL Data
-    trials, _ = load_subject_examples(1)
-    if not trials:
+    mat_path = "/kaggle/input/datasets/lowk1ee/s1-klu/S1_KLU.mat"
+    if not os.path.exists(mat_path):
+        mat_path = "data/S1_KLU.mat"
+    if not os.path.exists(mat_path):
         print("KUL data missing.")
         return
+        
+    mat = scipy.io.loadmat(mat_path, squeeze_me=True, struct_as_record=False)
+    trials = mat['trials'] if 'trials' in mat else mat['trial']
     
     kul_channel_names = [
         'Fp1', 'AF3', 'F7', 'F3', 'FC1', 'FC5', 'T7', 'C3', 'CP1', 'CP5', 'P7', 'P3', 'Pz', 'PO3', 'O1', 'Oz',
