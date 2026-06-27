@@ -255,7 +255,16 @@ def run_layer_profiling():
             with open(dtu_cache_path, 'wb') as f:
                 pickle.dump(dtu_act, f)
                 
-    kul_act = compute_kul_activations(profiler)
+    kul_cache_path = 'data/KUL_Layer_Activations.pkl'
+    if os.path.exists(kul_cache_path):
+        print(f"Loading KUL activations from cache {kul_cache_path}...")
+        with open(kul_cache_path, 'rb') as f:
+            kul_act = pickle.load(f)
+    else:
+        kul_act = compute_kul_activations(profiler)
+        if kul_act:
+            with open(kul_cache_path, 'wb') as f:
+                pickle.dump(kul_act, f)
     
     if not dtu_act or not kul_act:
         print("Missing dataset. Aborting.")
