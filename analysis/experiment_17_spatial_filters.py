@@ -6,7 +6,7 @@ import torch
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from analysis.experiment_16_input_equivalence import get_dtu_tensor, get_kul_tensor
-from models.matchnet import MatchNet
+from models.matchnet import ContrastiveMatchNet
 
 def compute_correlation_matrix(eeg_tensor):
     # eeg_tensor shape: (N, C, T) -> (100, 8, 192)
@@ -101,7 +101,7 @@ def run_experiment():
         print("Could not find MatchNet checkpoint.")
         return
         
-    model = MatchNet(fs=64)
+    model = ContrastiveMatchNet(eeg_model_type="eegnet", eeg_channels=8, audio_channels=28, latent_dim=64)
     model.load_state_dict(torch.load(model_path, map_location='cpu'))
     model.eval()
     
@@ -110,14 +110,14 @@ def run_experiment():
     t_kul = torch.tensor(e_kul, dtype=torch.float32).unsqueeze(1)
     
     with torch.no_grad():
-        # MatchNet EEG Branch:
+        # MatchNet EEG Branch (EEGNet):
         # Pass through temporal filters
-        temp_dtu = model.eeg_branch[0:3](t_dtu)
-        temp_kul = model.eeg_branch[0:3](t_kul)
+        temp_dtu = model.eeg_encoder.block1[0:2](t_dtu)
+        temp_kul = model.eeg_encoder.block1[0:2](t_kul)
         
         # Pass through spatial filters
-        spat_dtu = model.eeg_branch[3](temp_dtu)
-        spat_kul = model.eeg_branch[3](temp_kul)
+        spat_dtu = model.eeg_encoder.block1[2](temp_dtu)
+        spat_kul = model.eeg_encoder.block1[2](temp_kul)
         
         # Compute variance per spatial filter (dimension 1 is the 16 filters)
         var_dtu = spat_dtu.var(dim=(0, 2, 3)).numpy()
