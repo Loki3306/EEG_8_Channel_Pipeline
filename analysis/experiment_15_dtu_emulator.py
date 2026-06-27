@@ -219,20 +219,20 @@ def run_emulation():
                 eeg_norm = preproc_fn(raw_eeg)
                 
                 min_len = min(len(eeg_norm), env_att.shape[1], env_unatt.shape[1])
-                    win_len = int(3 * 64)
-                    stride = int(1.5 * 64)
+                win_len = int(3 * 64)
+                stride = int(1.5 * 64)
+                
+                for start in range(0, min_len - win_len + 1, stride):
+                    eeg_win = eeg_norm[start:start+win_len]
+                    att_win = env_att[:, start:start+win_len]
+                    unatt_win = env_unatt[:, start:start+win_len]
                     
-                    for start in range(0, min_len - win_len + 1, stride):
-                        eeg_win = eeg_norm[start:start+win_len]
-                        att_win = env_att[:, start:start+win_len]
-                        unatt_win = env_unatt[:, start:start+win_len]
-                        
-                        e_tensor = torch.tensor(eeg_win.T, dtype=torch.float32).unsqueeze(0).to(device)
-                        a_tensor = torch.tensor(att_win, dtype=torch.float32).unsqueeze(0).to(device)
-                        u_tensor = torch.tensor(unatt_win, dtype=torch.float32).unsqueeze(0).to(device)
-                        
-                        with torch.no_grad():
-                            profiler.model(e_tensor, a_tensor, u_tensor)
+                    e_tensor = torch.tensor(eeg_win.T, dtype=torch.float32).unsqueeze(0).to(device)
+                    a_tensor = torch.tensor(att_win, dtype=torch.float32).unsqueeze(0).to(device)
+                    u_tensor = torch.tensor(unatt_win, dtype=torch.float32).unsqueeze(0).to(device)
+                    
+                    with torch.no_grad():
+                        profiler.model(e_tensor, a_tensor, u_tensor)
                             
         acts = profiler.get_activations()
         if "EEG_Block1" not in acts or len(acts["EEG_Block1"]) == 0:
