@@ -26,7 +26,8 @@ def extract_features(model, bx, bya, byb):
     features = {}
     
     # 1. Spatial Conv out
-    x = model.eeg_encoder.block1(bx)
+    bx_unsqueeze = bx.unsqueeze(1)
+    x = model.eeg_encoder.block1(bx_unsqueeze)
     features['spatial_conv'] = x.view(x.size(0), -1)
     
     # 2. Block 2 out
