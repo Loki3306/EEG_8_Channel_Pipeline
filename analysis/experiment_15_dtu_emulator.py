@@ -13,7 +13,8 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from analysis.experiment_10_layer_profiler import (
     load_matchnet, 
     calculate_frechet_distance, 
-    LayerProfiler
+    LayerProfiler,
+    extract_gammatone_envelopes
 )
 from baselines.ridge_aad import load_subject_examples
 
@@ -190,29 +191,34 @@ def run_emulation():
             att_wav_name = str(stimuli[0] if att_ear == 'L' else stimuli[1])[2:-2]
             unatt_wav_name = str(stimuli[1] if att_ear == 'L' else stimuli[0])[2:-2]
             
-            # Use exact match mapping to ensure we don't break
-            subj = "S1"
-            trial_key = f"trial_{i}"
-            
-            if subj in mapping and trial_key in mapping[subj]:
-                fname_a = mapping[subj][trial_key]["wavA"]["filename"]
-                fname_b = mapping[subj][trial_key]["wavB"]["filename"]
+            def find_wav(name):
+                wav_dir = "/kaggle/input/datasets/lowk1ee/s1-klu" if os.path.exists("/kaggle/input/datasets/lowk1ee/s1-klu") else "data"
+                for r, d, f in os.walk(wav_dir):
+                    if name in f: return os.path.join(r, name)
+                    if name+".wav" in f: return os.path.join(r, name+".wav")
+                return None
                 
-                if fname_a in envelopes and fname_b in envelopes:
-                    env_a = envelopes[fname_a]
-                    env_b = envelopes[fname_b]
+            att_wav_path = find_wav(att_wav_name)
+            unatt_wav_path = find_wav(unatt_wav_name)
+            
+            if att_wav_path and unatt_wav_path:
+                if 'audio_cache' not in locals():
+                    audio_cache = {}
+                if att_wav_name not in audio_cache:
+                    audio_cache[att_wav_name] = extract_gammatone_envelopes(att_wav_path, target_fs=64)
+                if unatt_wav_name not in audio_cache:
+                    audio_cache[unatt_wav_name] = extract_gammatone_envelopes(unatt_wav_path, target_fs=64)
                     
-                    label = 1 if att_ear == 'L' else 0
-                    env_att = env_a if label == 1 else env_b
-                    env_unatt = env_b if label == 1 else env_a
-                    
-                    env_att = normalize_array(env_att.T).T
-                    env_unatt = normalize_array(env_unatt.T).T
-                    
-                    # Apply Preprocessing Scheme!
-                    eeg_norm = preproc_fn(raw_eeg)
-                    
-                    min_len = min(len(eeg_norm), env_att.shape[1], env_unatt.shape[1])
+                env_att = audio_cache[att_wav_name]
+                env_unatt = audio_cache[unatt_wav_name]
+                
+                env_att = normalize_array(env_att.T).T
+                env_unatt = normalize_array(env_unatt.T).T
+                
+                # Apply Preprocessing Scheme!
+                eeg_norm = preproc_fn(raw_eeg)
+                
+                min_len = min(len(eeg_norm), env_att.shape[1], env_unatt.shape[1])
                     win_len = int(3 * 64)
                     stride = int(1.5 * 64)
                     
