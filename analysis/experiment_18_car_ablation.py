@@ -167,8 +167,8 @@ def evaluate_condition(model, profiler, e_tensor, a_tensor, u_tensor, t_idx_list
         
         with torch.no_grad():
             emb_e, emb_a, emb_u = model(e, a, u)
-            sim_a = torch.nn.functional.cosine_similarity(emb_e, emb_a).item()
-            sim_u = torch.nn.functional.cosine_similarity(emb_e, emb_u).item()
+            sim_a = torch.nn.functional.cosine_similarity(emb_e, emb_a, dim=1).mean().item()
+            sim_u = torch.nn.functional.cosine_similarity(emb_e, emb_u, dim=1).mean().item()
             
             margin = sim_a - sim_u
             margins.append(margin)
