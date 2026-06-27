@@ -90,7 +90,7 @@ def run_pipeline_audit():
     if 'trials' in kul_mat:
         for i in range(kul_mat['trials'].shape[1]):
             t = kul_mat['trials'][0, i]
-            eeg = t['RawEEG'][0,0]
+            eeg = t['RawData'][0,0]
             kul_trials.append(eeg)
     kul_raw = kul_trials[0] # [T, 64]
     

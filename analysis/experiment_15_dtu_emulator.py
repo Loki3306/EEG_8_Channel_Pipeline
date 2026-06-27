@@ -180,7 +180,7 @@ def run_emulation():
         # Process first 5 trials to get a good statistical estimate without taking 6 minutes
         for i in range(min(5, trials.shape[1])):
             trial = trials[0, i]
-            raw_eeg = trial['RawEEG'][0,0] # [T, 64]
+            raw_eeg = trial['RawData'][0,0] # [T, 64]
             att_ear = trial['attended_ear'][0,0][0]
             stimuli = trial['stimuli'][0]
             
