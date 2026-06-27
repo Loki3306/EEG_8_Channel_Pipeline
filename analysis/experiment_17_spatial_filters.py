@@ -42,7 +42,11 @@ def compute_band_power(freqs, psds):
     for c in range(psds.shape[0]):
         for b_name, (low, high) in bands.items():
             idx = np.logical_and(freqs >= low, freqs <= high)
-            band_power = np.trapz(psds[c, idx], freqs[idx])
+            # Use np.trapezoid for newer numpy versions, fallback to np.trapz for older
+            if hasattr(np, 'trapezoid'):
+                band_power = np.trapezoid(psds[c, idx], freqs[idx])
+            else:
+                band_power = np.trapz(psds[c, idx], freqs[idx])
             band_powers[b_name].append(band_power)
             
     return band_powers
