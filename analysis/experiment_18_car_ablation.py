@@ -25,6 +25,16 @@ def get_kul_tensor(apply_car=False, zero_fp1=False):
     t_idx_list = []
     win_len = int(3 * 64)
     
+    # Envelope caching to avoid recomputing
+    cache_path = "kul_gammatone_cache.pkl"
+    if os.path.exists(cache_path):
+        import pickle
+        with open(cache_path, "rb") as f:
+            envelope_cache = pickle.load(f)
+        print("Loaded KUL gammatone envelopes from cache.")
+    else:
+        envelope_cache = {}
+    
     for t_idx, trial in enumerate(trials):
         eeg_data = trial.RawData.EegData
         fs_eeg = trial.FileHeader.SampleRate
@@ -77,11 +87,16 @@ def get_kul_tensor(apply_car=False, zero_fp1=False):
         unatt_wav_path = find_wav(unatt_wav_name)
         
         if att_wav_path and unatt_wav_path:
-            import torchaudio
             try:
-                from data.extract_gammatone_envelopes import extract_gammatone_envelopes
-                env_att = extract_gammatone_envelopes(att_wav_path, target_fs=64)
-                env_unatt = extract_gammatone_envelopes(unatt_wav_path, target_fs=64)
+                if att_wav_path not in envelope_cache:
+                    from data.extract_gammatone_envelopes import extract_gammatone_envelopes
+                    envelope_cache[att_wav_path] = extract_gammatone_envelopes(att_wav_path, target_fs=64)
+                if unatt_wav_path not in envelope_cache:
+                    from data.extract_gammatone_envelopes import extract_gammatone_envelopes
+                    envelope_cache[unatt_wav_path] = extract_gammatone_envelopes(unatt_wav_path, target_fs=64)
+                
+                env_att = envelope_cache[att_wav_path]
+                env_unatt = envelope_cache[unatt_wav_path]
                 
                 def norm_env(env):
                     env = env.T
@@ -101,6 +116,12 @@ def get_kul_tensor(apply_car=False, zero_fp1=False):
             except Exception as e:
                 print(f"Error extracting audio: {e}")
                 
+    if not os.path.exists(cache_path) and len(envelope_cache) > 0:
+        import pickle
+        with open(cache_path, "wb") as f:
+            pickle.dump(envelope_cache, f)
+        print("Saved KUL gammatone envelopes to cache (kul_gammatone_cache.pkl). You can download this file from Kaggle.")
+        
     return np.array(e_list)[:100], np.array(a_list)[:100], np.array(u_list)[:100], np.array(t_idx_list)[:100]
 
 class FullLayerProfiler:
