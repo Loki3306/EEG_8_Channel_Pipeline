@@ -98,8 +98,8 @@ def compute_dtu_activations(profiler, fs_target=64, win_len_sec=3, stride_sec=1.
             eeg_8 = eeg_data[:, dtu_indices]
             eeg_norm = normalize_array(eeg_8)
             
-            trial_key = f"trial{ex.trial_index+1}"
-            if subj in mapping and trial_key in mapping[subj]:
+            trial_key = f"trial_{ex.trial_index}"
+            if mapping and subj in mapping and trial_key in mapping[subj]:
                 fname_a = mapping[subj][trial_key]["wavA"]["filename"]
                 fname_b = mapping[subj][trial_key]["wavB"]["filename"]
                 

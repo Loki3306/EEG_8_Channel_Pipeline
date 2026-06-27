@@ -219,7 +219,7 @@ def compute_dtu_fingerprint():
             
             # --- MatchNet Evaluation ---
             if model is not None and mapping is not None and envelopes:
-                trial_key = f"trial{ex.trial_index+1}"
+                trial_key = f"trial_{ex.trial_index}"
                 if subj in mapping and trial_key in mapping[subj]:
                     fname_a = mapping[subj][trial_key]["wavA"]["filename"]
                     fname_b = mapping[subj][trial_key]["wavB"]["filename"]
