@@ -68,7 +68,7 @@ def preprocess_trial(trial, envelope_cache, apply_car=True):
         fs_eeg = trial.FileHeader.SampleRate
         channel_names = [ch.Label for ch in trial.FileHeader.Channels]
     except AttributeError:
-        return None, None, None
+        return None, None, None, "Invalid EEG shape or missing metadata"
         
     target_channels = ['T7', 'C2', 'FT8', 'P7', 'CPz', 'Fp1', 'TP8', 'C3']
     
@@ -78,7 +78,7 @@ def preprocess_trial(trial, envelope_cache, apply_car=True):
     try:
         sel_idx = [channel_names.index(tc) if tc in channel_names else [c.upper() for c in channel_names].index(tc.upper()) for tc in target_channels]
     except ValueError:
-        return None, None, None
+        return None, None, None, f"Bad channels (Expected: {target_channels})"
         
     eeg_8 = eeg_data[:, sel_idx]
     
@@ -93,9 +93,19 @@ def preprocess_trial(trial, envelope_cache, apply_car=True):
     scale = arr.std(axis=0, keepdims=True) + 1e-12
     eeg_norm = arr / scale
     
-    att_ear = trial.attended_ear
-    stimuli = trial.stimuli
-    if len(stimuli) < 2: return None, None, None
+    try:
+        att_ear = trial.attended_ear
+    except AttributeError:
+        return None, None, None, "Missing attended_ear"
+        
+    try:
+        stimuli = trial.stimuli
+    except AttributeError:
+        return None, None, None, "Missing stimuli"
+        
+    if len(stimuli) < 2: 
+        return None, None, None, "Less than 2 stimuli"
+        
     att_wav_name = str(stimuli[0] if att_ear == 'L' else stimuli[1]).strip()
     unatt_wav_name = str(stimuli[1] if att_ear == 'L' else stimuli[0]).strip()
     
@@ -112,23 +122,29 @@ def preprocess_trial(trial, envelope_cache, apply_car=True):
     att_wav_path = find_wav(att_wav_name)
     unatt_wav_path = find_wav(unatt_wav_name)
     
-    if att_wav_path and unatt_wav_path and att_wav_path in envelope_cache and unatt_wav_path in envelope_cache:
-        env_att = envelope_cache[att_wav_path]
-        env_unatt = envelope_cache[unatt_wav_path]
+    if not att_wav_path or not unatt_wav_path:
+        return None, None, None, f"Audio file not found ({att_wav_name} or {unatt_wav_name})"
         
-        def norm_env(env):
-            env = env.T
-            env = env - env.mean(axis=0, keepdims=True)
-            env = env / (env.std(axis=0, keepdims=True) + 1e-12)
-            return env.T
-            
-        env_att = norm_env(env_att)
-        env_unatt = norm_env(env_unatt)
+    if att_wav_path not in envelope_cache or unatt_wav_path not in envelope_cache:
+        return None, None, None, f"Audio not in cache ({att_wav_name} or {unatt_wav_name})"
+    
+    env_att = envelope_cache[att_wav_path]
+    env_unatt = envelope_cache[unatt_wav_path]
+    
+    def norm_env(env):
+        env = env.T
+        env = env - env.mean(axis=0, keepdims=True)
+        env = env / (env.std(axis=0, keepdims=True) + 1e-12)
+        return env.T
         
-        min_len = min(len(eeg_norm), env_att.shape[1], env_unatt.shape[1])
-        return eeg_norm[:min_len].T, env_att[:, :min_len], env_unatt[:, :min_len]
+    env_att = norm_env(env_att)
+    env_unatt = norm_env(env_unatt)
+    
+    min_len = min(len(eeg_norm), env_att.shape[1], env_unatt.shape[1])
+    if min_len < FS * 5:
+        return None, None, None, "Too-short recording"
         
-    return None, None, None
+    return eeg_norm[:min_len].T, env_att[:, :min_len], env_unatt[:, :min_len], "Success"
 
 def chunk_data(x, ya, yb, window_sec, hop_sec, fs=FS):
     win_samples = int(window_sec * fs)
@@ -225,13 +241,25 @@ def train_matchnet_kul_loso():
         trials = load_kul_trials(str(p))
         
         valid_trials = []
+        discard_reasons = {}
         for t in trials:
-            x, ya, yb = preprocess_trial(t, envelope_cache, apply_car=True)
+            x, ya, yb, reason = preprocess_trial(t, envelope_cache, apply_car=True)
             if x is not None:
                 valid_trials.append((x, ya, yb))
-        
+            else:
+                discard_reasons[reason] = discard_reasons.get(reason, 0) + 1
+                
         all_subject_data[sub_id] = valid_trials
-        print(f"  {sub_id}: {len(valid_trials)} valid trials")
+        
+        print(f"\nSubject {sub_id}")
+        print(f"Total trials in MAT file:      {len(trials)}")
+        print(f"Trials after preprocessing:    {len(valid_trials)}")
+        print(f"Trials discarded:              {len(trials) - len(valid_trials)}")
+        if discard_reasons:
+            print("\nReasons:")
+            for reason, count in discard_reasons.items():
+                print(f"  {reason}: {count}")
+        print("-" * 40)
         
     os.makedirs(REPO_ROOT / "checkpoints", exist_ok=True)
     
