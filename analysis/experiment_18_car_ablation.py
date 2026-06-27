@@ -44,14 +44,14 @@ def get_kul_tensor(apply_car=False, zero_fp1=False):
         
         if apply_car:
             # Recover CAR by subtracting the mean of all 64 available channels at each timepoint
-            eeg_data = eeg_data - eeg_data.mean(axis=0, keepdims=True)
+            eeg_data = eeg_data - eeg_data.mean(axis=1, keepdims=True)
             
         try:
             sel_idx = [channel_names.index(tc) if tc in channel_names else [c.upper() for c in channel_names].index(tc.upper()) for tc in target_channels]
         except ValueError as e:
             raise RuntimeError(f"Missing EEG channel in KUL dataset! {e}")
             
-        eeg_8 = eeg_data[sel_idx, :].T # shape: (T, 8)
+        eeg_8 = eeg_data[:, sel_idx] # shape: (T, 8)
         
         nyq = 0.5 * fs_eeg
         b, a = scipy.signal.butter(4, [1.0/nyq, 8.0/nyq], btype='band')
@@ -108,7 +108,6 @@ def get_kul_tensor(apply_car=False, zero_fp1=False):
                 env_unatt = norm_env(env_unatt)
                 
                 min_len = min(len(eeg_norm), env_att.shape[1], env_unatt.shape[1])
-                print(f"DEBUG: Trial {t_idx} min_len={min_len}, eeg_len={len(eeg_norm)}, env_att_len={env_att.shape[1]}")
                 for start in range(0, min_len - win_len + 1, win_len):
                     e_list.append(eeg_norm[start:start+win_len].T)
                     a_list.append(env_att[:, start:start+win_len])
@@ -116,8 +115,6 @@ def get_kul_tensor(apply_car=False, zero_fp1=False):
                     t_idx_list.append(t_idx)
             except Exception as e:
                 print(f"Error extracting audio: {e}")
-        else:
-            print(f"DEBUG: Could not find wavs for Trial {t_idx}: att={att_wav_path}, unatt={unatt_wav_path}")
                 
     if not os.path.exists(cache_path) and len(envelope_cache) > 0:
         import pickle
