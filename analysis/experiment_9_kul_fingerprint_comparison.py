@@ -13,7 +13,6 @@ import math
 # Add repository root to path
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from baselines.ridge_aad import load_subject_examples, subject_files
 from data.extract_gammatone_envelopes import extract_gammatone_envelopes
 try:
     from models.matchnet import ContrastiveMatchNet
@@ -72,7 +71,9 @@ def compute_kul_fingerprint():
     print("="*60)
     
     fs_target = 64
-    target_channels = ['Fp1', 'Fp2', 'F7', 'F8', 'T7', 'T8', 'P7', 'P8']
+    # Match EXACTLY the 8 channels DTU was trained on:
+    # 13: "T7", 46: "C2", 43: "FT8", 23: "P7", 50: "CPz", 0: "Fp1", 52: "TP8", 14: "C3"
+    target_channels = ['T7', 'C2', 'FT8', 'P7', 'CPz', 'Fp1', 'TP8', 'C3']
     
     mat_path = "/kaggle/input/datasets/lowk1ee/s1-klu/S1_KLU.mat"
     wav_dir = "/kaggle/input/datasets/lowk1ee/audio-klu"
@@ -111,7 +112,7 @@ def compute_kul_fingerprint():
     # Memoize envelopes to save time
     audio_cache = {}
 
-    print(f"Extracting features from {len(trials)} KUL trials...")
+    print(f"Extracting features from {len(trials)} KUL trials using channels: {target_channels}")
     for t_idx, trial in enumerate(tqdm(trials, desc="KUL Trials")):
         eeg_data = trial.RawData.EegData
         fs_eeg = trial.FileHeader.SampleRate
@@ -119,7 +120,8 @@ def compute_kul_fingerprint():
         
         try:
             sel_idx = [channel_names.index(tc) if tc in channel_names else [c.upper() for c in channel_names].index(tc.upper()) for tc in target_channels]
-        except ValueError:
+        except ValueError as e:
+            print(f"Missing channel in KUL: {e}")
             continue
             
         eeg_8 = eeg_data[:, sel_idx]
@@ -195,12 +197,14 @@ def compute_kul_fingerprint():
                 env_att = audio_cache[att_wav_name] # (28, T)
                 env_unatt = audio_cache[unatt_wav_name] # (28, T)
                 
+                # NOTE: In DTU, env_att is normalized. 
+                # extract_gammatone_envelopes does not normalize over time, so we must normalize here to match the DTU pipeline
                 env_att = normalize_array(env_att.T).T
                 env_unatt = normalize_array(env_unatt.T).T
                 
                 min_len = min(len(eeg_norm), env_att.shape[1], env_unatt.shape[1])
                 win_len = 3 * fs_target
-                stride = fs_target
+                stride = 96 # 1.5 seconds stride (MATCHING DTU TRAINING EXACTLY)
                 
                 all_eeg_emb = []
                 all_att_emb = []
@@ -232,7 +236,7 @@ def compute_kul_fingerprint():
                     all_att_emb = np.array(all_att_emb)
                     all_unatt_emb = np.array(all_unatt_emb)
                     
-                    fingerprint['matchnet']['embeddings'].append(np.mean(all_eeg_emb, axis=0))
+                    fingerprint['matchnet']['embeddings'].extend(all_eeg_emb)
                     fingerprint['matchnet']['embedding_cov'].append(np.cov(all_eeg_emb, rowvar=False))
                     fingerprint['matchnet']['embedding_norm'].append(np.linalg.norm(all_eeg_emb, axis=1).mean())
                     
@@ -244,14 +248,15 @@ def compute_kul_fingerprint():
                     fingerprint['matchnet']['margin'].extend(sim_a - sim_b)
 
     # 3. Aggregate
+    # Instead of computing the mean over axis 0, stack the trial data to preserve the distribution
     def aggregate_dict(d):
         agg = {}
         for k, v in d.items():
             if isinstance(v, list) and len(v) > 0:
-                if k in ['cosine_sim_a', 'cosine_sim_b', 'margin']:
-                    agg[k] = {'mean': np.mean(v), 'std': np.std(v), 'median': np.median(v)}
-                else:
-                    agg[k] = np.mean(np.array(v), axis=0)
+                try:
+                    agg[k] = np.stack(v, axis=0)
+                except ValueError:
+                    agg[k] = np.array(v, dtype=object)
             elif isinstance(v, dict):
                 agg[k] = aggregate_dict(v)
             else:
@@ -273,7 +278,7 @@ def compute_kul_fingerprint():
     # ---------------------------------------------------------
     dtu_path = 'data/DTU_Profile.pkl'
     if not os.path.exists(dtu_path):
-        print(f"Skipping comparison: {dtu_path} not found.")
+        print(f"Skipping comparison: {dtu_path} not found. Please run experiment_8 first.")
         return
         
     with open(dtu_path, 'rb') as f:
@@ -281,13 +286,13 @@ def compute_kul_fingerprint():
         
     print("\n" + "-"*60)
     print("DISTRIBUTION COMPARISON: DTU vs KUL")
-    print("-"*60)
+    print("-" * 60)
     
     from scipy.stats import wasserstein_distance
     
     comparisons = []
     
-    # 1D Array comparisons
+    # 1D Array comparisons (distributions across all trials/subjects)
     metrics = [
         ('Raw RMS', 'raw_rms'), ('Raw Skewness', 'raw_skewness'), ('Raw Kurtosis', 'raw_kurtosis'),
         ('Alpha Power', 'alpha'), ('Theta Power', 'theta'), ('Beta Power', 'beta'),
@@ -299,34 +304,47 @@ def compute_kul_fingerprint():
         if key in dtu_profile['eeg'] and key in kul_profile['eeg']:
             dtu_val = np.array(dtu_profile['eeg'][key]).flatten()
             kul_val = np.array(kul_profile['eeg'][key]).flatten()
+            if len(dtu_val) == 0 or len(kul_val) == 0: continue
             w_dist = wasserstein_distance(dtu_val, kul_val)
             mean_diff = np.abs(np.mean(dtu_val) - np.mean(kul_val))
             comparisons.append({'Metric': name, 'Wasserstein': w_dist, 'MeanDiff': mean_diff})
             
-    # Covariance Matrix Distance (Frobenius Norm of Difference)
+    # Covariance Matrix Distance (Frobenius Norm of Difference of Mean Covariances)
     if 'covariance' in dtu_profile['eeg'] and 'covariance' in kul_profile['eeg']:
-        dtu_cov = dtu_profile['eeg']['covariance']
-        kul_cov = kul_profile['eeg']['covariance']
-        frob = np.linalg.norm(dtu_cov - kul_cov, 'fro')
+        # We stored the distributions of covariances. Let's compare their means (or we can use Fréchet)
+        dtu_cov_mean = np.mean(dtu_profile['eeg']['covariance'], axis=0)
+        kul_cov_mean = np.mean(kul_profile['eeg']['covariance'], axis=0)
+        frob = np.linalg.norm(dtu_cov_mean - kul_cov_mean, 'fro')
         comparisons.append({'Metric': 'Spatial Covariance (Frobenius)', 'Wasserstein': frob, 'MeanDiff': frob})
         
     # MatchNet Latent Distance
     if 'margin' in dtu_profile['matchnet'] and 'margin' in kul_profile['matchnet']:
-        dtu_margin = dtu_profile['matchnet']['margin']['mean']
-        kul_margin = kul_profile['matchnet']['margin']['mean']
-        diff = np.abs(dtu_margin - kul_margin)
-        comparisons.append({'Metric': 'MatchNet Margin Mean', 'Wasserstein': diff, 'MeanDiff': diff})
+        dtu_margin = np.array(dtu_profile['matchnet']['margin']).flatten()
+        kul_margin = np.array(kul_profile['matchnet']['margin']).flatten()
+        if len(dtu_margin) > 0 and len(kul_margin) > 0:
+            w_dist = wasserstein_distance(dtu_margin, kul_margin)
+            mean_diff = np.abs(np.mean(dtu_margin) - np.mean(kul_margin))
+            comparisons.append({'Metric': 'MatchNet Margin', 'Wasserstein': w_dist, 'MeanDiff': mean_diff})
         
     if 'embeddings' in dtu_profile['matchnet'] and 'embeddings' in kul_profile['matchnet']:
-        dtu_emb = dtu_profile['matchnet']['embeddings'].flatten()
-        kul_emb = kul_profile['matchnet']['embeddings'].flatten()
-        w_dist = wasserstein_distance(dtu_emb, kul_emb)
-        comparisons.append({'Metric': 'MatchNet Latent Embedding Vector', 'Wasserstein': w_dist, 'MeanDiff': w_dist})
+        dtu_emb = np.array(dtu_profile['matchnet']['embeddings'])
+        kul_emb = np.array(kul_profile['matchnet']['embeddings'])
+        
+        if len(dtu_emb) > 0 and len(kul_emb) > 0:
+            # Flatten only over the N dimension to shape (N, 64)
+            dtu_emb = dtu_emb.reshape(-1, dtu_emb.shape[-1])
+            kul_emb = kul_emb.reshape(-1, kul_emb.shape[-1])
+            
+            dtu_centroid = np.mean(dtu_emb, axis=0)
+            kul_centroid = np.mean(kul_emb, axis=0)
+            
+            cos_dist = 1 - np.dot(dtu_centroid, kul_centroid) / (np.linalg.norm(dtu_centroid) * np.linalg.norm(kul_centroid) + 1e-12)
+            comparisons.append({'Metric': 'Latent Centroid Cosine Dist', 'Wasserstein': cos_dist, 'MeanDiff': cos_dist})
         
     # Sort and Display
     comparisons.sort(key=lambda x: x['Wasserstein'], reverse=True)
     
-    print(f"{'Metric':<35} | {'Wasserstein Dist':<18} | {'Absolute Mean Diff'}")
+    print(f"{'Metric':<35} | {'Distance Score':<18} | {'Absolute Mean Diff'}")
     print("-" * 75)
     for c in comparisons:
         print(f"{c['Metric']:<35} | {c['Wasserstein']:<18.4f} | {c['MeanDiff']:.4f}")

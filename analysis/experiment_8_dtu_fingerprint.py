@@ -237,7 +237,7 @@ def compute_dtu_fingerprint():
                         min_len = min(len(eeg_norm), env_att.shape[1], env_unatt.shape[1])
                         
                         win_len = 3 * fs_dtu
-                        stride = fs_dtu
+                        stride = 96 # 1.5 seconds at 64Hz
                         
                         all_eeg_emb = []
                         all_att_emb = []
@@ -287,23 +287,21 @@ def compute_dtu_fingerprint():
     print("Aggregating metrics...")
     dtu_profile = {}
     
-    # Helper to average lists of arrays
+    # Helper to preserve the full distribution of trials
     def aggregate_dict(d):
         agg = {}
         for k, v in d.items():
-            if k == 'psd_freqs' or k == 'channels' or k == 'normalization':
+            if k in ['psd_freqs', 'channels', 'normalization', 'num_subjects', 'num_trials', 'fs']:
                 agg[k] = v
                 continue
             if isinstance(v, list) and len(v) > 0:
-                # If it's a list of numbers (like margin), keep distribution stats
-                if k in ['cosine_sim_a', 'cosine_sim_b', 'margin']:
-                    agg[k] = {
-                        'mean': np.mean(v),
-                        'std': np.std(v),
-                        'median': np.median(v)
-                    }
-                else:
-                    agg[k] = np.mean(np.array(v), axis=0)
+                # v is a list of arrays from each trial
+                # Stack them to shape (N_trials, ...) to preserve the distribution
+                try:
+                    agg[k] = np.stack(v, axis=0)
+                except ValueError:
+                    # In case of jagged arrays (which shouldn't happen), fallback to object array
+                    agg[k] = np.array(v, dtype=object)
             elif isinstance(v, dict):
                 agg[k] = aggregate_dict(v)
             else:
@@ -322,10 +320,10 @@ def compute_dtu_fingerprint():
         
     print(f"\n[+] Successfully saved DTU Fingerprint to {out_path}")
     print("\nSummary Statistics:")
-    print(f"Num Subjects: {dtu_profile['metadata']['num_subjects']}")
-    print(f"Num Trials:   {dtu_profile['metadata']['num_trials']}")
-    if dtu_profile['matchnet'].get('margin'):
-        print(f"Mean Margin:  {dtu_profile['matchnet']['margin']['mean']:.4f}")
+    print(f"Num Subjects: {dtu_profile['metadata'].get('num_subjects', 0)}")
+    print(f"Num Trials:   {dtu_profile['metadata'].get('num_trials', 0)}")
+    if dtu_profile['matchnet'].get('margin') is not None and len(dtu_profile['matchnet']['margin']) > 0:
+        print(f"Mean Margin:  {dtu_profile['matchnet']['margin'].mean():.4f}")
 
 if __name__ == "__main__":
     compute_dtu_fingerprint()
