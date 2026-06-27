@@ -80,6 +80,9 @@ def get_kul_tensor():
         
         target_channels = ['T7', 'C2', 'FT8', 'P7', 'CPz', 'Fp1', 'TP8', 'C3']
         
+        # Recover 64-channel CAR from Cz-referenced KUL data
+        eeg_data = eeg_data - eeg_data.mean(axis=1, keepdims=True)
+        
         try:
             sel_idx = [channel_names.index(tc) if tc in channel_names else [c.upper() for c in channel_names].index(tc.upper()) for tc in target_channels]
         except ValueError as e:
