@@ -9,7 +9,6 @@ import torch
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from analysis.experiment_16_input_equivalence import get_dtu_tensor
-from analysis.experiment_17_spatial_filters import compute_band_power, compute_psd
 from models.matchnet import ContrastiveMatchNet
 
 def get_kul_tensor(apply_car=False, zero_fp1=False):
@@ -18,14 +17,15 @@ def get_kul_tensor(apply_car=False, zero_fp1=False):
         mat_path = "data/S1_KLU.mat"
     if not os.path.exists(mat_path):
         print("Missing KUL data.")
-        return None, None, None
+        return None, None, None, None
         
     mat = scipy.io.loadmat(mat_path, squeeze_me=True, struct_as_record=False)
     trials = mat['trials'] if 'trials' in mat else mat['trial']
     e_list, a_list, u_list = [], [], []
+    t_idx_list = []
     win_len = int(3 * 64)
     
-    for trial in trials:
+    for t_idx, trial in enumerate(trials):
         eeg_data = trial.RawData.EegData
         fs_eeg = trial.FileHeader.SampleRate
         channel_names = [ch.Label for ch in trial.FileHeader.Channels]
@@ -33,14 +33,15 @@ def get_kul_tensor(apply_car=False, zero_fp1=False):
         target_channels = ['T7', 'C2', 'FT8', 'P7', 'CPz', 'Fp1', 'TP8', 'C3']
         
         if apply_car:
-            eeg_data = eeg_data - eeg_data.mean(axis=1, keepdims=True)
+            # Recover CAR by subtracting the mean of all 64 available channels at each timepoint
+            eeg_data = eeg_data - eeg_data.mean(axis=0, keepdims=True)
             
         try:
             sel_idx = [channel_names.index(tc) if tc in channel_names else [c.upper() for c in channel_names].index(tc.upper()) for tc in target_channels]
         except ValueError as e:
             raise RuntimeError(f"Missing EEG channel in KUL dataset! {e}")
             
-        eeg_8 = eeg_data[:, sel_idx]
+        eeg_8 = eeg_data[sel_idx, :].T # shape: (T, 8)
         
         nyq = 0.5 * fs_eeg
         b, a = scipy.signal.butter(4, [1.0/nyq, 8.0/nyq], btype='band')
@@ -95,10 +96,11 @@ def get_kul_tensor(apply_car=False, zero_fp1=False):
                     e_list.append(eeg_norm[start:start+win_len].T)
                     a_list.append(env_att[:, start:start+win_len])
                     u_list.append(env_unatt[:, start:start+win_len])
+                    t_idx_list.append(t_idx)
             except Exception as e:
                 pass
                 
-    return np.array(e_list)[:100], np.array(a_list)[:100], np.array(u_list)[:100]
+    return np.array(e_list)[:100], np.array(a_list)[:100], np.array(u_list)[:100], np.array(t_idx_list)[:100]
 
 class FullLayerProfiler:
     def __init__(self, model):
@@ -136,6 +138,9 @@ class FullLayerProfiler:
         return {k: np.array(v) for k, v in self.activations.items()}
 
 def compute_frechet_distance(mu1, sigma1, mu2, sigma2, eps=1e-6):
+    sigma1 += np.eye(sigma1.shape[0]) * eps
+    sigma2 += np.eye(sigma2.shape[0]) * eps
+    
     diff = mu1 - mu2
     covmean, _ = scipy.linalg.sqrtm(sigma1.dot(sigma2), disp=False)
     if not np.isfinite(covmean).all():
@@ -145,12 +150,16 @@ def compute_frechet_distance(mu1, sigma1, mu2, sigma2, eps=1e-6):
         covmean = covmean.real
     return diff.dot(diff) + np.trace(sigma1 + sigma2 - 2 * covmean)
 
-def evaluate_condition(model, profiler, e_tensor, a_tensor, u_tensor):
+def compute_cosine_similarity(mu1, mu2):
+    return np.dot(mu1, mu2) / (np.linalg.norm(mu1) * np.linalg.norm(mu2) + 1e-12)
+
+def evaluate_condition(model, profiler, e_tensor, a_tensor, u_tensor, t_idx_list=None):
     profiler.clear()
     margins = []
-    correct = 0
     
-    # We will process one by one to use the profiler exactly like training batches
+    # Store margins per trial
+    trial_margins = {}
+    
     for i in range(len(e_tensor)):
         e = torch.tensor(e_tensor[i], dtype=torch.float32).unsqueeze(0).unsqueeze(1)
         a = torch.tensor(a_tensor[i], dtype=torch.float32).unsqueeze(0)
@@ -163,31 +172,32 @@ def evaluate_condition(model, profiler, e_tensor, a_tensor, u_tensor):
             
             margin = sim_a - sim_u
             margins.append(margin)
-            if margin > 0:
-                correct += 1
+            
+            if t_idx_list is not None:
+                t_idx = t_idx_list[i]
+                if t_idx not in trial_margins:
+                    trial_margins[t_idx] = []
+                trial_margins[t_idx].append(margin)
                 
-    acc = correct / len(e_tensor)
+    win_acc = sum(1 for m in margins if m > 0) / len(margins)
+    
+    trial_acc = 0.0
+    if trial_margins:
+        correct_trials = 0
+        for t_idx, t_margins in trial_margins.items():
+            if np.mean(t_margins) > 0:
+                correct_trials += 1
+        trial_acc = correct_trials / len(trial_margins)
+    
     acts = profiler.get_activations()
     
-    # Compute Gaussian stats for Fréchet Distance
     stats = {}
     for layer, A in acts.items():
         mu = np.mean(A, axis=0)
         sigma = np.cov(A, rowvar=False)
         stats[layer] = (mu, sigma)
         
-    # Spatial Correlation
-    # e_tensor shape: (N, C, T) -> flatten to (C, N*T)
-    C = e_tensor.shape[1]
-    e_flat = e_tensor.transpose(1, 0, 2).reshape(C, -1)
-    spatial_corr = np.corrcoef(e_flat)
-    
-    # Band Powers
-    freqs, psds = compute_psd(e_tensor, fs=64)
-    band_powers = compute_band_power(freqs, psds)
-    avg_band_powers = {k: np.mean(v) for k, v in band_powers.items()}
-    
-    return acc, margins, stats, spatial_corr, avg_band_powers
+    return win_acc, trial_acc, margins, stats
 
 def print_histogram(margins, bins=20):
     margins = np.array(margins)
@@ -198,7 +208,6 @@ def print_histogram(margins, bins=20):
     print("<-1.0 (Unattended)                              0.0                              (Attended) >1.0")
     print("-" * 96)
     
-    # Scale counts to max 20 blocks
     for i in range(len(counts)):
         bar_len = int(20 * counts[i] / max_count)
         bar = "█" * bar_len
@@ -238,41 +247,60 @@ def run_experiment():
         print("Failed to load DTU tensors.")
         return
         
-    acc_dtu, mar_dtu, stat_dtu, corr_dtu, bp_dtu = evaluate_condition(model, profiler, e_dtu, a_dtu, u_dtu)
+    acc_dtu, _, mar_dtu, stat_dtu = evaluate_condition(model, profiler, e_dtu, a_dtu, u_dtu)
     
     conditions = [
-        ("Condition A: Current KUL (Baseline)", False, False),
-        ("Condition B: KUL + CAR Recovery", True, False),
-        ("Condition C: KUL + CAR + No Fp1", True, True)
+        ("Baseline", False, False),
+        ("CAR", True, False),
+        ("CAR+Fp1Zero", True, True)
     ]
     
+    results = {}
+    
     for name, apply_car, zero_fp1 in conditions:
-        print(f"\n{'='*80}\n{name}\n{'='*80}")
-        e_kul, a_kul, u_kul = get_kul_tensor(apply_car, zero_fp1)
+        print(f"\n{'='*80}\nCondition: {name}\n{'='*80}")
+        e_kul, a_kul, u_kul, t_idx_kul = get_kul_tensor(apply_car, zero_fp1)
         if e_kul is None or len(e_kul) == 0:
             print("Failed to load KUL tensors.")
             continue
             
-        acc_kul, mar_kul, stat_kul, corr_kul, bp_kul = evaluate_condition(model, profiler, e_kul, a_kul, u_kul)
+        win_acc, trial_acc, mar_kul, stat_kul = evaluate_condition(model, profiler, e_kul, a_kul, u_kul, t_idx_kul)
         
-        print(f"Accuracy: {acc_kul*100:.2f}% (DTU Target: {acc_dtu*100:.2f}%)")
-        print(f"Mean Margin: {np.mean(mar_kul):.4f} (DTU Target: {np.mean(mar_dtu):.4f})")
+        print(f"Window Accuracy: {win_acc*100:.2f}%")
+        print(f"Trial Accuracy:  {trial_acc*100:.2f}%")
+        print(f"Mean Margin:     {np.mean(mar_kul):.4f}")
         print_histogram(mar_kul)
         
-        print("\nLayer Fréchet Distances (vs DTU):")
-        print(f"{'Layer':<15} | {'FD':<10}")
-        print("-" * 30)
+        print("\nLayer Representations (vs DTU):")
+        print(f"{'Layer':<15} | {'Fréchet Dist':<12} | {'Cosine(mu)':<12}")
+        print("-" * 45)
         
+        layer_metrics = {}
         for layer in stat_dtu.keys():
             mu1, sig1 = stat_dtu[layer]
             mu2, sig2 = stat_kul[layer]
             fd = compute_frechet_distance(mu1, sig1, mu2, sig2)
-            print(f"{layer:<15} | {fd:<10.2f}")
+            cos = compute_cosine_similarity(mu1, mu2)
+            layer_metrics[layer] = {'fd': fd, 'cos': cos}
+            print(f"{layer:<15} | {fd:<12.2f} | {cos:<12.4f}")
             
-        print("\nBand Power (KUL / DTU Ratio):")
-        for b in bp_dtu.keys():
-            ratio = bp_kul[b] / bp_dtu[b] if bp_dtu[b] > 0 else 0
-            print(f"{b:<15}: {ratio:.2f}")
+        results[name] = {
+            'win_acc': win_acc,
+            'trial_acc': trial_acc,
+            'margin': np.mean(mar_kul),
+            'block1_fd': layer_metrics.get('Block1_Out', {}).get('fd', 0),
+            'emb_fd': layer_metrics.get('Embedding', {}).get('fd', 0)
+        }
+        
+    print("\n" + "="*80)
+    print("FINAL SUMMARY TABLE")
+    print("="*80)
+    print(f"| {'Condition':<12} | {'Trial Acc':<10} | {'Window Acc':<10} | {'Margin':<8} | {'Block1 FD':<10} | {'Embed FD':<10} |")
+    print(f"|{'-'*14}|{'-'*12}|{'-'*12}|{'-'*10}|{'-'*12}|{'-'*12}|")
+    for name in [c[0] for c in conditions]:
+        if name in results:
+            r = results[name]
+            print(f"| {name:<12} | {r['trial_acc']*100:>8.1f}% | {r['win_acc']*100:>8.1f}% | {r['margin']:>8.4f} | {r['block1_fd']:>9.2f} | {r['emb_fd']:>9.2f} |")
 
 if __name__ == "__main__":
     run_experiment()
