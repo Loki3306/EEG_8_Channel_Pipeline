@@ -62,7 +62,7 @@ def load_kul_trials(mat_path):
         trials = [trials]
     return trials
 
-def preprocess_trial(trial, apply_car=True):
+def preprocess_trial(trial, envelope_cache, apply_car=True):
     try:
         eeg_data = trial.RawData.EegData
         fs_eeg = trial.FileHeader.SampleRate
@@ -126,8 +126,13 @@ def preprocess_trial(trial, apply_car=True):
         raise FileNotFoundError(f"Missing stimulus file: {unatt_wav_path}")
         
     from data.extract_gammatone_envelopes import extract_gammatone_envelopes
-    env_att = extract_gammatone_envelopes(att_wav_path, target_fs=FS)
-    env_unatt = extract_gammatone_envelopes(unatt_wav_path, target_fs=FS)
+    if att_wav_path not in envelope_cache:
+        envelope_cache[att_wav_path] = extract_gammatone_envelopes(att_wav_path, target_fs=FS)
+    if unatt_wav_path not in envelope_cache:
+        envelope_cache[unatt_wav_path] = extract_gammatone_envelopes(unatt_wav_path, target_fs=FS)
+        
+    env_att = envelope_cache[att_wav_path]
+    env_unatt = envelope_cache[unatt_wav_path]
     
     def norm_env(env):
         env = env.T
@@ -220,6 +225,8 @@ def train_matchnet_kul_loso():
         
     print(f"Found {len(subject_paths)} subjects. Reading and preprocessing all data into RAM...")
     
+    computed_envelope_cache = {}
+    
     all_subject_data = {}
     for p in subject_paths:
         m = re.search(r"S(\d+)", p.name, re.IGNORECASE)
@@ -228,16 +235,21 @@ def train_matchnet_kul_loso():
         
         valid_trials = []
         discard_reasons = {}
-        for t in trials:
-            x, ya, yb, reason = preprocess_trial(t, apply_car=True)
+        
+        print(f"\nProcessing Subject {sub_id} ({len(trials)} trials)...")
+        for i, t in enumerate(trials):
+            sys.stdout.write(f"\r  Trial {i+1}/{len(trials)}")
+            sys.stdout.flush()
+            
+            x, ya, yb, reason = preprocess_trial(t, computed_envelope_cache, apply_car=True)
             if x is not None:
                 valid_trials.append((x, ya, yb))
             else:
                 discard_reasons[reason] = discard_reasons.get(reason, 0) + 1
+        print() # newline after trial progress
                 
         all_subject_data[sub_id] = valid_trials
         
-        print(f"\nSubject {sub_id}")
         print(f"Total trials in MAT file:      {len(trials)}")
         print(f"Trials after preprocessing:    {len(valid_trials)}")
         print(f"Trials discarded:              {len(trials) - len(valid_trials)}")
