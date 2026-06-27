@@ -68,7 +68,7 @@ def get_kul_tensor(apply_car=False, zero_fp1=False):
             wav_dir = "/kaggle/input/datasets/lowk1ee/audio-klu" if os.path.exists("/kaggle/input/datasets/lowk1ee/audio-klu") else "data"
             for r, d, f in os.walk(wav_dir):
                 for file in f:
-                    if name in file and file.endswith(".wav"):
+                    if file == name or file == name + ".wav":
                         return os.path.join(r, file)
             return None
             
@@ -79,8 +79,8 @@ def get_kul_tensor(apply_car=False, zero_fp1=False):
             import torchaudio
             try:
                 from data.extract_gammatone_envelopes import extract_gammatone_envelopes
-                env_att = extract_gammatone_envelopes(att_wav_path, fs_target=64)
-                env_unatt = extract_gammatone_envelopes(unatt_wav_path, fs_target=64)
+                env_att = extract_gammatone_envelopes(att_wav_path, target_fs=64)
+                env_unatt = extract_gammatone_envelopes(unatt_wav_path, target_fs=64)
                 
                 def norm_env(env):
                     env = env.T
@@ -98,7 +98,7 @@ def get_kul_tensor(apply_car=False, zero_fp1=False):
                     u_list.append(env_unatt[:, start:start+win_len])
                     t_idx_list.append(t_idx)
             except Exception as e:
-                pass
+                print(f"Error extracting audio: {e}")
                 
     return np.array(e_list)[:100], np.array(a_list)[:100], np.array(u_list)[:100], np.array(t_idx_list)[:100]
 
