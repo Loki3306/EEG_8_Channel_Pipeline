@@ -94,7 +94,7 @@ def compute_dtu_activations(profiler, fs_target=64, win_len_sec=3, stride_sec=1.
         examples = load_subject_examples(s_file)
         
         for ex in examples:
-            eeg_data = ex.eeg_data
+            eeg_data = ex.eeg
             eeg_8 = eeg_data[:, dtu_indices]
             eeg_norm = normalize_array(eeg_8)
             
