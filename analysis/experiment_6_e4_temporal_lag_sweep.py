@@ -45,8 +45,12 @@ def main():
     if not os.path.exists(chk_path):
         chk_path = "checkpoints/matchnet_fold_S2_data_preproc_best.pth"
         
-    if not os.path.exists(chk_path):
-        print(f"ERROR: DTU MatchNet checkpoint not found at {chk_path}!")
+    if not chk_path:
+        print("ERROR: DTU MatchNet checkpoint not found!")
+        return
+        
+    if extract_gammatone_envelopes is None:
+        print("ERROR: extract_gammatone_envelopes could not be imported from data.extract_gammatone_envelopes!")
         return
         
     print(f"Loading DTU Checkpoint: {chk_path}")
@@ -90,7 +94,12 @@ def main():
         fs_eeg = trial.FileHeader.SampleRate
         channel_names = [ch.Label for ch in trial.FileHeader.Channels]
         
-        selected_indices = [channel_names.index(tc) if tc in channel_names else [c.upper() for c in channel_names].index(tc.upper()) for tc in target_channels]
+        try:
+            selected_indices = [channel_names.index(tc) if tc in channel_names else [c.upper() for c in channel_names].index(tc.upper()) for tc in target_channels]
+        except ValueError as e:
+            print(f"    WARNING: Missing required channel in Trial {t_idx} ({e}). Skipping.")
+            continue
+            
         eeg_8 = eeg_data[:, selected_indices]
         
         # EXACT DTU FILTERING: 1.0 - 8.0 Hz (Not 1.0 - 6.0 Hz)
@@ -197,6 +206,10 @@ def main():
                     all_sim_a.append(sim_a)
                     all_sim_b.append(sim_b)
             
+            if len(all_sim_a) == 0:
+                print(f"Lag {lag:3d} smp | {lag_ms:6.1f} ms | No valid windows evaluated.")
+                continue
+                
             all_sim_a = np.array(all_sim_a)
             all_sim_b = np.array(all_sim_b)
             margins = all_sim_a - all_sim_b
@@ -239,6 +252,10 @@ def main():
             })
 
     # Save to CSV
+    if not results:
+        print("\nERROR: No results were generated. Cannot create plots or CSV.")
+        return
+        
     os.makedirs("analysis", exist_ok=True)
     df = pd.DataFrame(results)
     df.to_csv("analysis/lag_sweep_results.csv", index=False)
