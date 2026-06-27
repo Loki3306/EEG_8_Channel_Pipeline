@@ -3,7 +3,9 @@ import pickle
 import numpy as np
 from pathlib import Path
 from scipy.io import wavfile
-from scipy.signal import butter, filtfilt, resample, gammatone, lfilter
+from scipy.signal import butter, filtfilt, resample, resample_poly, gammatone, lfilter
+import math
+from joblib import Parallel, delayed
 import warnings
 warnings.filterwarnings("ignore")
 
@@ -31,24 +33,22 @@ def extract_gammatone_envelopes(wav_path, num_bands=28, low_freq=50, high_freq=8
     
     audio_float = data.astype(np.float64)
     
-    bands = []
-    
-    for cf in cfs:
-        # 1. Gammatone filter (FIR is numerically stable)
+    # Define single band processing function for parallelization
+    def process_band(cf):
         b_gt, a_gt = gammatone(cf, 'fir', fs=fs)
         filtered = lfilter(b_gt, a_gt, audio_float)
-        
-        # 2. Rectification & Power-law compression
         compressed = np.abs(filtered) ** 0.6
-        
-        # 3. Envelope Extraction (lowpass)
         env_band = filtfilt(b_lp, a_lp, compressed)
         
-        # 4. Downsample
-        num_samples = int(len(env_band) * target_fs / fs)
-        env_resampled = resample(env_band, num_samples)
+        # Use resample_poly instead of resample for 10x+ speedup on long audio
+        g = math.gcd(target_fs, fs)
+        up = target_fs // g
+        down = fs // g
+        return resample_poly(env_band, up, down)
         
-        bands.append(env_resampled)
+    bands = Parallel(n_jobs=-1, backend="threading")(
+        delayed(process_band)(cf) for cf in cfs
+    )
         
     return np.vstack(bands) # shape: (28, Time)
 
