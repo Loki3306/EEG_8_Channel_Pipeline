@@ -108,6 +108,7 @@ def get_kul_tensor(apply_car=False, zero_fp1=False):
                 env_unatt = norm_env(env_unatt)
                 
                 min_len = min(len(eeg_norm), env_att.shape[1], env_unatt.shape[1])
+                print(f"DEBUG: Trial {t_idx} min_len={min_len}, eeg_len={len(eeg_norm)}, env_att_len={env_att.shape[1]}")
                 for start in range(0, min_len - win_len + 1, win_len):
                     e_list.append(eeg_norm[start:start+win_len].T)
                     a_list.append(env_att[:, start:start+win_len])
@@ -115,6 +116,8 @@ def get_kul_tensor(apply_car=False, zero_fp1=False):
                     t_idx_list.append(t_idx)
             except Exception as e:
                 print(f"Error extracting audio: {e}")
+        else:
+            print(f"DEBUG: Could not find wavs for Trial {t_idx}: att={att_wav_path}, unatt={unatt_wav_path}")
                 
     if not os.path.exists(cache_path) and len(envelope_cache) > 0:
         import pickle
