@@ -61,15 +61,16 @@ def get_kul_tensor(apply_car=False, zero_fp1=False):
         att_ear = trial.attended_ear
         stimuli = trial.stimuli
         if len(stimuli) < 2: continue
-        att_wav_name = str(stimuli[0] if att_ear == 'L' else stimuli[1])
-        unatt_wav_name = str(stimuli[1] if att_ear == 'L' else stimuli[0])
+        att_wav_name = str(stimuli[0] if att_ear == 'L' else stimuli[1]).strip()
+        unatt_wav_name = str(stimuli[1] if att_ear == 'L' else stimuli[0]).strip()
         
         def find_wav(name):
             wav_dir = "/kaggle/input/datasets/lowk1ee/audio-klu" if os.path.exists("/kaggle/input/datasets/lowk1ee/audio-klu") else "data"
             for r, d, f in os.walk(wav_dir):
                 for file in f:
-                    if file == name or file == name + ".wav":
+                    if name in file and file.endswith(".wav"):
                         return os.path.join(r, file)
+            print(f"DEBUG: Could not find wav for {name} in {wav_dir}")
             return None
             
         att_wav_path = find_wav(att_wav_name)
