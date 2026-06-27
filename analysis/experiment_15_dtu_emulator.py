@@ -87,15 +87,10 @@ def run_emulation():
         return
 
     # Load KUL Data
-    mat_path = "/kaggle/input/datasets/lowk1ee/s1-klu/S1_KLU.mat"
-    if not os.path.exists(mat_path):
-        mat_path = "data/S1_KLU.mat"
-    if not os.path.exists(mat_path):
+    trials, _ = load_subject_examples(1)
+    if not trials:
         print("KUL data missing.")
         return
-        
-    mat_data = scipy.io.loadmat(mat_path)
-    trials = mat_data['trials'] if 'trials' in mat_data else None
     
     kul_channel_names = [
         'Fp1', 'AF3', 'F7', 'F3', 'FC1', 'FC5', 'T7', 'C3', 'CP1', 'CP5', 'P7', 'P3', 'Pz', 'PO3', 'O1', 'Oz',
@@ -179,11 +174,11 @@ def run_emulation():
         profiler.clear()
         
         # Process first 5 trials to get a good statistical estimate without taking 6 minutes
-        for i in range(min(5, trials.shape[1])):
-            trial = trials[0, i]
-            raw_eeg = trial['RawData'][0,0] # [T, 64]
-            att_ear = trial['attended_ear'][0,0][0]
-            stimuli = trial['stimuli'][0]
+        for i in range(min(5, len(trials))):
+            trial = trials[i]
+            raw_eeg = trial.RawData.EegData # [T, 64]
+            att_ear = trial.attended_ear
+            stimuli = trial.stimuli
             if len(stimuli) < 2:
                 continue
 
