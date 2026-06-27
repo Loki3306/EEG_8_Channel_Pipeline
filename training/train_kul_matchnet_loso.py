@@ -125,11 +125,40 @@ def preprocess_trial(trial, envelope_cache, apply_car=True):
     if not att_wav_path or not unatt_wav_path:
         return None, None, None, f"Audio file not found ({att_wav_name} or {unatt_wav_name})"
         
-    if att_wav_path not in envelope_cache or unatt_wav_path not in envelope_cache:
+    def resolve_cache_key(filepath, cache, name):
+        if filepath in cache:
+            return filepath, True
+            
+        basename = os.path.basename(filepath)
+        candidates = []
+        for k in cache.keys():
+            k_base = os.path.basename(k)
+            if basename == k_base:
+                candidates.append(k)
+            elif basename.lower() == k_base.lower():
+                candidates.append(k)
+            elif basename.replace(".wav", "") in k:
+                candidates.append(k)
+                
+        if len(candidates) > 0:
+            return candidates[0], True
+            
+        # If we failed to find it, print the diagnostic
+        print(f"\n[CACHE MISS DIAGNOSTIC]")
+        print(f"Requested: {name}")
+        print(f"Resolved absolute path: {filepath}")
+        print(f"Candidate matches: {candidates}")
+        print("-" * 30)
+        return filepath, False
+
+    att_key, att_found = resolve_cache_key(att_wav_path, envelope_cache, att_wav_name)
+    unatt_key, unatt_found = resolve_cache_key(unatt_wav_path, envelope_cache, unatt_wav_name)
+    
+    if not att_found or not unatt_found:
         return None, None, None, f"Audio not in cache ({att_wav_name} or {unatt_wav_name})"
     
-    env_att = envelope_cache[att_wav_path]
-    env_unatt = envelope_cache[unatt_wav_path]
+    env_att = envelope_cache[att_key]
+    env_unatt = envelope_cache[unatt_key]
     
     def norm_env(env):
         env = env.T
@@ -224,6 +253,13 @@ def train_matchnet_kul_loso():
         import pickle
         with open(cache_path, "rb") as f:
             envelope_cache = pickle.load(f)
+            
+        print("\n--- AUDIO CACHE DIAGNOSTICS ---")
+        print(f"Total keys in cache: {len(envelope_cache)}")
+        print("First 20 cache keys:")
+        for i, k in enumerate(list(envelope_cache.keys())[:20]):
+            print(f"  {k}")
+        print("-------------------------------\n")
     else:
         print("Missing kul_gammatone_cache.pkl. Run experiment 18 first.")
         return
