@@ -4,51 +4,41 @@ import pickle
 import numpy as np
 import scipy.linalg
 from scipy.signal import welch
-from sklearn.cross_decomposition import CCA
+import torch
+import torch.nn.functional as F
 from tqdm import tqdm
 
 # Add repository root to path
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from baselines.ridge_aad import load_subject_examples, subject_files
+try:
+    from models.matchnet import ContrastiveMatchNet
+except ImportError:
+    ContrastiveMatchNet = None
 
 def compute_hjorth_parameters(signal):
-    """
-    Computes Hjorth parameters for a single channel.
-    signal: 1D numpy array
-    Returns: (activity, mobility, complexity)
-    """
     first_deriv = np.diff(signal)
     second_deriv = np.diff(first_deriv)
-
     var_zero = np.var(signal)
     var_d1 = np.var(first_deriv)
     var_d2 = np.var(second_deriv)
-
     activity = var_zero
     if activity == 0 or var_d1 == 0:
         return 0, 0, 0
-
     mobility = np.sqrt(var_d1 / activity)
     complexity = np.sqrt(var_d2 / var_d1) / mobility
-
     return activity, mobility, complexity
 
 def compute_band_powers(f, psd):
-    """
-    Computes relative band powers from PSD.
-    """
     bands = {
         'delta': (1, 4),
         'theta': (4, 8),
         'alpha': (8, 13),
-        'beta': (13, 30),
-        'gamma': (30, 45) # Keep gamma bounded
+        'beta': (13, 30)
     }
-    
     total_power = np.trapz(psd, f) + 1e-12
     powers = {}
-    
     for band, (low, high) in bands.items():
         idx = np.logical_and(f >= low, f <= high)
         if not np.any(idx):
@@ -56,14 +46,33 @@ def compute_band_powers(f, psd):
         else:
             band_power = np.trapz(psd[idx], f[idx])
             powers[band] = band_power / total_power
-            
     return powers
 
 def normalize_array(arr):
-    # Same normalizer used by our models
     arr = arr - arr.mean(axis=0, keepdims=True)
     scale = arr.std(axis=0, keepdims=True) + 1e-12
     return arr / scale
+
+def load_matchnet(device='cuda'):
+    if ContrastiveMatchNet is None:
+        return None
+    model = ContrastiveMatchNet(
+        eeg_channels=8,
+        audio_channels=28,
+        eeg_out_channels=64,
+        audio_out_channels=64,
+        latent_dim=128
+    )
+    checkpoint_path = "/kaggle/working/EEG_8_Channel_Pipeline/checkpoints/matchnet_fold_S2_data_preproc_best.pth"
+    if os.path.exists(checkpoint_path):
+        model.load_state_dict(torch.load(checkpoint_path, map_location=device))
+        print("Loaded MatchNet checkpoint successfully.")
+    else:
+        print("MatchNet checkpoint NOT found. Ensure you are on Kaggle and path is correct.")
+        return None
+    model.to(device)
+    model.eval()
+    return model
 
 def compute_dtu_fingerprint():
     print("\n" + "="*60)
@@ -72,27 +81,30 @@ def compute_dtu_fingerprint():
 
     # 1. Configuration
     fs_dtu = 64
-    target_channels = ['Fp1', 'Fp2', 'F7', 'F8', 'T7', 'T8', 'P7', 'P8']
-    dtu_indices = [0, 33, 6, 41, 14, 51, 22, 59] # BioSemi 64 to 8-ch
+    dtu_indices = [13, 46, 43, 23, 50, 0, 52, 14] # Correct DTU training channels
+    
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    model = load_matchnet(device)
     
     # Storage for trial-level metrics
     fingerprint = {
+        'metadata': {
+            'num_subjects': 0, 'num_trials': 0, 'fs': fs_dtu,
+            'channels': dtu_indices, 'normalization': 'z-score per trial'
+        },
         'eeg': {
-            'mean': [], 'std': [], 'rms': [], 'skewness': [], 'kurtosis': [],
-            'psd': [], 'psd_freqs': None,
-            'delta': [], 'theta': [], 'alpha': [], 'beta': [], 'gamma': [],
-            'covariance': [], 'eigenvalues': [],
+            'raw_mean': [], 'raw_std': [], 'raw_rms': [], 'raw_skewness': [], 'raw_kurtosis': [],
+            'psd': [], 'psd_freqs': None, 'psd_peak_freq': [],
+            'delta': [], 'theta': [], 'alpha': [], 'beta': [],
+            'covariance': [], 'correlation': [], 'cov_cond_num': [], 'eigenvalues': [],
             'hjorth_activity': [], 'hjorth_mobility': [], 'hjorth_complexity': []
         },
-        'audio': {
-            'mean': [], 'variance': []
-        },
-        'relational': {
-            'cca_att_1': [], 'cca_unatt_1': []
+        'matchnet': {
+            'embeddings': [], 'embedding_cov': [], 'embedding_norm': [],
+            'cosine_sim_a': [], 'cosine_sim_b': [], 'margin': []
         }
     }
 
-    # 2. Iterate DTU subjects and trials
     s_files = subject_files()
     if not s_files:
         print("ERROR: DTU Dataset not found! Are you on Kaggle with DATA_preproc available?")
@@ -100,67 +112,83 @@ def compute_dtu_fingerprint():
         
     print(f"Found {len(s_files)} DTU subjects. Extracting features...")
     
+    from data.extract_gammatone_envelopes import extract_gammatone_envelopes
+    
+    # We will need mapping.json to find 28-band envelopes if we want latent space evaluation
+    mapping_path = 'data/mapping.json'
+    mapping = None
+    if os.path.exists(mapping_path):
+        import json
+        with open(mapping_path, 'r') as f:
+            mapping = json.load(f)
+            
+    # Load 28-band envelopes if available
+    env_dir = 'data/gammatone_envelopes_28band'
+    envelopes = {}
+    if os.path.exists(env_dir):
+        for f in os.listdir(env_dir):
+            if f.endswith('.npy'):
+                envelopes[f] = np.load(os.path.join(env_dir, f))
+    else:
+        print("WARNING: 28-band gammatone envelopes not found. MatchNet evaluation will be skipped.")
+
     for s_file in tqdm(s_files, desc="Subjects"):
+        subj = s_file.stem.split('_')[0]
         examples = load_subject_examples(s_file)
+        fingerprint['metadata']['num_subjects'] += 1
         
         for ex in examples:
-            # eeg is (64, T). We want (T, 8) normalized.
-            eeg_8 = ex.eeg[dtu_indices, :].T
-            eeg_norm = normalize_array(eeg_8)
+            fingerprint['metadata']['num_trials'] += 1
             
-            # audio is already envelope form in DTU MAT file? 
-            # In DTU, wav_a and wav_b are actually the broad-band audio envelopes or gammatone? 
-            # DTU wav_a shape in ridge_aad.py is (T,) i.e., 1D broad-band envelope.
-            # But MatchNet expects 28-band? Wait. DTU `_data_preproc` only has 1D envelopes in `wavA` `wavB`. 
-            # For this fingerprint, we will use the 1D envelope provided in the MAT file for Audio features.
-            
-            env_a = ex.wav_a.reshape(-1, 1)
-            env_b = ex.wav_b.reshape(-1, 1)
-            
-            env_att = env_a if ex.label == 1 else env_b
-            env_unatt = env_b if ex.label == 1 else env_a
-            
-            env_att_norm = normalize_array(env_att)
-            env_unatt_norm = normalize_array(env_unatt)
-            
-            min_len = min(len(eeg_norm), len(env_att_norm))
-            eeg_norm = eeg_norm[:min_len]
-            env_att_norm = env_att_norm[:min_len]
-            env_unatt_norm = env_unatt_norm[:min_len]
+            # eeg is (64, T). We want (T, 8)
+            eeg_8_raw = ex.eeg[dtu_indices, :].T
+            eeg_norm = normalize_array(eeg_8_raw)
 
-            # --- EEG Features ---
-            # Statistical
-            fingerprint['eeg']['mean'].append(np.mean(eeg_norm, axis=0))
-            fingerprint['eeg']['std'].append(np.std(eeg_norm, axis=0))
-            fingerprint['eeg']['rms'].append(np.sqrt(np.mean(eeg_norm**2, axis=0)))
+            # --- EEG Features (Raw) ---
+            fingerprint['eeg']['raw_mean'].append(np.mean(eeg_8_raw, axis=0))
+            fingerprint['eeg']['raw_std'].append(np.std(eeg_8_raw, axis=0))
+            fingerprint['eeg']['raw_rms'].append(np.sqrt(np.mean(eeg_8_raw**2, axis=0)))
             
             from scipy.stats import skew, kurtosis
-            fingerprint['eeg']['skewness'].append(skew(eeg_norm, axis=0))
-            fingerprint['eeg']['kurtosis'].append(kurtosis(eeg_norm, axis=0))
+            fingerprint['eeg']['raw_skewness'].append(skew(eeg_8_raw, axis=0))
+            fingerprint['eeg']['raw_kurtosis'].append(kurtosis(eeg_8_raw, axis=0))
             
+            # --- EEG Features (Normalized) ---
             # Spectral
             psds = []
-            band_powers = {'delta': [], 'theta': [], 'alpha': [], 'beta': [], 'gamma': []}
+            band_powers = {'delta': [], 'theta': [], 'alpha': [], 'beta': []}
+            peak_freqs = []
             for ch in range(8):
-                f, p = welch(eeg_norm[:, ch], fs=fs_dtu, nperseg=fs_dtu*2) # 2-sec window
+                f, p = welch(eeg_norm[:, ch], fs=fs_dtu, nperseg=fs_dtu*4) # 4-sec window (0.25 Hz res)
                 psds.append(p)
                 bp = compute_band_powers(f, p)
                 for b in band_powers: band_powers[b].append(bp[b])
+                
+                # Peak frequency in the 1-30Hz range
+                valid_idx = np.logical_and(f >= 1, f <= 30)
+                peak_freqs.append(f[valid_idx][np.argmax(p[valid_idx])])
+                
                 if fingerprint['eeg']['psd_freqs'] is None:
                     fingerprint['eeg']['psd_freqs'] = f
             
             fingerprint['eeg']['psd'].append(np.array(psds))
+            fingerprint['eeg']['psd_peak_freq'].append(peak_freqs)
             fingerprint['eeg']['delta'].append(band_powers['delta'])
             fingerprint['eeg']['theta'].append(band_powers['theta'])
             fingerprint['eeg']['alpha'].append(band_powers['alpha'])
             fingerprint['eeg']['beta'].append(band_powers['beta'])
-            fingerprint['eeg']['gamma'].append(band_powers['gamma'])
             
             # Spatial
             cov = np.cov(eeg_norm, rowvar=False)
+            corr = np.corrcoef(eeg_norm, rowvar=False)
             fingerprint['eeg']['covariance'].append(cov)
+            fingerprint['eeg']['correlation'].append(corr)
+            
+            cond_num = np.linalg.cond(cov)
+            fingerprint['eeg']['cov_cond_num'].append(cond_num)
+            
             eigenvals = scipy.linalg.eigh(cov, eigvals_only=True)
-            fingerprint['eeg']['eigenvalues'].append(np.sort(eigenvals)[::-1]) # descending
+            fingerprint['eeg']['eigenvalues'].append(np.sort(eigenvals)[::-1])
             
             # Temporal (Hjorth)
             act, mob, comp = [], [], []
@@ -171,28 +199,74 @@ def compute_dtu_fingerprint():
             fingerprint['eeg']['hjorth_mobility'].append(mob)
             fingerprint['eeg']['hjorth_complexity'].append(comp)
             
-            # --- Audio Features ---
-            fingerprint['audio']['mean'].append(np.mean(env_att_norm))
-            fingerprint['audio']['variance'].append(np.var(env_att_norm))
-            
-            # --- Relational Features ---
-            cca = CCA(n_components=1)
-            try:
-                cca.fit(eeg_norm, env_att_norm)
-                x_c, y_c = cca.transform(eeg_norm, env_att_norm)
-                r_att = np.corrcoef(x_c[:, 0], y_c[:, 0])[0, 1]
-            except Exception:
-                r_att = 0.0
-                
-            try:
-                cca.fit(eeg_norm, env_unatt_norm)
-                x_c, y_c = cca.transform(eeg_norm, env_unatt_norm)
-                r_unatt = np.corrcoef(x_c[:, 0], y_c[:, 0])[0, 1]
-            except Exception:
-                r_unatt = 0.0
-                
-            fingerprint['relational']['cca_att_1'].append(r_att)
-            fingerprint['relational']['cca_unatt_1'].append(r_unatt)
+            # --- MatchNet Evaluation ---
+            if model is not None and mapping is not None and envelopes:
+                trial_key = f"trial{ex.trial_index+1}"
+                if subj in mapping and trial_key in mapping[subj]:
+                    fname_a = mapping[subj][trial_key]["wavA"]["filename"]
+                    fname_b = mapping[subj][trial_key]["wavB"]["filename"]
+                    
+                    if fname_a in envelopes and fname_b in envelopes:
+                        env_a = envelopes[fname_a].T
+                        env_b = envelopes[fname_b].T
+                        
+                        env_att = env_a if ex.label == 1 else env_b
+                        env_unatt = env_b if ex.label == 1 else env_a
+                        
+                        env_att = normalize_array(env_att.T).T
+                        env_unatt = normalize_array(env_unatt.T).T
+                        
+                        min_len = min(len(eeg_norm), env_att.shape[1], env_unatt.shape[1])
+                        
+                        win_len = 3 * fs_dtu
+                        stride = fs_dtu
+                        
+                        all_eeg_emb = []
+                        all_att_emb = []
+                        all_unatt_emb = []
+                        
+                        # Generate windows
+                        for start in range(0, min_len - win_len + 1, stride):
+                            eeg_win = eeg_norm[start:start+win_len]
+                            att_win = env_att[:, start:start+win_len]
+                            unatt_win = env_unatt[:, start:start+win_len]
+                            
+                            e_tensor = torch.tensor(eeg_win.T, dtype=torch.float32).unsqueeze(0).to(device)
+                            a_tensor = torch.tensor(att_win, dtype=torch.float32).unsqueeze(0).to(device)
+                            u_tensor = torch.tensor(unatt_win, dtype=torch.float32).unsqueeze(0).to(device)
+                            
+                            with torch.no_grad():
+                                e_emb = model.eeg_encoder(e_tensor)
+                                e_emb = model.projector(e_emb)
+                                e_emb = F.normalize(e_emb, p=2, dim=1)
+                                
+                                a_emb = model.audio_encoder(a_tensor)
+                                a_emb = model.projector(a_emb)
+                                a_emb = F.normalize(a_emb, p=2, dim=1)
+                                
+                                u_emb = model.audio_encoder(u_tensor)
+                                u_emb = model.projector(u_emb)
+                                u_emb = F.normalize(u_emb, p=2, dim=1)
+                                
+                                all_eeg_emb.append(e_emb.cpu().numpy()[0])
+                                all_att_emb.append(a_emb.cpu().numpy()[0])
+                                all_unatt_emb.append(u_emb.cpu().numpy()[0])
+                                
+                        if all_eeg_emb:
+                            all_eeg_emb = np.array(all_eeg_emb)
+                            all_att_emb = np.array(all_att_emb)
+                            all_unatt_emb = np.array(all_unatt_emb)
+                            
+                            fingerprint['matchnet']['embeddings'].append(np.mean(all_eeg_emb, axis=0))
+                            fingerprint['matchnet']['embedding_cov'].append(np.cov(all_eeg_emb, rowvar=False))
+                            fingerprint['matchnet']['embedding_norm'].append(np.linalg.norm(all_eeg_emb, axis=1).mean())
+                            
+                            sim_a = np.sum(all_eeg_emb * all_att_emb, axis=1)
+                            sim_b = np.sum(all_eeg_emb * all_unatt_emb, axis=1)
+                            
+                            fingerprint['matchnet']['cosine_sim_a'].extend(sim_a)
+                            fingerprint['matchnet']['cosine_sim_b'].extend(sim_b)
+                            fingerprint['matchnet']['margin'].extend(sim_a - sim_b)
 
     # 3. Aggregate
     print("Aggregating metrics...")
@@ -202,18 +276,28 @@ def compute_dtu_fingerprint():
     def aggregate_dict(d):
         agg = {}
         for k, v in d.items():
-            if k == 'psd_freqs':
+            if k == 'psd_freqs' or k == 'channels' or k == 'normalization':
                 agg[k] = v
                 continue
             if isinstance(v, list) and len(v) > 0:
-                agg[k] = np.mean(np.array(v), axis=0)
+                # If it's a list of numbers (like margin), keep distribution stats
+                if k in ['cosine_sim_a', 'cosine_sim_b', 'margin']:
+                    agg[k] = {
+                        'mean': np.mean(v),
+                        'std': np.std(v),
+                        'median': np.median(v)
+                    }
+                else:
+                    agg[k] = np.mean(np.array(v), axis=0)
             elif isinstance(v, dict):
                 agg[k] = aggregate_dict(v)
+            else:
+                agg[k] = v
         return agg
 
+    dtu_profile['metadata'] = aggregate_dict(fingerprint['metadata'])
     dtu_profile['eeg'] = aggregate_dict(fingerprint['eeg'])
-    dtu_profile['audio'] = aggregate_dict(fingerprint['audio'])
-    dtu_profile['relational'] = aggregate_dict(fingerprint['relational'])
+    dtu_profile['matchnet'] = aggregate_dict(fingerprint['matchnet'])
     
     # 4. Save
     os.makedirs('data', exist_ok=True)
@@ -223,8 +307,10 @@ def compute_dtu_fingerprint():
         
     print(f"\n[+] Successfully saved DTU Fingerprint to {out_path}")
     print("\nSummary Statistics:")
-    print(f"Mean Canonical Correlation (Attended):   {dtu_profile['relational']['cca_att_1']:.4f}")
-    print(f"Mean Canonical Correlation (Unattended): {dtu_profile['relational']['cca_unatt_1']:.4f}")
+    print(f"Num Subjects: {dtu_profile['metadata']['num_subjects']}")
+    print(f"Num Trials:   {dtu_profile['metadata']['num_trials']}")
+    if dtu_profile['matchnet'].get('margin'):
+        print(f"Mean Margin:  {dtu_profile['matchnet']['margin']['mean']:.4f}")
 
 if __name__ == "__main__":
     compute_dtu_fingerprint()
