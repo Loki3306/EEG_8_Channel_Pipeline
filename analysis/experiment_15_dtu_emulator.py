@@ -188,8 +188,8 @@ def run_emulation():
                 continue
 
             
-            att_wav_name = str(stimuli[0] if att_ear == 'L' else stimuli[1])[2:-2]
-            unatt_wav_name = str(stimuli[1] if att_ear == 'L' else stimuli[0])[2:-2]
+            att_wav_name = str(stimuli[0] if att_ear == 'L' else stimuli[1])
+            unatt_wav_name = str(stimuli[1] if att_ear == 'L' else stimuli[0])
             
             def find_wav(name):
                 wav_dir = "/kaggle/input/datasets/lokeshgile/dataset-eeg" if os.path.exists("/kaggle/input/datasets/lokeshgile/dataset-eeg") else "data"
@@ -201,6 +201,10 @@ def run_emulation():
             att_wav_path = find_wav(att_wav_name)
             unatt_wav_path = find_wav(unatt_wav_name)
             
+            if not att_wav_path or not unatt_wav_path:
+                print(f"DEBUG: Could not find wavs for {att_wav_name} or {unatt_wav_name}")
+                continue
+                
             if att_wav_path and unatt_wav_path:
                 if 'audio_cache' not in locals():
                     audio_cache = {}
