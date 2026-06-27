@@ -28,15 +28,15 @@ def extract_features(model, bx, bya, byb):
     # 1. Spatial Conv out
     bx_unsqueeze = bx.unsqueeze(1)
     x = model.eeg_encoder.block1(bx_unsqueeze)
-    features['spatial_conv'] = x.view(x.size(0), -1)
+    features['spatial_conv'] = x.reshape(x.size(0), -1)
     
     # 2. Block 2 out
     x = model.eeg_encoder.block2(x)
-    features['temporal_conv'] = x.view(x.size(0), -1)
+    features['temporal_conv'] = x.reshape(x.size(0), -1)
     
     # 3. Final embedding
     z_eeg = model.encode_eeg(bx)
-    features['embedding'] = z_eeg.view(z_eeg.size(0), -1)
+    features['embedding'] = z_eeg.reshape(z_eeg.size(0), -1)
     
     return features
 
