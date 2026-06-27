@@ -192,7 +192,7 @@ def run_emulation():
             unatt_wav_name = str(stimuli[1] if att_ear == 'L' else stimuli[0])
             
             def find_wav(name):
-                wav_dir = "/kaggle/input/datasets/lokeshgile/dataset-eeg" if os.path.exists("/kaggle/input/datasets/lokeshgile/dataset-eeg") else "data"
+                wav_dir = "/kaggle/input/datasets/lowk1ee/audio-klu" if os.path.exists("/kaggle/input/datasets/lowk1ee/audio-klu") else "data"
                 for r, d, f in os.walk(wav_dir):
                     if name in f: return os.path.join(r, name)
                     if name+".wav" in f: return os.path.join(r, name+".wav")
