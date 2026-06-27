@@ -227,25 +227,23 @@ def compute_kul_fingerprint():
                         u_emb = model.audio_encoder(u_tensor)
                         u_emb = F.normalize(u_emb, p=2, dim=1)
                         
-                        all_eeg_emb.append(e_emb.cpu().numpy()[0])
-                        all_att_emb.append(a_emb.cpu().numpy()[0])
-                        all_unatt_emb.append(u_emb.cpu().numpy()[0])
+                        # sim_a, sim_b over T, then average (matches MatchNet logic)
+                        sim_a_val = F.cosine_similarity(e_emb, a_emb, dim=1).mean().item()
+                        sim_b_val = F.cosine_similarity(e_emb, u_emb, dim=1).mean().item()
+                        
+                        fingerprint['matchnet']['cosine_sim_a'].append(sim_a_val)
+                        fingerprint['matchnet']['cosine_sim_b'].append(sim_b_val)
+                        fingerprint['matchnet']['margin'].append(sim_a_val - sim_b_val)
+                        
+                        # Average over T to get a single 64-D embedding for this window
+                        all_eeg_emb.append(e_emb.mean(dim=2).cpu().numpy()[0])
                         
                 if all_eeg_emb:
-                    all_eeg_emb = np.array(all_eeg_emb)
-                    all_att_emb = np.array(all_att_emb)
-                    all_unatt_emb = np.array(all_unatt_emb)
+                    all_eeg_emb = np.array(all_eeg_emb) # (N_windows, 64)
                     
                     fingerprint['matchnet']['embeddings'].extend(all_eeg_emb)
                     fingerprint['matchnet']['embedding_cov'].append(np.cov(all_eeg_emb, rowvar=False))
                     fingerprint['matchnet']['embedding_norm'].append(np.linalg.norm(all_eeg_emb, axis=1).mean())
-                    
-                    sim_a = np.sum(all_eeg_emb * all_att_emb, axis=1)
-                    sim_b = np.sum(all_eeg_emb * all_unatt_emb, axis=1)
-                    
-                    fingerprint['matchnet']['cosine_sim_a'].extend(sim_a)
-                    fingerprint['matchnet']['cosine_sim_b'].extend(sim_b)
-                    fingerprint['matchnet']['margin'].extend(sim_a - sim_b)
 
     # 3. Aggregate
     # Instead of computing the mean over axis 0, stack the trial data to preserve the distribution
