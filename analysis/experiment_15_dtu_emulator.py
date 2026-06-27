@@ -183,6 +183,9 @@ def run_emulation():
             raw_eeg = trial['RawData'][0,0] # [T, 64]
             att_ear = trial['attended_ear'][0,0][0]
             stimuli = trial['stimuli'][0]
+            if len(stimuli) < 2:
+                continue
+
             
             att_wav_name = str(stimuli[0] if att_ear == 'L' else stimuli[1])[2:-2]
             unatt_wav_name = str(stimuli[1] if att_ear == 'L' else stimuli[0])[2:-2]
