@@ -140,6 +140,18 @@ def main():
         
         lags_ms = lags * (1000.0 / fs_dtu)
         
+        # 3.5 Find the exact peak and print it!
+        peak_idx_att = np.argmax(xcorr_att)
+        peak_lag_att_ms = lags_ms[peak_idx_att]
+        peak_val_att = xcorr_att[peak_idx_att]
+        
+        peak_idx_unatt = np.argmax(xcorr_unatt)
+        peak_lag_unatt_ms = lags_ms[peak_idx_unatt]
+        peak_val_unatt = xcorr_unatt[peak_idx_unatt]
+        
+        print(f"   Attended Peak Cross-Corr:   {peak_val_att:.2f} at Lag = {peak_lag_att_ms:+.1f} ms")
+        print(f"   Unattended Peak Cross-Corr: {peak_val_unatt:.2f} at Lag = {peak_lag_unatt_ms:+.1f} ms")
+        
         # Plot Cross-Correlation
         plt.figure(figsize=(12, 6))
         plt.plot(lags_ms, xcorr_att, color='green', label=f'Attended ({att_wav_name})', alpha=0.8)
