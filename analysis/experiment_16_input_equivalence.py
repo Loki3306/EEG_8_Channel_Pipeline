@@ -34,6 +34,12 @@ def get_dtu_tensor():
     for trial in trials:
         eeg_data = trial.eeg
         eeg_8 = eeg_data[:, dtu_indices]
+        
+        # Apply identical 1-8Hz bandpass to DTU
+        nyq = 0.5 * 64
+        b, a = scipy.signal.butter(4, [1.0/nyq, 8.0/nyq], btype='band')
+        eeg_8 = scipy.signal.filtfilt(b, a, eeg_8, axis=0)
+        
         eeg_norm = normalize_array(eeg_8)
         
         trial_key = f"trial_{trial.trial_index}"
