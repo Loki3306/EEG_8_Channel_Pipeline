@@ -127,7 +127,7 @@ def main():
         eeg_proxy = eeg_norm.mean(axis=1) # Mean across all 8 target channels for robustness
         
         # Compute valid cross-correlation
-        max_lag_samples = int(1.5 * fs_dtu) # ±1.5 seconds
+        max_lag_samples = int(15.0 * fs_dtu) # ±15 seconds to catch the 5s offset
         lags = np.arange(-max_lag_samples, max_lag_samples + 1)
         
         xcorr_att = np.correlate(eeg_proxy, att_broadband, mode='full')
