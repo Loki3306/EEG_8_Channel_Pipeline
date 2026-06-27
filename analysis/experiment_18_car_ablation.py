@@ -218,7 +218,7 @@ def run_experiment():
     model_path = None
     for r, d, f in os.walk("/kaggle/input"):
         for file in f:
-            if file in ["best_model.pt", "best_model.pth", "checkpoint.pt", "checkpoint.pth", "matchnet.pt", "matchnet.pth"]:
+            if file.endswith(".pth") and "matchnet" in file:
                 model_path = os.path.join(r, file)
                 break
         if model_path: break
@@ -226,7 +226,7 @@ def run_experiment():
     if not model_path:
         for r, d, f in os.walk("checkpoints"):
             for file in f:
-                if file in ["best_model.pt", "best_model.pth", "checkpoint.pt", "checkpoint.pth", "matchnet.pt", "matchnet.pth"]:
+                if file.endswith(".pth") and "matchnet" in file:
                     model_path = os.path.join(r, file)
                     break
             if model_path: break
