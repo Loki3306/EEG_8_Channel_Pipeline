@@ -161,7 +161,7 @@ def evaluate_condition(model, profiler, e_tensor, a_tensor, u_tensor, t_idx_list
     trial_margins = {}
     
     for i in range(len(e_tensor)):
-        e = torch.tensor(e_tensor[i], dtype=torch.float32).unsqueeze(0).unsqueeze(1)
+        e = torch.tensor(e_tensor[i], dtype=torch.float32).unsqueeze(0)
         a = torch.tensor(a_tensor[i], dtype=torch.float32).unsqueeze(0)
         u = torch.tensor(u_tensor[i], dtype=torch.float32).unsqueeze(0)
         
