@@ -4,6 +4,7 @@ import argparse
 import scipy.io as sio
 import scipy.io.wavfile as wavfile
 import numpy as np
+import pickle
 import pandas as pd
 import torch
 import torch.nn.functional as F
@@ -74,70 +75,85 @@ def main():
     min_lag = min(lags_samples)
     max_lag = max(lags_samples)
     
-    print("\nLoading KUL MAT file...")
-    mat = sio.loadmat(mat_path, squeeze_me=True, struct_as_record=False)
-    trials = mat['trials'] if 'trials' in mat else mat['trial']
     
-    print("Extracting trials using IDENTICAL DTU Preprocessing (1-8 Hz filter & Gammatone Envelopes)...")
-    audio_cache = {}
-    def find_wav(name):
-        for r, d, f in os.walk(wav_dir):
-            if name in f: return os.path.join(r, name)
-            if name+".wav" in f: return os.path.join(r, name+".wav")
-        return None
+    # Setup cache file path for preprocessed KUL trials
+    cache_path = "/kaggle/working/EEG_8_Channel_Pipeline/data/kul_preproc_dtu_style.pkl"
+    if not os.path.exists(os.path.dirname(cache_path)):
+        os.makedirs(os.path.dirname(cache_path), exist_ok=True)
+        
+    if os.path.exists(cache_path):
+        print(f"\nFound cached preprocessed data at {cache_path}. Loading...")
+        with open(cache_path, 'rb') as f:
+            trial_data = pickle.load(f)
+        print(f"Successfully loaded {len(trial_data)} trials from cache.")
+    else:
+        print("\nLoading KUL MAT file...")
+        mat = sio.loadmat(mat_path, squeeze_me=True, struct_as_record=False)
+        trials = mat['trials'] if 'trials' in mat else mat['trial']
+        
+        print("Extracting trials using IDENTICAL DTU Preprocessing (1-8 Hz filter & Gammatone Envelopes)...")
+        audio_cache = {}
+        def find_wav(name):
+            for r, d, f in os.walk(wav_dir):
+                if name in f: return os.path.join(r, name)
+                if name+".wav" in f: return os.path.join(r, name+".wav")
+            return None
 
-    trial_data = []
-    
-    for t_idx, trial in enumerate(trials):
-        print(f"  [Trial {t_idx+1:02d}/{len(trials):02d}] Extracting...")
-        eeg_data = trial.RawData.EegData
-        fs_eeg = trial.FileHeader.SampleRate
-        channel_names = [ch.Label for ch in trial.FileHeader.Channels]
+        trial_data = []
         
-        try:
-            selected_indices = [channel_names.index(tc) if tc in channel_names else [c.upper() for c in channel_names].index(tc.upper()) for tc in target_channels]
-        except ValueError as e:
-            print(f"    WARNING: Missing required channel in Trial {t_idx} ({e}). Skipping.")
-            continue
+        for t_idx, trial in enumerate(trials):
+            print(f"  [Trial {t_idx+1:02d}/{len(trials):02d}] Extracting...")
+            eeg_data = trial.RawData.EegData
+            fs_eeg = trial.FileHeader.SampleRate
+            channel_names = [ch.Label for ch in trial.FileHeader.Channels]
             
-        eeg_8 = eeg_data[:, selected_indices]
-        
-        # EXACT DTU FILTERING: 1.0 - 8.0 Hz (Not 1.0 - 6.0 Hz)
-        nyq = 0.5 * fs_eeg
-        b, a = butter(2, [1.0/nyq, 8.0/nyq], btype='band')
-        eeg_8 = filtfilt(b, a, eeg_8, axis=0)
-        eeg_64 = resample(eeg_8, int(len(eeg_8) * fs_dtu / fs_eeg), axis=0)
-        
-        att_ear = trial.attended_ear
-        stimuli = trial.stimuli
-        att_wav_name = stimuli[0] if att_ear == 'L' else stimuli[1]
-        unatt_wav_name = stimuli[1] if att_ear == 'L' else stimuli[0]
-        
-        att_wav_path = find_wav(str(att_wav_name))
-        unatt_wav_path = find_wav(str(unatt_wav_name))
-        
-        if not att_wav_path or not unatt_wav_path:
-            print(f"    WARNING: Missing audio for Trial {t_idx}. Skipping.")
-            continue
+            try:
+                selected_indices = [channel_names.index(tc) if tc in channel_names else [c.upper() for c in channel_names].index(tc.upper()) for tc in target_channels]
+            except ValueError as e:
+                print(f"    WARNING: Missing required channel in Trial {t_idx} ({e}). Skipping.")
+                continue
+                
+            eeg_8 = eeg_data[:, selected_indices]
             
-        def get_cached_env(wav_path):
-            if wav_path in audio_cache:
-                return audio_cache[wav_path]
-            # EXACT DTU ENVELOPE PIPELINE
-            env = extract_gammatone_envelopes(wav_path, num_bands=28, low_freq=50, high_freq=8000, target_fs=fs_dtu)
-            audio_cache[wav_path] = env
-            return env
+            # EXACT DTU FILTERING: 1.0 - 8.0 Hz (Not 1.0 - 6.0 Hz)
+            nyq = 0.5 * fs_eeg
+            b, a = butter(2, [1.0/nyq, 8.0/nyq], btype='band')
+            eeg_8 = filtfilt(b, a, eeg_8, axis=0)
+            eeg_64 = resample(eeg_8, int(len(eeg_8) * fs_dtu / fs_eeg), axis=0)
             
-        env_att = get_cached_env(att_wav_path)
-        env_unatt = get_cached_env(unatt_wav_path)
-        
-        eeg_norm = normalize_array(eeg_64) 
-        env_att = normalize_array(env_att.T).T 
-        env_unatt = normalize_array(env_unatt.T).T
-        
-        trial_data.append((eeg_norm, env_att, env_unatt))
-        
-    print(f"\nSuccessfully loaded {len(trial_data)} trials.")
+            att_ear = trial.attended_ear
+            stimuli = trial.stimuli
+            att_wav_name = stimuli[0] if att_ear == 'L' else stimuli[1]
+            unatt_wav_name = stimuli[1] if att_ear == 'L' else stimuli[0]
+            
+            att_wav_path = find_wav(str(att_wav_name))
+            unatt_wav_path = find_wav(str(unatt_wav_name))
+            
+            if not att_wav_path or not unatt_wav_path:
+                print(f"    WARNING: Missing audio for Trial {t_idx}. Skipping.")
+                continue
+                
+            def get_cached_env(wav_path):
+                if wav_path in audio_cache:
+                    return audio_cache[wav_path]
+                # EXACT DTU ENVELOPE PIPELINE
+                env = extract_gammatone_envelopes(wav_path, num_bands=28, low_freq=50, high_freq=8000, target_fs=fs_dtu)
+                audio_cache[wav_path] = env
+                return env
+                
+            env_att = get_cached_env(att_wav_path)
+            env_unatt = get_cached_env(unatt_wav_path)
+            
+            eeg_norm = normalize_array(eeg_64) 
+            env_att = normalize_array(env_att.T).T 
+            env_unatt = normalize_array(env_unatt.T).T
+            
+            trial_data.append((eeg_norm, env_att, env_unatt))
+            
+        print(f"\nSuccessfully processed {len(trial_data)} trials. Saving to cache...")
+        with open(cache_path, 'wb') as f:
+            pickle.dump(trial_data, f)
+        print("Saved to cache.")
     
     # Sanity Checks
     avg_eeg_len = np.mean([t[0].shape[0] for t in trial_data])
