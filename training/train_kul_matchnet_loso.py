@@ -62,7 +62,7 @@ def load_kul_trials(mat_path):
         trials = [trials]
     return trials
 
-def preprocess_trial(trial, envelope_cache, apply_car=True):
+def preprocess_trial(trial, apply_car=True):
     try:
         eeg_data = trial.RawData.EegData
         fs_eeg = trial.FileHeader.SampleRate
@@ -109,56 +109,25 @@ def preprocess_trial(trial, envelope_cache, apply_car=True):
     att_wav_name = str(stimuli[0] if att_ear == 'L' else stimuli[1]).strip()
     unatt_wav_name = str(stimuli[1] if att_ear == 'L' else stimuli[0]).strip()
     
-    def find_wav(name):
-        wav_dirs = ["/kaggle/input/datasets/lowk1ee/audio-klu", "/kaggle/input/audio-klu", "data"]
-        for w_dir in wav_dirs:
-            if os.path.exists(w_dir):
-                for r, d, f in os.walk(w_dir):
-                    for file in f:
-                        if name in file and file.endswith(".wav"):
-                            return os.path.join(r, file)
-        return None
+    # Direct path construction
+    if os.path.exists("/kaggle/input/datasets/lowk1ee/audio-klu/stimuli"):
+        stimuli_dir = "/kaggle/input/datasets/lowk1ee/audio-klu/stimuli"
+    elif os.path.exists("/kaggle/input/audio-klu/stimuli"):
+        stimuli_dir = "/kaggle/input/audio-klu/stimuli"
+    else:
+        stimuli_dir = os.path.join(REPO_ROOT, "data", "audio-klu", "stimuli")
         
-    att_wav_path = find_wav(att_wav_name)
-    unatt_wav_path = find_wav(unatt_wav_name)
+    att_wav_path = os.path.join(stimuli_dir, att_wav_name)
+    unatt_wav_path = os.path.join(stimuli_dir, unatt_wav_name)
     
-    if not att_wav_path or not unatt_wav_path:
-        return None, None, None, f"Audio file not found ({att_wav_name} or {unatt_wav_name})"
+    if not os.path.isfile(att_wav_path):
+        raise FileNotFoundError(f"Missing stimulus file: {att_wav_path}")
+    if not os.path.isfile(unatt_wav_path):
+        raise FileNotFoundError(f"Missing stimulus file: {unatt_wav_path}")
         
-    def resolve_cache_key(filepath, cache, name):
-        if filepath in cache:
-            return filepath, True
-            
-        basename = os.path.basename(filepath)
-        candidates = []
-        for k in cache.keys():
-            k_base = os.path.basename(k)
-            if basename == k_base:
-                candidates.append(k)
-            elif basename.lower() == k_base.lower():
-                candidates.append(k)
-            elif basename.replace(".wav", "") in k:
-                candidates.append(k)
-                
-        if len(candidates) > 0:
-            return candidates[0], True
-            
-        # If we failed to find it, print the diagnostic
-        print(f"\n[CACHE MISS DIAGNOSTIC]")
-        print(f"Requested: {name}")
-        print(f"Resolved absolute path: {filepath}")
-        print(f"Candidate matches: {candidates}")
-        print("-" * 30)
-        return filepath, False
-
-    att_key, att_found = resolve_cache_key(att_wav_path, envelope_cache, att_wav_name)
-    unatt_key, unatt_found = resolve_cache_key(unatt_wav_path, envelope_cache, unatt_wav_name)
-    
-    if not att_found or not unatt_found:
-        return None, None, None, f"Audio not in cache ({att_wav_name} or {unatt_wav_name})"
-    
-    env_att = envelope_cache[att_key]
-    env_unatt = envelope_cache[unatt_key]
+    from data.extract_gammatone_envelopes import extract_gammatone_envelopes
+    env_att = extract_gammatone_envelopes(att_wav_path, target_fs=FS)
+    env_unatt = extract_gammatone_envelopes(unatt_wav_path, target_fs=FS)
     
     def norm_env(env):
         env = env.T
@@ -245,25 +214,6 @@ def train_matchnet_kul_loso():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Starting KUL LOSO Pipeline on {device}...")
     
-    cache_path = REPO_ROOT / "kul_gammatone_cache.pkl"
-    if not cache_path.exists():
-        cache_path = Path("kul_gammatone_cache.pkl")
-    
-    if cache_path.exists():
-        import pickle
-        with open(cache_path, "rb") as f:
-            envelope_cache = pickle.load(f)
-            
-        print("\n--- AUDIO CACHE DIAGNOSTICS ---")
-        print(f"Total keys in cache: {len(envelope_cache)}")
-        print("First 20 cache keys:")
-        for i, k in enumerate(list(envelope_cache.keys())[:20]):
-            print(f"  {k}")
-        print("-------------------------------\n")
-    else:
-        print("Missing kul_gammatone_cache.pkl. Run experiment 18 first.")
-        return
-        
     subject_paths = get_kul_subject_files()
     if not subject_paths:
         return
@@ -279,7 +229,7 @@ def train_matchnet_kul_loso():
         valid_trials = []
         discard_reasons = {}
         for t in trials:
-            x, ya, yb, reason = preprocess_trial(t, envelope_cache, apply_car=True)
+            x, ya, yb, reason = preprocess_trial(t, apply_car=True)
             if x is not None:
                 valid_trials.append((x, ya, yb))
             else:
