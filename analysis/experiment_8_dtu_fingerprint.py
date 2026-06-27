@@ -37,14 +37,20 @@ def compute_band_powers(f, psd):
         'alpha': (8, 13),
         'beta': (13, 30)
     }
-    total_power = np.trapz(psd, f) + 1e-12
+    # np.trapezoid for numpy 2.0, fallback to np.trapz
+    try:
+        from numpy import trapezoid as trapz
+    except ImportError:
+        from numpy import trapz
+        
+    total_power = trapz(psd, f) + 1e-12
     powers = {}
     for band, (low, high) in bands.items():
         idx = np.logical_and(f >= low, f <= high)
         if not np.any(idx):
             powers[band] = 0.0
         else:
-            band_power = np.trapz(psd[idx], f[idx])
+            band_power = trapz(psd[idx], f[idx])
             powers[band] = band_power / total_power
     return powers
 
@@ -52,6 +58,32 @@ def normalize_array(arr):
     arr = arr - arr.mean(axis=0, keepdims=True)
     scale = arr.std(axis=0, keepdims=True) + 1e-12
     return arr / scale
+
+def get_dtu_mapping_and_envelopes():
+    from pathlib import Path
+    import json
+    REPO_ROOT = Path(__file__).resolve().parents[1]
+    
+    kaggle_map_dir = Path("/kaggle/input/datasets/lokeshgile/dataset-eeg")
+    if (kaggle_map_dir / "audio_mapping.json").exists():
+        map_file = kaggle_map_dir / "audio_mapping.json"
+    else:
+        map_file = REPO_ROOT / "data" / "audio_mapping.json"
+    
+    kaggle_env_dir = Path("/kaggle/input/datasets/lokeshgile/gammatone-envelope")
+    if kaggle_env_dir.exists() and list(kaggle_env_dir.glob("*.pkl")):
+        env_file = list(kaggle_env_dir.glob("*.pkl"))[0]
+    else:
+        env_file = REPO_ROOT / "data" / "gammatone_envelopes.pkl"
+        
+    if not map_file.exists() or not env_file.exists():
+        return None, None
+        
+    with open(map_file, 'r') as f:
+        mapping = json.load(f)
+    with open(env_file, 'rb') as f:
+        envelopes = pickle.load(f)
+    return mapping, envelopes
 
 def load_matchnet(device='cuda'):
     if ContrastiveMatchNet is None:
@@ -114,21 +146,8 @@ def compute_dtu_fingerprint():
     from data.extract_gammatone_envelopes import extract_gammatone_envelopes
     
     # We will need mapping.json to find 28-band envelopes if we want latent space evaluation
-    mapping_path = 'data/mapping.json'
-    mapping = None
-    if os.path.exists(mapping_path):
-        import json
-        with open(mapping_path, 'r') as f:
-            mapping = json.load(f)
-            
-    # Load 28-band envelopes if available
-    env_dir = 'data/gammatone_envelopes_28band'
-    envelopes = {}
-    if os.path.exists(env_dir):
-        for f in os.listdir(env_dir):
-            if f.endswith('.npy'):
-                envelopes[f] = np.load(os.path.join(env_dir, f))
-    else:
+    mapping, envelopes = get_dtu_mapping_and_envelopes()
+    if mapping is None or envelopes is None:
         print("WARNING: 28-band gammatone envelopes not found. MatchNet evaluation will be skipped.")
 
     for s_file in tqdm(s_files, desc="Subjects"):
@@ -206,8 +225,8 @@ def compute_dtu_fingerprint():
                     fname_b = mapping[subj][trial_key]["wavB"]["filename"]
                     
                     if fname_a in envelopes and fname_b in envelopes:
-                        env_a = envelopes[fname_a].T
-                        env_b = envelopes[fname_b].T
+                        env_a = envelopes[fname_a]
+                        env_b = envelopes[fname_b]
                         
                         env_att = env_a if ex.label == 1 else env_b
                         env_unatt = env_b if ex.label == 1 else env_a
