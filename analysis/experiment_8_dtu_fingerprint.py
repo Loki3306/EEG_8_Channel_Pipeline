@@ -57,11 +57,10 @@ def load_matchnet(device='cuda'):
     if ContrastiveMatchNet is None:
         return None
     model = ContrastiveMatchNet(
+        eeg_model_type="eegnet",
         eeg_channels=8,
         audio_channels=28,
-        eeg_out_channels=64,
-        audio_out_channels=64,
-        latent_dim=128
+        latent_dim=64
     )
     checkpoint_path = "/kaggle/working/EEG_8_Channel_Pipeline/checkpoints/matchnet_fold_S2_data_preproc_best.pth"
     if os.path.exists(checkpoint_path):
@@ -237,15 +236,12 @@ def compute_dtu_fingerprint():
                             
                             with torch.no_grad():
                                 e_emb = model.eeg_encoder(e_tensor)
-                                e_emb = model.projector(e_emb)
                                 e_emb = F.normalize(e_emb, p=2, dim=1)
                                 
                                 a_emb = model.audio_encoder(a_tensor)
-                                a_emb = model.projector(a_emb)
                                 a_emb = F.normalize(a_emb, p=2, dim=1)
                                 
                                 u_emb = model.audio_encoder(u_tensor)
-                                u_emb = model.projector(u_emb)
                                 u_emb = F.normalize(u_emb, p=2, dim=1)
                                 
                                 all_eeg_emb.append(e_emb.cpu().numpy()[0])
