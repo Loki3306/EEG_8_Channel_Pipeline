@@ -296,10 +296,16 @@ def train_matchnet_kul_loso(dataset_dir=None, eeg_model_type="eegnet", epochs=50
             print(f"Loading DTU pretrained weights from: {dtu_ckpt}")
             model.load_state_dict(torch.load(dtu_ckpt, map_location=device))
             
-            # Freeze Audio Encoder
-            for param in model.audio_encoder.parameters():
-                param.requires_grad = False
-            print("Successfully FROZE the Audio Encoder parameters.")
+            # Freeze Audio Encoder Feature Extractor, but leave projection trainable
+            for i, layer in enumerate(model.audio_encoder.net):
+                if i < 8: # The first two Conv1d+BN+GELU+Dropout blocks
+                    for param in layer.parameters():
+                        param.requires_grad = False
+            
+            print("\n[VERIFICATION] Trainable parameters:")
+            print("  EEG Encoder: YES")
+            print("  Audio Feature Extractor: NO (Frozen)")
+            print("  Audio Projection Head: YES\n")
         else:
             print("WARNING: No DTU checkpoint provided. Audio encoder will NOT be frozen.")
         
