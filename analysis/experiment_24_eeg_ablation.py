@@ -41,6 +41,9 @@ def evaluate_ablation(model, test_data, device, mode="control"):
             
             # Apply ablation to EEG (x)
             x_test = x.copy()
+            ya_test = ya.copy()
+            yb_test = yb.copy()
+            
             if mode == "zero":
                 x_test = np.zeros_like(x)
             elif mode == "random":
@@ -55,9 +58,6 @@ def evaluate_ablation(model, test_data, device, mode="control"):
                 x_test = x_other[:, :min_len]
                 ya_test = ya[:, :min_len]
                 yb_test = yb[:, :min_len]
-            else:
-                ya_test = ya
-                yb_test = yb
                 
             start = 0
             trial_sim_a = []

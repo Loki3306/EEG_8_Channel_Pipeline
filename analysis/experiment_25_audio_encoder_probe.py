@@ -90,14 +90,11 @@ def main():
                 c_tensor = torch.FloatTensor(c).unsqueeze(0).to(device)
                 
                 # Pass through audio encoder
-                _, z_a = model.audio_net(c_tensor)
+                z_a = model.encode_audio(c_tensor)
                 
                 # Flatten or pool depending on architecture output
                 if z_a.dim() > 2:
                     z_a = z_a.mean(dim=2) # global average pool across time if it's temporal
-                    
-                # The projection head in MatchNet is linear for z_a
-                z_a = model.proj_a(z_a)
                 
                 all_embeddings.append(z_a.cpu().numpy()[0])
                 all_labels.append(track_id)
