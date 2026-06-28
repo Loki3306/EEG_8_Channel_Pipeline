@@ -23,10 +23,13 @@ FS = 64
 DECISION_WINDOW_SEC = 3.0   # 192 samples
 TRAIN_HOP_SEC = 1.0         # 64 samples
 EVAL_HOP_SEC = 1.0
-BATCH_SIZE = 4              # mini_batch_size = 4 in original repo
+BATCH_SIZE = 64             # Increased to maximize GPU memory
 LEARNING_RATE = 5e-4        # exact from repo
 MAX_EPOCHS = 100
 PATIENCE = 10
+
+# Fixed number of windows per trial to extract
+WINDOWS_PER_TRIAL = 20
 
 class LazyKULKuruvilaDataset(torch.utils.data.Dataset):
     def __init__(self, chunks, trials, win_samples):
@@ -150,9 +153,12 @@ def main():
     parser.add_argument("--smoke_test", action="store_true", help="Run 1 fold, 1 batch, print shapes, and exit")
     args = parser.parse_args()
 
+    # Enable cudnn benchmark for faster convolutions
+    torch.backends.cudnn.benchmark = True
+
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Starting Exact Kuruvila 2021 Reproduction LOSO Pipeline on {device}")
-    print(f"Window: {DECISION_WINDOW_SEC}s, Hop: {TRAIN_HOP_SEC}s, Batch: {BATCH_SIZE}, LR: {LEARNING_RATE}")
+    print(f"Window: {DECISION_WINDOW_SEC}s, Hop: {TRAIN_HOP_SEC}s, Batch: {BATCH_SIZE}, LR: {LEARNING_RATE}, Windows/Trial: {WINDOWS_PER_TRIAL}")
     
     loader = KULCachedLoader(REPO_ROOT / "data" / "processed_kul")
     try:
@@ -193,54 +199,46 @@ def main():
                     t["meta"]["Subject"] = sub
                 train_data.extend(all_subject_data[sub])
                 
-        all_train_chunks = []
-        all_train_meta = []
+        # Create balanced trial subsets
+        train_trials_c1 = [i for i, t in enumerate(train_data) if str(t["meta"].get('attended_track', 'Unknown')) == '1']
+        train_trials_c2 = [i for i, t in enumerate(train_data) if str(t["meta"].get('attended_track', 'Unknown')) == '2']
         
-        for i, t in enumerate(train_data):
-            meta = t["meta"]
-            attended_track = str(meta.get('attended_track', 'Unknown'))
-            if attended_track not in ['1', '2']:
-                continue
-                
-            label = 0 if attended_track == '1' else 1
-            sub = meta.get("Subject", "Unknown")
-            tid = meta.get("TrialID", "Unknown")
-            
+        min_trials = min(len(train_trials_c1), len(train_trials_c2))
+        
+        rng = np.random.default_rng(42)
+        rng.shuffle(train_trials_c1)
+        rng.shuffle(train_trials_c2)
+        
+        bal_trials_idx = np.concatenate([train_trials_c1[:min_trials], train_trials_c2[:min_trials]])
+        
+        # Extract a strictly balanced and equal number of windows PER trial
+        bal_chunks = []
+        for i in bal_trials_idx:
+            t = train_data[i]
+            label = 0 if str(t["meta"].get('attended_track')) == '1' else 1
             eeg_len = t["eeg"].shape[1]
+            
+            # Find all possible valid starting positions for this trial
+            possible_starts = []
             start = 0
             while start + win_samples <= eeg_len:
-                all_train_chunks.append((i, start, label))
-                all_train_meta.append((sub, tid))
+                possible_starts.append(start)
                 start += hop_samples
                 
-        chunks_c1 = [i for i, c in enumerate(all_train_chunks) if c[2] == 0]
-        chunks_c2 = [i for i, c in enumerate(all_train_chunks) if c[2] == 1]
+            # Randomly select a fixed number of windows to ensure uniform representation
+            if len(possible_starts) > 0:
+                selected_starts = rng.choice(possible_starts, size=min(WINDOWS_PER_TRIAL, len(possible_starts)), replace=False)
+                for st in selected_starts:
+                    bal_chunks.append((i, st, label))
+                    
+        rng.shuffle(bal_chunks)
         
-        print("\n========================================")
-        print("Window Distribution BEFORE balancing")
-        print(f"Track1 windows: {len(chunks_c1)}")
-        print(f"Track2 windows: {len(chunks_c2)}")
+        # Calculate stats for reporting
+        idx_c1_bal = [c for c in bal_chunks if c[2] == 0]
+        idx_c2_bal = [c for c in bal_chunks if c[2] == 1]
         
-        min_windows = min(len(chunks_c1), len(chunks_c2))
-        if min_windows == 0:
-            print(f"Skipping fold {held_out_subject} due to missing classes.")
-            continue
-            
-        rng = np.random.default_rng(42)
-        rng.shuffle(chunks_c1)
-        rng.shuffle(chunks_c2)
-        
-        idx_c1_bal = chunks_c1[:min_windows]
-        idx_c2_bal = chunks_c2[:min_windows]
-        
-        bal_idx = np.concatenate([idx_c1_bal, idx_c2_bal])
-        rng.shuffle(bal_idx)
-        
-        bal_chunks = [all_train_chunks[i] for i in bal_idx]
-        bal_meta = [all_train_meta[i] for i in bal_idx]
-        
-        unique_subs = set(m[0] for m in bal_meta)
-        unique_trials = set(f"{m[0]}_{m[1]}" for m in bal_meta)
+        unique_subs = set(train_data[c[0]]["meta"]["Subject"] for c in bal_chunks)
+        unique_trials = set(c[0] for c in bal_chunks)
         
         print("\nWindow Distribution AFTER balancing")
         print(f"Track1 windows: {len(idx_c1_bal)}")
@@ -250,7 +248,16 @@ def main():
         print("========================================\n")
         
         train_dataset = LazyKULKuruvilaDataset(bal_chunks, train_data, win_samples)
-        train_loader = DataLoader(train_dataset, batch_size=BATCH_SIZE, shuffle=True, drop_last=True)
+        train_loader = DataLoader(
+            train_dataset, 
+            batch_size=BATCH_SIZE, 
+            shuffle=True, 
+            drop_last=True,
+            num_workers=4,
+            pin_memory=True,
+            persistent_workers=True,
+            prefetch_factor=2
+        )
         
         model = KuruvilaOriginalCNNLSTM(eeg_channels=8, audio_channels=28, num_spkr=2).to(device)
         
@@ -303,22 +310,33 @@ def main():
         train_losses = []
         val_losses = []
         
+        scaler = torch.cuda.amp.GradScaler()
+        
         for epoch in range(MAX_EPOCHS):
             model.train()
             epoch_loss = 0.0
             for batch_x, batch_a1, batch_a2, batch_y in train_loader:
-                batch_x = batch_x.to(device)
-                batch_a1 = batch_a1.to(device)
-                batch_a2 = batch_a2.to(device)
-                batch_y = batch_y.to(device)
+                batch_x = batch_x.to(device, non_blocking=True)
+                batch_a1 = batch_a1.to(device, non_blocking=True)
+                batch_a2 = batch_a2.to(device, non_blocking=True)
+                batch_y = batch_y.to(device, non_blocking=True)
                 
                 one_hot_y = F.one_hot(batch_y, num_classes=2).float()
                 
-                optimizer.zero_grad()
-                logits = model(batch_x, batch_a1, batch_a2)
-                loss = criterion(logits, one_hot_y)
-                loss.backward()
-                optimizer.step()
+                optimizer.zero_grad(set_to_none=True)
+                
+                with torch.cuda.amp.autocast():
+                    logits = model(batch_x, batch_a1, batch_a2)
+                    loss = criterion(logits, one_hot_y)
+                    
+                scaler.scale(loss).backward()
+                
+                # Gradient clipping
+                scaler.unscale_(optimizer)
+                torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+                
+                scaler.step(optimizer)
+                scaler.update()
                 
                 epoch_loss += loss.item()
                 
