@@ -4,6 +4,7 @@ import re
 import math
 import numpy as np
 import scipy.io
+import argparse
 import scipy.signal
 import torch
 import torch.optim as optim
@@ -445,4 +446,18 @@ def train_matchnet_kul_loso(dataset_dir=None, eeg_model_type="eegnet", epochs=50
     print("==================================================")
 
 if __name__ == "__main__":
-    train_matchnet_kul_loso()
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--dataset_dir", type=str, default=None, help="Path to Kaggle dataset if applicable")
+    parser.add_argument("--eeg_model", type=str, default="eegnet", choices=["eegnet", "atcnet", "eegnet_tcn"])
+    parser.add_argument("--epochs", type=int, default=50)
+    parser.add_argument("--batch_size", type=int, default=32)
+    parser.add_argument("--lr", type=float, default=1e-3)
+    parser.add_argument("--fold", type=str, default=None, help="Specific subject to use as held-out test set (e.g. 'S1'). If None, trains all folds.")
+    parser.add_argument("--dtu_ckpt", type=str, default=None, help="Path to DTU pretrained model to freeze audio encoder")
+    args = parser.parse_args()
+    
+    if args.dtu_ckpt is None:
+        print("ERROR: --dtu_ckpt is required for the Phase E intervention!")
+        sys.exit(1)
+        
+    train_matchnet_kul_loso(args.dataset_dir, args.eeg_model, args.epochs, args.batch_size, args.lr, args.fold, args.dtu_ckpt)
