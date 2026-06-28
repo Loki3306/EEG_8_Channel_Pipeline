@@ -17,9 +17,6 @@ from training.train_kul_matchnet_loso import get_kul_subject_files, load_kul_tri
 DECISION_WINDOW_SEC = 10
 FS = 64
 
-def evaluate_ablation(model, test_data, device, mode="control"):
-    """
-    Evaluates trials under different EEG ablation conditions.
 def evaluate_ablation(model, test_data, device, mode="control", window_sec=DECISION_WINDOW_SEC, fs=FS):
     model.eval()
     win_samples = int(window_sec * fs)
