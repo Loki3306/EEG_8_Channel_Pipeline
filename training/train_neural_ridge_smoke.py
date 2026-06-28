@@ -12,7 +12,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT))
 
 from data.kul_cached_dataset import KULCachedLoader
-from models.neural_ridge_decoder import NeuralRidgeDecoder
+from models.neural_ridge_decoder import ResidualNeuralRidgeDecoder
 
 def safe_corr_torch(x, y, eps=1e-8):
     """Batched Pearson correlation in PyTorch. x, y: (Batch, Channels, Time)"""
@@ -25,13 +25,11 @@ def safe_corr_torch(x, y, eps=1e-8):
     x_var = (x_centered ** 2).sum(dim=-1)
     y_var = (y_centered ** 2).sum(dim=-1)
     
-    # corr: (Batch, Channels)
     corr = cov / (torch.sqrt(x_var * y_var) + eps)
     return corr
 
 def custom_loss(pred, target, mse_weight=0.5, corr_weight=0.5):
     mse = nn.functional.mse_loss(pred, target)
-    # Compute correlation per channel and average across channels and batch
     corr = safe_corr_torch(pred, target)
     mean_corr = corr.mean()
     corr_loss = 1.0 - mean_corr
@@ -45,10 +43,6 @@ def safe_corr_np(x, y, eps=1e-8):
     return num / (den + eps)
 
 def evaluate_trial_majority_vote_multiband(predicted: np.ndarray, wav_a: np.ndarray, wav_b: np.ndarray, window_seconds: int, hop_seconds: float = 1.0, fs: int = 64):
-    """
-    Evaluates correlation across all bands over overlapping windows.
-    predicted, wav_a, wav_b: shape (Channels, Time)
-    """
     num_bands = predicted.shape[0]
     win_samples = int(window_seconds * fs)
     hop_samples = int(hop_seconds * fs)
@@ -75,16 +69,60 @@ def evaluate_trial_majority_vote_multiband(predicted: np.ndarray, wav_a: np.ndar
     trial_correct = (correct_windows > total_windows / 2.0)
     return trial_correct, total_windows, correct_windows
 
-def prepare_data(subject_data, window_sec=10, hop_sec=2, fs=64):
-    """Slices trials into fixed windows for mini-batch training."""
+def prepare_data_and_ridge(subject_data, window_sec=10, hop_sec=2, fs=64, lags=16):
+    """
+    Slices trials into fixed windows.
+    Also computes analytical Ridge weights (OLS) across the entire dataset.
+    """
     win_samples = int(window_sec * fs)
     hop_samples = int(hop_sec * fs)
     
     X, Y_a = [], []
+    
+    # For Ridge XTX, XTY
+    num_channels = 8
+    num_lags = lags + 1 # 0 to 16
+    feature_count = num_channels * num_lags
+    num_bands = 28
+    
+    xtx = np.zeros((feature_count, feature_count), dtype=float)
+    xty = np.zeros((feature_count, num_bands), dtype=float)
+    
+    print(f"Preparing data and computing analytical Ridge weights...")
     for t in subject_data:
         eeg = t["eeg"]       # (8, Time)
         audio_a = t["audio_a"] # (28, Time)
         
+        # 1. Normalize EEG for Ridge (matching classical pipeline)
+        eeg_np = eeg.numpy()
+        e_mean_full = eeg_np.mean(axis=1, keepdims=True)
+        e_std_full = eeg_np.std(axis=1, keepdims=True) + 1e-12
+        e_norm_full = (eeg_np - e_mean_full) / e_std_full
+        
+        # Normalize audio_a for Ridge
+        a_np = audio_a.numpy()
+        a_mean_full = a_np.mean(axis=1, keepdims=True)
+        a_std_full = a_np.std(axis=1, keepdims=True) + 1e-12
+        a_norm_full = (a_np - a_mean_full) / a_std_full
+        
+        # Build lagged EEG matrix for Ridge (shape: Time, Channels*Lags)
+        time_steps = e_norm_full.shape[1]
+        lagged_blocks = []
+        for lag in range(num_lags):
+            if lag == 0:
+                lagged_blocks.append(e_norm_full.T)
+            else:
+                shifted = np.vstack([np.zeros((lag, num_channels)), e_norm_full.T[:-lag]])
+                lagged_blocks.append(shifted)
+                
+        # X_mat: (Time, Channels*Lags)
+        X_mat = np.concatenate(lagged_blocks, axis=1)
+        Y_mat = a_norm_full.T # (Time, 28)
+        
+        xtx += X_mat.T @ X_mat
+        xty += X_mat.T @ Y_mat
+        
+        # 2. Windowing for Neural Network
         n_windows = (eeg.shape[1] - win_samples) // hop_samples + 1
         for i in range(max(1, n_windows)):
             start = i * hop_samples
@@ -108,10 +146,24 @@ def prepare_data(subject_data, window_sec=10, hop_sec=2, fs=64):
             X.append(e_norm)
             Y_a.append(a_norm)
             
-    if not X:
-        return None
+    # Solve Ridge
+    ridge_lambda = 100.0
+    regularized = xtx + ridge_lambda * np.eye(feature_count, dtype=float)
+    W = np.linalg.solve(regularized, xty) # (Channels*Lags, 28)
+    
+    # Map to PyTorch Conv1D shape (out_channels, in_channels, kernel_size)
+    W_reshaped = W.reshape(num_lags, num_channels, num_bands) # (17, 8, 28)
+    W_torch = np.zeros((num_bands, num_channels, num_lags), dtype=np.float32)
+    
+    for lag in range(num_lags):
+        # lag=0 is the most recent sample (k=16 in Conv1D)
+        k = num_lags - 1 - lag
+        W_torch[:, :, k] = W_reshaped[lag, :, :].T
         
-    return torch.stack(X), torch.stack(Y_a)
+    if not X:
+        return None, None
+        
+    return (torch.stack(X), torch.stack(Y_a)), W_torch
 
 def main():
     print("Loading KUL Cache...")
@@ -139,8 +191,8 @@ def main():
         if sub != test_subject:
             train_trials.extend(trials)
             
-    # Prepare chunked training data (10s windows, 2s hop for dense training)
-    train_tensors = prepare_data(train_trials, window_sec=10, hop_sec=2, fs=64)
+    # Prepare chunked training data and analytical ridge weights
+    train_tensors, ridge_weights = prepare_data_and_ridge(train_trials, window_sec=10, hop_sec=2, fs=64, lags=16)
     if train_tensors is None:
         print("No training data.")
         return
@@ -152,8 +204,14 @@ def main():
     # ---------------------------------------------------------
     # 2. Model, Loss, Optimizer
     # ---------------------------------------------------------
-    model = NeuralRidgeDecoder(in_channels=8, out_channels=28).to(device)
-    optimizer = optim.Adam(model.parameters(), lr=1e-3)
+    model = ResidualNeuralRidgeDecoder(in_channels=8, out_channels=28, lags=16).to(device)
+    
+    # Inject analytical Ridge weights
+    print("Injecting analytical Ridge weights into base_ridge branch...")
+    model.load_ridge_weights(ridge_weights)
+    
+    # Use weight decay (1e-4)
+    optimizer = optim.Adam(filter(lambda p: p.requires_grad, model.parameters()), lr=1e-3, weight_decay=1e-4)
     
     epochs = 5
     best_margin = -float('inf')
@@ -170,9 +228,12 @@ def main():
             optimizer.zero_grad()
             pred = model(batch_x)
             
-            # Loss = 0.5 * MSE + 0.5 * (1 - Pearson)
             loss = custom_loss(pred, batch_y, mse_weight=0.5, corr_weight=0.5)
             loss.backward()
+            
+            # Gradient clipping
+            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+            
             optimizer.step()
             
             train_loss += loss.item() * batch_x.size(0)
@@ -206,7 +267,7 @@ def main():
                 eeg_std = eeg.std(dim=2, keepdim=True) + 1e-8
                 eeg_norm = (eeg - eeg_mean) / eeg_std
                 
-                # Normalize targets identically to training
+                # Normalize targets
                 audio_a_mean = audio_a.mean(dim=2, keepdim=True)
                 audio_a_std = audio_a.std(dim=2, keepdim=True) + 1e-8
                 audio_a_norm = (audio_a - audio_a_mean) / audio_a_std
@@ -290,8 +351,6 @@ def main():
         if val_plot_data:
             true_env, pred_env = val_plot_data
             bands_to_plot = [0, 4, 9, 19, 27]
-            
-            # Ensure we don't try to plot indices out of bounds if num_bands changed
             bands_to_plot = [b for b in bands_to_plot if b < true_env.shape[0]]
             
             plt.figure(figsize=(15, 10))
