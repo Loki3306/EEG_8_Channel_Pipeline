@@ -106,9 +106,9 @@ def main():
         print("No checkpoints found. Please run KUL LOSO training first.")
         return
         
-    ckpts = list(ckpt_dir.glob("matchnet_kul_fold_S*_best.pth"))
+    ckpts = list(ckpt_dir.glob("matchnet_kul_balanced_fold_S*_best.pth"))
     if not ckpts:
-        print("No KUL LOSO checkpoints found.")
+        print("No balanced KUL LOSO checkpoints found.")
         return
         
     # Just grab the first one (e.g., S1 or S16 depending on what finished)
