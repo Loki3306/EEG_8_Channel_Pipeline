@@ -11,7 +11,7 @@ sys.path.insert(0, str(REPO_ROOT))
 from data.kul_cached_dataset import KULCachedLoader
 from baselines.ridge_aad import TrialExample, lagged_eeg_matrix, feature_statistics, standardize_features
 from training.loso_ridge_runner import evaluate_trial_windows
-from evaluation.aad_metrics import TrialScore, summarize_trials
+from evaluation.aad_metrics import TrialScore, summarize_trials, safe_corr
 
 import matplotlib.pyplot as plt
 
@@ -19,6 +19,35 @@ FS = 64
 RIDGE_LAMBDA = 100.0
 LAGS = 32
 LAG_STEP_MS = 16
+
+def evaluate_trial_majority_vote(predicted: np.ndarray, wav_a: np.ndarray, wav_b: np.ndarray, window_seconds: int, fs: int = 64):
+    if window_seconds <= 0:
+        corr_a = safe_corr(predicted, wav_a)
+        corr_b = safe_corr(predicted, wav_b)
+        return corr_a > corr_b, 1, 1 if corr_a > corr_b else 0
+        
+    window_samples = window_seconds * fs
+    if window_samples >= predicted.size:
+        corr_a = safe_corr(predicted, wav_a)
+        corr_b = safe_corr(predicted, wav_b)
+        return corr_a > corr_b, 1, 1 if corr_a > corr_b else 0
+        
+    correct_windows = 0
+    total_windows = 0
+    
+    for start in range(0, predicted.size - window_samples + 1, window_samples):
+        stop = start + window_samples
+        corr_a = safe_corr(predicted[start:stop], wav_a[start:stop])
+        corr_b = safe_corr(predicted[start:stop], wav_b[start:stop])
+        if corr_a > corr_b:
+            correct_windows += 1
+        total_windows += 1
+        
+    if total_windows == 0:
+        return False, 0, 0
+        
+    trial_correct = (correct_windows > total_windows / 2.0)
+    return trial_correct, total_windows, correct_windows
 
 def run_ridge_loso_window(window_sec, all_subject_data):
     print(f"\n==================================================")
@@ -28,7 +57,6 @@ def run_ridge_loso_window(window_sec, all_subject_data):
     subject_paths = sorted(all_subject_data.keys())
     
     per_subject = []
-    all_scores = []
     
     # Pre-format KUL dicts into TrialExamples
     subject_examples = {}
@@ -48,6 +76,14 @@ def run_ridge_loso_window(window_sec, all_subject_data):
             )
             examples.append(ex)
         subject_examples[sub_id] = examples
+        
+    global_legacy_trials = 0
+    global_legacy_correct = 0
+    
+    global_mv_trials = 0
+    global_mv_correct = 0
+    global_mv_windows_total = 0
+    global_mv_windows_correct = 0
         
     for fold_index, held_out in enumerate(subject_paths, start=1):
         print(f"  Fold {fold_index}/{len(subject_paths)}: held out {held_out} | fitting ridge")
@@ -77,7 +113,6 @@ def run_ridge_loso_window(window_sec, all_subject_data):
             x = lagged_eeg_matrix(eeg, lags=LAGS, lag_ms=None, lag_step_ms=LAG_STEP_MS)
             x = standardize_features(x, feature_mean, feature_std)
             
-            # y is always wav_a because audio_a is attended in KUL Cache
             y = example.wav_a 
             
             train_xtx += x.T @ x
@@ -89,7 +124,11 @@ def run_ridge_loso_window(window_sec, all_subject_data):
         # 4. Evaluate Held-out
         test_examples = subject_examples[held_out]
         
-        scores = []
+        legacy_trial_correct = 0
+        mv_trial_correct = 0
+        mv_windows_correct = 0
+        mv_windows_total = 0
+        
         for example in test_examples:
             # Predict
             eeg = example.eeg
@@ -99,31 +138,47 @@ def run_ridge_loso_window(window_sec, all_subject_data):
             pred = pred - pred.mean()
             pred = pred / (pred.std() + 1e-12)
             
-            # Evaluate window corr
+            # Legacy Eval (Averaging Correlations)
             corr_a, corr_b = evaluate_trial_windows(pred, example.wav_a, example.wav_b, window_seconds=window_sec)
+            if corr_a > corr_b:
+                legacy_trial_correct += 1
+                
+            # Majority Vote Eval
+            trial_ok, n_win, c_win = evaluate_trial_majority_vote(pred, example.wav_a, example.wav_b, window_sec)
+            if trial_ok:
+                mv_trial_correct += 1
+            mv_windows_total += n_win
+            mv_windows_correct += c_win
             
-            true_stream = "A" # wav_a is always attended
-            predicted_stream = "A" if corr_a > corr_b else "B"
-            
-            scores.append(
-                TrialScore(
-                    trial_index=example.trial_index,
-                    corr_a=corr_a,
-                    corr_b=corr_b,
-                    true_stream=true_stream,
-                    predicted_stream=predicted_stream,
-                )
-            )
-            
-        fold_summary = summarize_trials(scores)
-        fold_summary["held_out_subject"] = held_out
-        per_subject.append(fold_summary)
-        all_scores.extend(scores)
+        total_trials = len(test_examples)
         
-        print(f"    Fold {held_out}: Trial Acc={fold_summary['trial_accuracy']*100:.2f}% | Win Acc={fold_summary['balanced_accuracy']*100:.2f}%")
+        legacy_acc = legacy_trial_correct / total_trials if total_trials > 0 else 0
+        mv_trial_acc = mv_trial_correct / total_trials if total_trials > 0 else 0
+        mv_win_acc = mv_windows_correct / mv_windows_total if mv_windows_total > 0 else 0
         
-    summary = summarize_trials(all_scores)
-    print(f"Done Window {window_sec}s | Trial Acc={summary['trial_accuracy']*100:.2f}% | Win Acc={summary['balanced_accuracy']*100:.2f}%")
+        per_subject.append({
+            "held_out_subject": held_out,
+            "legacy_trial_acc": legacy_acc,
+            "mv_trial_acc": mv_trial_acc,
+            "mv_win_acc": mv_win_acc,
+        })
+        
+        global_legacy_trials += total_trials
+        global_legacy_correct += legacy_trial_correct
+        global_mv_trials += total_trials
+        global_mv_correct += mv_trial_correct
+        global_mv_windows_total += mv_windows_total
+        global_mv_windows_correct += mv_windows_correct
+        
+        print(f"    Fold {held_out}: Legacy Trial={legacy_acc*100:.1f}% | MV Trial={mv_trial_acc*100:.1f}% | MV Win={mv_win_acc*100:.1f}%")
+        
+    summary = {
+        "legacy_trial_acc": global_legacy_correct / global_legacy_trials if global_legacy_trials > 0 else 0,
+        "mv_trial_acc": global_mv_correct / global_mv_trials if global_mv_trials > 0 else 0,
+        "mv_win_acc": global_mv_windows_correct / global_mv_windows_total if global_mv_windows_total > 0 else 0,
+    }
+    
+    print(f"Done Window {window_sec}s | Legacy Trial={summary['legacy_trial_acc']*100:.1f}% | MV Trial={summary['mv_trial_acc']*100:.1f}% | MV Win={summary['mv_win_acc']*100:.1f}%")
     return summary, per_subject
 
 def main():
@@ -148,67 +203,46 @@ def main():
         
         # Save fold-level results
         with open(out_dir / f"kul_ridge_window_{w}.csv", "w", newline="") as f:
-            writer = csv.DictWriter(f, fieldnames=["held_out_subject", "trial_accuracy", "balanced_accuracy"])
+            writer = csv.DictWriter(f, fieldnames=["held_out_subject", "legacy_trial_acc", "mv_trial_acc", "mv_win_acc"])
             writer.writeheader()
             for row in per_sub:
-                writer.writerow({
-                    "held_out_subject": row["held_out_subject"],
-                    "trial_accuracy": row["trial_accuracy"],
-                    "balanced_accuracy": row["balanced_accuracy"]
-                })
+                writer.writerow(row)
                 
     # Save overall summary
     summary_path = out_dir / "kul_ridge_summary.csv"
     with open(summary_path, "w", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=["Window", "Mean_Trial_Acc", "Mean_Window_Acc", "Std_Trial_Acc"])
+        writer = csv.DictWriter(f, fieldnames=["Window", "Legacy_Trial_Acc", "MV_Trial_Acc", "MV_Window_Acc"])
         writer.writeheader()
         
         for w in windows:
-            # Recompute Std from fold-level? 
-            # Or use global? Wait, DTU summary didn't have std, we will compute std from trial accuracy of folds.
             writer.writerow({
                 "Window": w,
-                "Mean_Trial_Acc": window_results[w]["trial_accuracy"],
-                "Mean_Window_Acc": window_results[w]["balanced_accuracy"],
-                "Std_Trial_Acc": 0.0 # Placeholder if needed, or we compute it if needed.
-            })
-            
-    # Compute true STD across folds
-    for w in windows:
-        with open(out_dir / f"kul_ridge_window_{w}.csv", "r") as f:
-            reader = csv.DictReader(f)
-            fold_accs = [float(r["trial_accuracy"]) for r in reader]
-        window_results[w]["std"] = np.std(fold_accs)
-        
-    # Re-write summary with true STD
-    with open(summary_path, "w", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=["Window", "Mean_Trial_Acc", "Mean_Window_Acc", "Std_Trial_Acc"])
-        writer.writeheader()
-        for w in windows:
-            writer.writerow({
-                "Window": w,
-                "Mean_Trial_Acc": window_results[w]["trial_accuracy"],
-                "Mean_Window_Acc": window_results[w]["balanced_accuracy"],
-                "Std_Trial_Acc": window_results[w]["std"]
+                "Legacy_Trial_Acc": window_results[w]["legacy_trial_acc"],
+                "MV_Trial_Acc": window_results[w]["mv_trial_acc"],
+                "MV_Window_Acc": window_results[w]["mv_win_acc"],
             })
             
     # Plot
-    plt.figure(figsize=(8, 6))
+    plt.figure(figsize=(10, 6))
     x = windows
-    y = [window_results[w]["trial_accuracy"] * 100 for w in windows]
-    e = [window_results[w]["std"] * 100 for w in windows]
+    y_legacy = [window_results[w]["legacy_trial_acc"] * 100 for w in windows]
+    y_mv = [window_results[w]["mv_trial_acc"] * 100 for w in windows]
+    y_win = [window_results[w]["mv_win_acc"] * 100 for w in windows]
     
-    plt.errorbar(x, y, yerr=e, fmt='-o', color='b', capsize=5, capthick=2, elinewidth=2, markersize=8)
+    plt.plot(x, y_legacy, '-o', label='Legacy Trial Acc (Correlation Avg)', linewidth=2)
+    plt.plot(x, y_mv, '-s', label='MV Trial Acc (Majority Vote)', linewidth=2)
+    plt.plot(x, y_win, '--^', label='MV Window Acc (Thresholded)', linewidth=2, color='gray')
+    
     plt.axhline(50, color='r', linestyle='--', label='Chance (50%)')
     plt.xlabel("Window Size (s)", fontsize=12)
-    plt.ylabel("Mean Trial Accuracy (%)", fontsize=12)
-    plt.title("KUL Classical Ridge AAD Baseline", fontsize=14)
+    plt.ylabel("Accuracy (%)", fontsize=12)
+    plt.title("KUL Classical Ridge AAD Baseline: Evaluation Protocols", fontsize=14)
     plt.grid(True, alpha=0.3)
     plt.legend()
     plt.ylim(30, 100)
     plt.tight_layout()
-    plt.savefig(out_dir / "kul_ridge_window_scaling.png", dpi=300)
-    print(f"\nSaved summary plot to {out_dir / 'kul_ridge_window_scaling.png'}")
+    plt.savefig(out_dir / "kul_ridge_evaluation_protocols.png", dpi=300)
+    print(f"\nSaved summary plot to {out_dir / 'kul_ridge_evaluation_protocols.png'}")
     
 if __name__ == "__main__":
     main()
