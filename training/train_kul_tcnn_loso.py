@@ -170,29 +170,71 @@ def main():
             if sub != held_out_subject and sub != val_subject:
                 train_data.extend(all_subject_data[sub])
                 
-        # Balancing classes
-        c1_data = [t for t in train_data if str(t["meta"].get("attended_track")) == '1']
-        c2_data = [t for t in train_data if str(t["meta"].get("attended_track")) == '2']
+        # Extract all chunks without trial-level balancing
+        all_train_x = []
+        all_train_y = []
+        for t in train_data:
+            meta = t["meta"]
+            attended_track = str(meta.get('attended_track', 'Unknown'))
+            if attended_track not in ['1', '2']:
+                continue
+            chunks_x, labels = chunk_data_classification(t["eeg"].numpy(), attended_track, DECISION_WINDOW_SEC, TRAIN_HOP_SEC)
+            all_train_x.extend(chunks_x)
+            all_train_y.extend(labels)
+            
+        all_train_x = np.array(all_train_x)
+        all_train_y = np.array(all_train_y)
         
-        if len(c1_data) == 0 or len(c2_data) == 0:
-            print(f"Skipping fold {held_out_subject} due to missing classes in training set.")
+        idx_c1 = np.where(all_train_y == 0)[0]
+        idx_c2 = np.where(all_train_y == 1)[0]
+        
+        print("\n========================================")
+        print("Window Distribution BEFORE balancing")
+        print(f"Track1 windows: {len(idx_c1)}")
+        print(f"Track2 windows: {len(idx_c2)}")
+        
+        min_windows = min(len(idx_c1), len(idx_c2))
+        if min_windows == 0:
+            print(f"Skipping fold {held_out_subject} due to missing classes.")
             continue
             
-        min_class = min(len(c1_data), len(c2_data))
-        np.random.shuffle(c1_data)
-        np.random.shuffle(c2_data)
-        balanced_train = c1_data[:min_class] + c2_data[:min_class]
+        # Randomly downsample
+        np.random.shuffle(idx_c1)
+        np.random.shuffle(idx_c2)
+        idx_c1_bal = idx_c1[:min_windows]
+        idx_c2_bal = idx_c2[:min_windows]
         
-        print(f"--- Balancing Training Data ---")
-        print(f"Class 1 Trials: {len(c1_data)} -> {min_class}")
-        print(f"Class 2 Trials: {len(c2_data)} -> {min_class}")
+        bal_idx = np.concatenate([idx_c1_bal, idx_c2_bal])
+        np.random.shuffle(bal_idx)
         
-        train_dataset = create_dataset(balanced_train, DECISION_WINDOW_SEC, TRAIN_HOP_SEC)
-        if train_dataset is None:
-            continue
-            
+        bal_train_x = all_train_x[bal_idx]
+        bal_train_y = all_train_y[bal_idx]
+        
+        print("\nWindow Distribution AFTER balancing")
+        print(f"Track1 windows: {len(idx_c1_bal)}")
+        print(f"Track2 windows: {len(idx_c2_bal)}")
+        print(f"\nFinal Training Windows: {len(bal_train_y)}")
+        print("========================================\n")
+        
+        tx = torch.FloatTensor(bal_train_x)
+        ty = torch.LongTensor(bal_train_y)
+        train_dataset = TensorDataset(tx, ty)
+        
         train_loader = DataLoader(train_dataset, batch_size=BATCH_SIZE, shuffle=True, drop_last=True)
-        print(f"Training on {len(train_dataset)} chunks | Validating on {val_subject} ({len(val_data)} trials)...")
+        
+        print(f"Printing first 5 training batches to verify balance:")
+        loader_iter = iter(train_loader)
+        for b_idx in range(5):
+            try:
+                _, b_y = next(loader_iter)
+                b_c1 = (b_y == 0).sum().item()
+                b_c2 = (b_y == 1).sum().item()
+                print(f"Batch {b_idx + 1}")
+                print(f"Track1 windows: {b_c1}")
+                print(f"Track2 windows: {b_c2}")
+            except StopIteration:
+                break
+        print(f"\nTraining on {len(train_dataset)} chunks | Validating on {val_subject} ({len(val_data)} trials)...")
         
         model = TCNN(in_channels=8, num_classes=2).to(device)
         optimizer = optim.Adam(model.parameters(), lr=LEARNING_RATE, weight_decay=1e-4)
