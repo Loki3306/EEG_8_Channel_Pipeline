@@ -173,6 +173,7 @@ def main():
         # Extract all chunks without trial-level balancing
         all_train_x = []
         all_train_y = []
+        all_train_meta = []
         for t in train_data:
             meta = t["meta"]
             attended_track = str(meta.get('attended_track', 'Unknown'))
@@ -181,6 +182,10 @@ def main():
             chunks_x, labels = chunk_data_classification(t["eeg"].numpy(), attended_track, DECISION_WINDOW_SEC, TRAIN_HOP_SEC)
             all_train_x.extend(chunks_x)
             all_train_y.extend(labels)
+            
+            sub = meta.get("Subject", "Unknown")
+            tid = meta.get("TrialID", "Unknown")
+            all_train_meta.extend([(sub, tid)] * len(labels))
             
         all_train_x = np.array(all_train_x)
         all_train_y = np.array(all_train_y)
@@ -198,22 +203,30 @@ def main():
             print(f"Skipping fold {held_out_subject} due to missing classes.")
             continue
             
-        # Randomly downsample
-        np.random.shuffle(idx_c1)
-        np.random.shuffle(idx_c2)
+        # Randomly downsample reproducibly
+        rng = np.random.default_rng(42)
+        rng.shuffle(idx_c1)
+        rng.shuffle(idx_c2)
         idx_c1_bal = idx_c1[:min_windows]
         idx_c2_bal = idx_c2[:min_windows]
         
         bal_idx = np.concatenate([idx_c1_bal, idx_c2_bal])
-        np.random.shuffle(bal_idx)
+        rng.shuffle(bal_idx)
         
         bal_train_x = all_train_x[bal_idx]
         bal_train_y = all_train_y[bal_idx]
+        bal_train_meta = [all_train_meta[i] for i in bal_idx]
+        
+        unique_subs = set(m[0] for m in bal_train_meta)
+        unique_trials = set(f"{m[0]}_{m[1]}" for m in bal_train_meta)
         
         print("\nWindow Distribution AFTER balancing")
         print(f"Track1 windows: {len(idx_c1_bal)}")
         print(f"Track2 windows: {len(idx_c2_bal)}")
         print(f"\nFinal Training Windows: {len(bal_train_y)}")
+        print(f"\nGenerated from")
+        print(f"{len(unique_trials)} unique trials")
+        print(f"{len(unique_subs)} subjects")
         print("========================================\n")
         
         tx = torch.FloatTensor(bal_train_x)
