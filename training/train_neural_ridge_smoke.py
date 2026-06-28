@@ -13,29 +13,29 @@ sys.path.insert(0, str(REPO_ROOT))
 
 from data.kul_cached_dataset import KULCachedLoader
 from models.neural_ridge_decoder import NeuralRidgeDecoder
-from training.loso_ridge_runner import evaluate_trial_windows
 from evaluation.aad_metrics import safe_corr
 
-def evaluate_trial_majority_vote(predicted: np.ndarray, wav_a: np.ndarray, wav_b: np.ndarray, window_seconds: int, fs: int = 64):
-    if window_seconds <= 0:
-        corr_a = safe_corr(predicted, wav_a)
-        corr_b = safe_corr(predicted, wav_b)
-        return corr_a > corr_b, 1, 1 if corr_a > corr_b else 0
-        
-    window_samples = window_seconds * fs
-    if window_samples >= predicted.size:
-        corr_a = safe_corr(predicted, wav_a)
-        corr_b = safe_corr(predicted, wav_b)
-        return corr_a > corr_b, 1, 1 if corr_a > corr_b else 0
+def evaluate_trial_majority_vote_28band(predicted: np.ndarray, wav_a: np.ndarray, wav_b: np.ndarray, window_seconds: int, hop_seconds: float = 1.0, fs: int = 64):
+    """
+    Evaluates correlation across all 28 bands over overlapping windows.
+    predicted, wav_a, wav_b: shape (28, Time)
+    """
+    win_samples = int(window_seconds * fs)
+    hop_samples = int(hop_seconds * fs)
+    
+    if win_samples >= predicted.shape[1]:
+        c_a = np.mean([safe_corr(predicted[i], wav_a[i]) for i in range(28)])
+        c_b = np.mean([safe_corr(predicted[i], wav_b[i]) for i in range(28)])
+        return c_a > c_b, 1, 1 if c_a > c_b else 0
         
     correct_windows = 0
     total_windows = 0
     
-    for start in range(0, predicted.size - window_samples + 1, window_samples):
-        stop = start + window_samples
-        corr_a = safe_corr(predicted[start:stop], wav_a[start:stop])
-        corr_b = safe_corr(predicted[start:stop], wav_b[start:stop])
-        if corr_a > corr_b:
+    for start in range(0, predicted.shape[1] - win_samples + 1, hop_samples):
+        stop = start + win_samples
+        c_a = np.mean([safe_corr(predicted[i, start:stop], wav_a[i, start:stop]) for i in range(28)])
+        c_b = np.mean([safe_corr(predicted[i, start:stop], wav_b[i, start:stop]) for i in range(28)])
+        if c_a > c_b:
             correct_windows += 1
         total_windows += 1
         
@@ -45,9 +45,10 @@ def evaluate_trial_majority_vote(predicted: np.ndarray, wav_a: np.ndarray, wav_b
     trial_correct = (correct_windows > total_windows / 2.0)
     return trial_correct, total_windows, correct_windows
 
-def prepare_data(subject_data, window_sec=2, fs=64):
+def prepare_data(subject_data, window_sec=10, hop_sec=10, fs=64):
     """Slices trials into fixed windows for mini-batch training."""
-    win_samples = window_sec * fs
+    win_samples = int(window_sec * fs)
+    hop_samples = int(hop_sec * fs)
     
     X, Y_a, Y_b = [], [], []
     for t in subject_data:
@@ -55,19 +56,29 @@ def prepare_data(subject_data, window_sec=2, fs=64):
         audio_a = t["audio_a"] # (28, Time)
         audio_b = t["audio_b"]
         
-        # Keep full trials for evaluation later, but slice for training
-        n_windows = eeg.shape[1] // win_samples
-        for i in range(n_windows):
-            start = i * win_samples
+        n_windows = (eeg.shape[1] - win_samples) // hop_samples + 1
+        for i in range(max(1, n_windows)):
+            start = i * hop_samples
             stop = start + win_samples
-            X.append(eeg[:, start:stop])
-            Y_a.append(audio_a[:, start:stop])
-            Y_b.append(audio_b[:, start:stop])
+            if stop > eeg.shape[1]:
+                break
+                
+            e = eeg[:, start:stop]
+            a = audio_a[:, start:stop]
+            b = audio_b[:, start:stop]
+            
+            # Normalize target (attended envelope) to mean 0, std 1 per band
+            a_mean = a.mean(dim=1, keepdim=True)
+            a_std = a.std(dim=1, keepdim=True) + 1e-8
+            a_norm = (a - a_mean) / a_std
+            
+            X.append(e)
+            Y_a.append(a_norm)
             
     if not X:
         return None
         
-    return torch.stack(X), torch.stack(Y_a), torch.stack(Y_b)
+    return torch.stack(X), torch.stack(Y_a)
 
 def main():
     print("Loading KUL Cache...")
@@ -81,7 +92,6 @@ def main():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Using device: {device}")
     
-    # Setup directories
     out_dir = REPO_ROOT / "results" / "neural_ridge_smoke"
     out_dir.mkdir(parents=True, exist_ok=True)
     
@@ -96,12 +106,12 @@ def main():
         if sub != test_subject:
             train_trials.extend(trials)
             
-    # Prepare chunked training data
-    train_tensors = prepare_data(train_trials, window_sec=2, fs=64)
+    # Prepare chunked training data (10s windows)
+    train_tensors = prepare_data(train_trials, window_sec=10, hop_sec=10, fs=64)
     if train_tensors is None:
         print("No training data.")
         return
-    X_train, Ya_train, Yb_train = train_tensors
+    X_train, Ya_train = train_tensors
     
     dataset = TensorDataset(X_train, Ya_train)
     dataloader = DataLoader(dataset, batch_size=64, shuffle=True)
@@ -156,35 +166,43 @@ def main():
                 audio_a = t["audio_a"].unsqueeze(0).to(device) # (1, 28, Time)
                 audio_b = t["audio_b"].unsqueeze(0).to(device)
                 
+                # Normalize targets identically to training
+                audio_a_mean = audio_a.mean(dim=2, keepdim=True)
+                audio_a_std = audio_a.std(dim=2, keepdim=True) + 1e-8
+                audio_a_norm = (audio_a - audio_a_mean) / audio_a_std
+                
+                audio_b_mean = audio_b.mean(dim=2, keepdim=True)
+                audio_b_std = audio_b.std(dim=2, keepdim=True) + 1e-8
+                audio_b_norm = (audio_b - audio_b_mean) / audio_b_std
+                
                 pred = model(eeg) # (1, 28, Time)
                 
-                # Validation MSE over full trial
-                mse = criterion(pred, audio_a).item()
+                mse = criterion(pred, audio_a_norm).item()
                 val_mse += mse
                 total_val_samples += 1
                 
-                # To match Ridge perfectly, average the 28 channels down to 1 envelope
-                pred_1d = pred.squeeze(0).mean(dim=0).cpu().numpy()
-                wav_a_1d = audio_a.squeeze(0).mean(dim=0).cpu().numpy()
-                wav_b_1d = audio_b.squeeze(0).mean(dim=0).cpu().numpy()
+                pred_np = pred.squeeze(0).cpu().numpy()
+                wav_a_np = audio_a_norm.squeeze(0).cpu().numpy()
+                wav_b_np = audio_b_norm.squeeze(0).cpu().numpy()
                 
-                # Compute full-trial correlations
-                c_att = safe_corr(pred_1d, wav_a_1d)
-                c_unatt = safe_corr(pred_1d, wav_b_1d)
+                # Compute full-trial mean correlations across 28 bands
+                c_att = np.mean([safe_corr(pred_np[i], wav_a_np[i]) for i in range(28)])
+                c_unatt = np.mean([safe_corr(pred_np[i], wav_b_np[i]) for i in range(28)])
                 
                 mean_corr_att += c_att
                 mean_corr_unatt += c_unatt
                 
-                # AAD Window Evaluation
-                trial_ok, n_win, c_win = evaluate_trial_majority_vote(pred_1d, wav_a_1d, wav_b_1d, window_seconds=2, fs=64)
+                # AAD Window Evaluation (10s windows, 1s hop)
+                trial_ok, n_win, c_win = evaluate_trial_majority_vote_28band(pred_np, wav_a_np, wav_b_np, window_seconds=10, hop_seconds=1.0, fs=64)
                 if trial_ok:
                     mv_trial_correct += 1
                 mv_windows_total += n_win
                 mv_windows_correct += c_win
                 
-                # Save plot data for the first trial (first few windows)
-                if len(val_plot_data) < 5 and n_win > 0:
-                    val_plot_data.append((wav_a_1d[:128], pred_1d[:128]))
+                # Save plot data for the first trial (first 10s)
+                if len(val_plot_data) == 0 and n_win > 0:
+                    vis_samples = 10 * 64
+                    val_plot_data = (wav_a_np[:, :vis_samples], pred_np[:, :vis_samples])
                     
         val_mse /= total_val_samples
         mean_corr_att /= total_val_samples
@@ -192,35 +210,47 @@ def main():
         
         trial_acc = mv_trial_correct / total_val_samples if total_val_samples > 0 else 0
         win_acc = mv_windows_correct / mv_windows_total if mv_windows_total > 0 else 0
+        margin = mean_corr_att - mean_corr_unatt
         
         print(f"Epoch {epoch}/{epochs}")
-        print(f"  Train MSE Loss: {train_loss:.6f}")
-        print(f"  Val MSE Loss:   {val_mse:.6f}")
-        print(f"  Mean Corr Att:  {mean_corr_att:.4f}")
-        print(f"  Mean Corr Unatt:{mean_corr_unatt:.4f}")
+        print(f"  Train Loss:     {train_loss:.6f}")
+        print(f"  Val Loss:       {val_mse:.6f}")
+        print(f"  Mean Corr(att): {mean_corr_att:.4f}")
+        print(f"  Mean Corr(unatt):{mean_corr_unatt:.4f}")
+        print(f"  Margin:         {margin:.4f}")
         print(f"  Window Acc:     {win_acc*100:.1f}%")
         print(f"  Trial Acc:      {trial_acc*100:.1f}%")
         print("-" * 50)
         
         # --- Visualization ---
-        plt.figure(figsize=(15, 8))
-        for i, (true_env, pred_env) in enumerate(val_plot_data):
-            plt.subplot(5, 1, i+1)
-            # Normalize for visualization comparison
-            true_env = (true_env - true_env.mean()) / (true_env.std() + 1e-8)
-            pred_env = (pred_env - pred_env.mean()) / (pred_env.std() + 1e-8)
+        if val_plot_data:
+            true_env, pred_env = val_plot_data
+            bands_to_plot = [0, 4, 9, 19, 27]
             
-            plt.plot(true_env, label="True Attended", alpha=0.7)
-            plt.plot(pred_env, label="Predicted", alpha=0.7)
-            if i == 0:
-                plt.title(f"Epoch {epoch}: True vs Predicted Envelope (First 2s)")
-            if i == 4:
-                plt.xlabel("Samples")
-            plt.legend(loc="upper right")
-            
-        plt.tight_layout()
-        plt.savefig(out_dir / f"reconstruction_epoch_{epoch}.png")
-        plt.close()
+            plt.figure(figsize=(15, 10))
+            for i, band_idx in enumerate(bands_to_plot):
+                plt.subplot(5, 1, i+1)
+                
+                # Since we already z-scored the targets and predictions (in theory), we can plot them directly
+                t_env = true_env[band_idx]
+                p_env = pred_env[band_idx]
+                
+                # Scale for overlay visualization just in case
+                t_env = (t_env - t_env.mean()) / (t_env.std() + 1e-8)
+                p_env = (p_env - p_env.mean()) / (p_env.std() + 1e-8)
+                
+                plt.plot(t_env, label=f"True Attended (Band {band_idx+1})", alpha=0.7)
+                plt.plot(p_env, label=f"Predicted (Band {band_idx+1})", alpha=0.7)
+                
+                if i == 0:
+                    plt.title(f"Epoch {epoch}: True vs Predicted Envelope (First 10s)")
+                if i == 4:
+                    plt.xlabel("Samples")
+                plt.legend(loc="upper right")
+                
+            plt.tight_layout()
+            plt.savefig(out_dir / f"reconstruction_epoch_{epoch}.png")
+            plt.close()
 
 if __name__ == "__main__":
     main()

@@ -22,30 +22,37 @@ class ResidualBlock1D(nn.Module):
         return out
 
 class NeuralRidgeDecoder(nn.Module):
-    def __init__(self, in_channels=8, hidden_channels=32, out_channels=28):
+    def __init__(self, in_channels=8, out_channels=28):
         super().__init__()
         
-        # Initial projection
         self.initial = nn.Sequential(
-            nn.Conv1d(in_channels, hidden_channels, kernel_size=5, padding=2),
-            nn.BatchNorm1d(hidden_channels),
+            nn.Conv1d(in_channels, 32, kernel_size=5, padding=2),
+            nn.BatchNorm1d(32),
             nn.ReLU()
         )
         
-        # Residual blocks
-        self.res1 = ResidualBlock1D(hidden_channels)
-        self.res2 = ResidualBlock1D(hidden_channels)
-        self.res3 = ResidualBlock1D(hidden_channels)
+        self.up = nn.Sequential(
+            nn.Conv1d(32, 64, kernel_size=3, padding=1),
+            nn.BatchNorm1d(64),
+            nn.ReLU()
+        )
         
-        # Output projection to match envelope dimensions
-        self.out = nn.Conv1d(hidden_channels, out_channels, kernel_size=1)
+        self.res1 = ResidualBlock1D(64)
+        self.res2 = ResidualBlock1D(64)
+        
+        self.down = nn.Sequential(
+            nn.Conv1d(64, 32, kernel_size=3, padding=1),
+            nn.BatchNorm1d(32),
+            nn.ReLU()
+        )
+        
+        self.out = nn.Conv1d(32, out_channels, kernel_size=1)
         
     def forward(self, x):
-        # x: (Batch, Channels, Time)
         out = self.initial(x)
+        out = self.up(out)
         out = self.res1(out)
         out = self.res2(out)
-        out = self.res3(out)
+        out = self.down(out)
         out = self.out(out)
-        # Output: (Batch, out_channels, Time). No activation (linear regression).
         return out
