@@ -292,9 +292,9 @@ def main():
                 break
         print(f"\nTraining on {len(train_dataset)} chunks | Validating on {val_subject} ({len(val_data)} trials)...")
         
-        model = KuruvilaCNNLSTM(eeg_channels=8, audio_channels=28, num_classes=2).to(device)
+        model = KuruvilaOriginalCNNLSTM(eeg_channels=8, audio_channels=28, num_spkr=2).to(device)
         optimizer = optim.Adam(model.parameters(), lr=LEARNING_RATE)
-        criterion = nn.CrossEntropyLoss()
+        criterion = nn.BCELoss()
         
         best_val_loss = float('inf')
         best_model_state = None
@@ -312,9 +312,11 @@ def main():
                 batch_a2 = batch_a2.to(device)
                 batch_y = batch_y.to(device)
                 
+                one_hot_y = F.one_hot(batch_y, num_classes=2).float()
+                
                 optimizer.zero_grad()
                 logits = model(batch_x, batch_a1, batch_a2)
-                loss = criterion(logits, batch_y)
+                loss = criterion(logits, one_hot_y)
                 loss.backward()
                 optimizer.step()
                 
