@@ -69,8 +69,8 @@ def evaluate_fold(model, eval_data, device, window_sec, fs, criterion=None):
     correct_wins = 0
     correct_trials = 0
     
-    pred_t1_count = 0
-    pred_t2_count = 0
+    conf_win = {'T1_P1': 0, 'T1_P2': 0, 'T2_P1': 0, 'T2_P2': 0}
+    conf_trial = {'T1_P1': 0, 'T1_P2': 0, 'T2_P1': 0, 'T2_P2': 0}
     
     win_samples = int(window_sec * fs)
     hop_samples = int(EVAL_HOP_SEC * fs)
@@ -125,8 +125,17 @@ def evaluate_fold(model, eval_data, device, window_sec, fs, criterion=None):
             
             c_t1 = (preds == 0).sum().item()
             c_t2 = (preds == 1).sum().item()
-            pred_t1_count += c_t1
-            pred_t2_count += c_t2
+            
+            # Window level confusion
+            for actual, pred in zip(cy, preds):
+                if actual == 0 and pred == 0:
+                    conf_win['T1_P1'] += 1
+                elif actual == 0 and pred == 1:
+                    conf_win['T1_P2'] += 1
+                elif actual == 1 and pred == 0:
+                    conf_win['T2_P1'] += 1
+                elif actual == 1 and pred == 1:
+                    conf_win['T2_P2'] += 1
             
             correct = (preds == cy).sum().item()
             correct_wins += correct
@@ -142,11 +151,21 @@ def evaluate_fold(model, eval_data, device, window_sec, fs, criterion=None):
             if trial_pred == label:
                 correct_trials += 1
                 
+            # Trial level confusion
+            if label == 0 and trial_pred == 0:
+                conf_trial['T1_P1'] += 1
+            elif label == 0 and trial_pred == 1:
+                conf_trial['T1_P2'] += 1
+            elif label == 1 and trial_pred == 0:
+                conf_trial['T2_P1'] += 1
+            elif label == 1 and trial_pred == 1:
+                conf_trial['T2_P2'] += 1
+                
     avg_loss = total_loss / total_batches if total_batches > 0 else 0
     win_acc = correct_wins / total_wins if total_wins > 0 else 0
     trial_acc = correct_trials / len(eval_data) if len(eval_data) > 0 else 0
     
-    return avg_loss, win_acc, trial_acc, pred_t1_count, pred_t2_count
+    return avg_loss, win_acc, trial_acc, conf_win, conf_trial
 
 def main():
     parser = argparse.ArgumentParser()
@@ -199,6 +218,22 @@ def main():
                     t["meta"]["Subject"] = sub
                 train_data.extend(all_subject_data[sub])
                 
+        def get_dist(data):
+            t1 = sum(1 for t in data if str(t["meta"].get('attended_track')) == '1')
+            t2 = sum(1 for t in data if str(t["meta"].get('attended_track')) == '2')
+            return t1, t2
+            
+        train_t1, train_t2 = get_dist(train_data)
+        val_t1, val_t2 = get_dist(val_data)
+        test_t1, test_t2 = get_dist(test_data)
+        
+        print("\n========================================")
+        print("Data Distribution Audit")
+        print(f"Training   (14 subs): {train_t1} Track1 trials, {train_t2} Track2 trials")
+        print(f"Validation ({val_subject}): {val_t1} Track1 trials, {val_t2} Track2 trials")
+        print(f"Testing    ({held_out_subject}): {test_t1} Track1 trials, {test_t2} Track2 trials")
+        print("========================================")
+        
         # Create balanced trial subsets
         train_trials_c1 = [i for i, t in enumerate(train_data) if str(t["meta"].get('attended_track', 'Unknown')) == '1']
         train_trials_c2 = [i for i, t in enumerate(train_data) if str(t["meta"].get('attended_track', 'Unknown')) == '2']
@@ -342,12 +377,15 @@ def main():
                 epoch_loss += loss.item()
                 
             train_loss = epoch_loss / len(train_loader)
-            val_loss, val_win_acc, val_trial_acc, _, _ = evaluate_fold(model, val_data, device, DECISION_WINDOW_SEC, FS, criterion)
+            val_loss, val_win_acc, val_trial_acc, val_cw, val_ct = evaluate_fold(model, val_data, device, DECISION_WINDOW_SEC, FS, criterion)
             
             train_losses.append(train_loss)
             val_losses.append(val_loss)
             
             print(f"  Epoch {epoch+1:02d} | Train Loss: {train_loss:.4f} | Val Loss: {val_loss:.4f} | Val Trial Acc: {val_trial_acc*100:.1f}%")
+            if epoch < 5:
+                print(f"    Val Win Conf : GT_T1->P1:{val_cw['T1_P1']} | GT_T1->P2:{val_cw['T1_P2']} | GT_T2->P1:{val_cw['T2_P1']} | GT_T2->P2:{val_cw['T2_P2']}")
+                print(f"    Val Trl Conf : GT_T1->P1:{val_ct['T1_P1']} | GT_T1->P2:{val_ct['T1_P2']} | GT_T2->P1:{val_ct['T2_P1']} | GT_T2->P2:{val_ct['T2_P2']}")
             
             if val_loss < best_val_loss:
                 best_val_loss = val_loss
@@ -373,21 +411,32 @@ def main():
         model.load_state_dict(best_model_state)
         torch.save(model.state_dict(), out_dir / f"best_model_{held_out_subject}.pt")
         
-        _, test_win_acc, test_trial_acc, p_t1, p_t2 = evaluate_fold(model, test_data, device, DECISION_WINDOW_SEC, FS)
+        _, test_win_acc, test_trial_acc, t_cw, t_ct = evaluate_fold(model, test_data, device, DECISION_WINDOW_SEC, FS)
         print(f"\n--> Fold Result ({held_out_subject}): Window Acc: {test_win_acc*100:.2f}% | Trial Acc: {test_trial_acc*100:.2f}%")
         
         print("\n--- Forensic Analysis on Held-out Subject ---")
-        print(f"Total Predicted Track 1 (Class 0): {p_t1}")
-        print(f"Total Predicted Track 2 (Class 1): {p_t2}")
-        if p_t1 == 0 or p_t2 == 0:
-            print("[WARNING] Model COLLAPSED into a single class prediction on the test set!")
+        print("Window-Level Confusion Matrix:")
+        print(f"  GT T1 -> Pred T1 (Correct) : {t_cw['T1_P1']}")
+        print(f"  GT T1 -> Pred T2 (Error)   : {t_cw['T1_P2']}")
+        print(f"  GT T2 -> Pred T1 (Error)   : {t_cw['T2_P1']}")
+        print(f"  GT T2 -> Pred T2 (Correct) : {t_cw['T2_P2']}")
+        print("\nTrial-Level Confusion Matrix:")
+        print(f"  GT T1 -> Pred T1 (Correct) : {t_ct['T1_P1']}")
+        print(f"  GT T1 -> Pred T2 (Error)   : {t_ct['T1_P2']}")
+        print(f"  GT T2 -> Pred T1 (Error)   : {t_ct['T2_P1']}")
+        print(f"  GT T2 -> Pred T2 (Correct) : {t_ct['T2_P2']}")
+        
+        pred_t1 = t_cw['T1_P1'] + t_cw['T2_P1']
+        pred_t2 = t_cw['T1_P2'] + t_cw['T2_P2']
+        if pred_t1 == 0 or pred_t2 == 0:
+            print("\n[WARNING] Model COLLAPSED into a single class prediction on the test set!")
             
         results.append({
             "held_out_subject": held_out_subject,
             "window_acc": test_win_acc,
             "trial_acc": test_trial_acc,
-            "pred_t1": p_t1,
-            "pred_t2": p_t2
+            "pred_t1": pred_t1,
+            "pred_t2": pred_t2
         })
         
         global_total_trials += len(test_data)
