@@ -26,26 +26,33 @@ LEARNING_RATE = 5e-4
 MAX_EPOCHS = 100
 PATIENCE = 10
 
-def chunk_data_kuruvila(eeg, audio_spk1, audio_spk2, label, window_sec, hop_sec, fs=FS):
-    win_samples = int(window_sec * fs)
-    hop_samples = int(hop_sec * fs)
-    
-    chunks_x = []
-    chunks_a1 = []
-    chunks_a2 = []
-    labels = []
-    
-    start = 0
-    # Shape of eeg: [Channels, Time]
-    while start + win_samples <= eeg.shape[1]:
-        end = start + win_samples
-        chunks_x.append(eeg[:, start:end])
-        chunks_a1.append(audio_spk1[:, start:end])
-        chunks_a2.append(audio_spk2[:, start:end])
-        labels.append(label)
-        start += hop_samples
+class LazyKULKuruvilaDataset(torch.utils.data.Dataset):
+    def __init__(self, chunks, trials, win_samples):
+        self.chunks = chunks
+        self.trials = trials
+        self.win_samples = win_samples
         
-    return chunks_x, chunks_a1, chunks_a2, labels
+    def __len__(self):
+        return len(self.chunks)
+        
+    def __getitem__(self, idx):
+        trial_idx, start, label = self.chunks[idx]
+        t = self.trials[trial_idx]
+        
+        attended_track = str(t["meta"].get('attended_track', 'Unknown'))
+        if attended_track == '1':
+            audio_spk1 = t["audio_a"]
+            audio_spk2 = t["audio_b"]
+        else:
+            audio_spk1 = t["audio_b"]
+            audio_spk2 = t["audio_a"]
+            
+        end = start + self.win_samples
+        cx = t["eeg"][:, start:end]
+        ca1 = audio_spk1[:, start:end]
+        ca2 = audio_spk2[:, start:end]
+        
+        return cx, ca1, ca2, label
 
 def evaluate_fold(model, eval_data, device, window_sec, fs, criterion=None):
     model.eval()
@@ -61,6 +68,9 @@ def evaluate_fold(model, eval_data, device, window_sec, fs, criterion=None):
     pred_t1_count = 0
     pred_t2_count = 0
     
+    win_samples = int(window_sec * fs)
+    hop_samples = int(EVAL_HOP_SEC * fs)
+    
     with torch.no_grad():
         for t in eval_data:
             meta = t["meta"]
@@ -70,24 +80,32 @@ def evaluate_fold(model, eval_data, device, window_sec, fs, criterion=None):
                 
             label = 0 if attended_track == '1' else 1
             
-            # REMAP: Input 1 must ALWAYS be Track 1 (Speaker 1). Input 2 must ALWAYS be Track 2 (Speaker 2).
-            # The cache stores audio_a as Attended and audio_b as Unattended.
             if attended_track == '1':
-                audio_spk1 = t["audio_a"].numpy()
-                audio_spk2 = t["audio_b"].numpy()
+                audio_spk1 = t["audio_a"].to(device)
+                audio_spk2 = t["audio_b"].to(device)
             else:
-                audio_spk1 = t["audio_b"].numpy()
-                audio_spk2 = t["audio_a"].numpy()
+                audio_spk1 = t["audio_b"].to(device)
+                audio_spk2 = t["audio_a"].to(device)
                 
-            cx, ca1, ca2, clabels = chunk_data_kuruvila(t["eeg"].numpy(), audio_spk1, audio_spk2, label, window_sec, EVAL_HOP_SEC, fs)
+            eeg = t["eeg"].to(device)
             
-            if not cx:
+            start = 0
+            cx_list, ca1_list, ca2_list, cy_list = [], [], [], []
+            while start + win_samples <= eeg.shape[1]:
+                end = start + win_samples
+                cx_list.append(eeg[:, start:end])
+                ca1_list.append(audio_spk1[:, start:end])
+                ca2_list.append(audio_spk2[:, start:end])
+                cy_list.append(label)
+                start += hop_samples
+                
+            if not cx_list:
                 continue
                 
-            cx = torch.FloatTensor(np.array(cx)).to(device)
-            ca1 = torch.FloatTensor(np.array(ca1)).to(device)
-            ca2 = torch.FloatTensor(np.array(ca2)).to(device)
-            cy = torch.LongTensor(np.array(clabels)).to(device)
+            cx = torch.stack(cx_list)
+            ca1 = torch.stack(ca1_list)
+            ca2 = torch.stack(ca2_list)
+            cy = torch.LongTensor(cy_list).to(device)
             
             logits = model(cx, ca1, ca2)
             
@@ -98,7 +116,6 @@ def evaluate_fold(model, eval_data, device, window_sec, fs, criterion=None):
                 
             preds = torch.argmax(logits, dim=1)
             
-            # Count window predictions
             c_t1 = (preds == 0).sum().item()
             c_t2 = (preds == 1).sum().item()
             pred_t1_count += c_t1
@@ -108,7 +125,6 @@ def evaluate_fold(model, eval_data, device, window_sec, fs, criterion=None):
             correct_wins += correct
             total_wins += len(preds)
             
-            # Majority vote for trial
             if c_t1 > c_t2:
                 trial_pred = 0
             elif c_t2 > c_t1:
@@ -149,6 +165,9 @@ def main():
     global_total_trials = 0
     global_correct_trials = 0
     
+    win_samples = int(DECISION_WINDOW_SEC * FS)
+    hop_samples = int(TRAIN_HOP_SEC * FS)
+    
     for held_out_idx, held_out_subject in enumerate(subject_ids):
         print(f"\n{'='*50}")
         print(f"Evaluating fold with held-out subject: {held_out_subject} ({held_out_idx+1}/{len(subject_ids)})")
@@ -165,91 +184,67 @@ def main():
                     t["meta"]["Subject"] = sub
                 train_data.extend(all_subject_data[sub])
                 
-        # Extract all chunks without trial-level balancing
-        all_train_x = []
-        all_train_a1 = []
-        all_train_a2 = []
-        all_train_y = []
-        all_train_meta = []
+        # Extract chunk metadata instead of full tensors (saves ~40GB of RAM)
+        all_train_chunks = [] # List of (trial_idx, start_sample, label)
+        all_train_meta = [] # List of (sub, tid) for tracking
         
-        for t in train_data:
+        for i, t in enumerate(train_data):
             meta = t["meta"]
             attended_track = str(meta.get('attended_track', 'Unknown'))
             if attended_track not in ['1', '2']:
                 continue
                 
             label = 0 if attended_track == '1' else 1
-            
-            # REMAP: Input 1 must ALWAYS be Track 1 (Speaker 1). Input 2 must ALWAYS be Track 2 (Speaker 2).
-            if attended_track == '1':
-                audio_spk1 = t["audio_a"].numpy()
-                audio_spk2 = t["audio_b"].numpy()
-            else:
-                audio_spk1 = t["audio_b"].numpy()
-                audio_spk2 = t["audio_a"].numpy()
-                
-            cx, ca1, ca2, clabels = chunk_data_kuruvila(t["eeg"].numpy(), audio_spk1, audio_spk2, label, DECISION_WINDOW_SEC, TRAIN_HOP_SEC, FS)
-            
-            all_train_x.extend(cx)
-            all_train_a1.extend(ca1)
-            all_train_a2.extend(ca2)
-            all_train_y.extend(clabels)
-            
             sub = meta.get("Subject", "Unknown")
             tid = meta.get("TrialID", "Unknown")
-            all_train_meta.extend([(sub, tid)] * len(clabels))
             
-        all_train_x = np.array(all_train_x)
-        all_train_a1 = np.array(all_train_a1)
-        all_train_a2 = np.array(all_train_a2)
-        all_train_y = np.array(all_train_y)
-        
-        idx_c1 = np.where(all_train_y == 0)[0]
-        idx_c2 = np.where(all_train_y == 1)[0]
+            eeg_len = t["eeg"].shape[1]
+            start = 0
+            while start + win_samples <= eeg_len:
+                all_train_chunks.append((i, start, label))
+                all_train_meta.append((sub, tid))
+                start += hop_samples
+                
+        # Balancing at the chunk metadata level
+        chunks_c1 = [i for i, c in enumerate(all_train_chunks) if c[2] == 0]
+        chunks_c2 = [i for i, c in enumerate(all_train_chunks) if c[2] == 1]
         
         print("\n========================================")
         print("Window Distribution BEFORE balancing")
-        print(f"Track1 windows: {len(idx_c1)}")
-        print(f"Track2 windows: {len(idx_c2)}")
+        print(f"Track1 windows: {len(chunks_c1)}")
+        print(f"Track2 windows: {len(chunks_c2)}")
         
-        min_windows = min(len(idx_c1), len(idx_c2))
+        min_windows = min(len(chunks_c1), len(chunks_c2))
         if min_windows == 0:
             print(f"Skipping fold {held_out_subject} due to missing classes.")
             continue
             
-        # Randomly downsample reproducibly
         rng = np.random.default_rng(42)
-        rng.shuffle(idx_c1)
-        rng.shuffle(idx_c2)
-        idx_c1_bal = idx_c1[:min_windows]
-        idx_c2_bal = idx_c2[:min_windows]
+        rng.shuffle(chunks_c1)
+        rng.shuffle(chunks_c2)
+        
+        idx_c1_bal = chunks_c1[:min_windows]
+        idx_c2_bal = chunks_c2[:min_windows]
         
         bal_idx = np.concatenate([idx_c1_bal, idx_c2_bal])
         rng.shuffle(bal_idx)
         
-        bal_train_x = all_train_x[bal_idx]
-        bal_train_a1 = all_train_a1[bal_idx]
-        bal_train_a2 = all_train_a2[bal_idx]
-        bal_train_y = all_train_y[bal_idx]
-        bal_train_meta = [all_train_meta[i] for i in bal_idx]
+        bal_chunks = [all_train_chunks[i] for i in bal_idx]
+        bal_meta = [all_train_meta[i] for i in bal_idx]
         
-        unique_subs = set(m[0] for m in bal_train_meta)
-        unique_trials = set(f"{m[0]}_{m[1]}" for m in bal_train_meta)
+        unique_subs = set(m[0] for m in bal_meta)
+        unique_trials = set(f"{m[0]}_{m[1]}" for m in bal_meta)
         
         print("\nWindow Distribution AFTER balancing")
         print(f"Track1 windows: {len(idx_c1_bal)}")
         print(f"Track2 windows: {len(idx_c2_bal)}")
-        print(f"\nFinal Training Windows: {len(bal_train_y)}")
+        print(f"\nFinal Training Windows: {len(bal_chunks)}")
         print(f"\nGenerated from")
         print(f"{len(unique_trials)} unique trials")
         print(f"{len(unique_subs)} subjects")
         print("========================================\n")
         
-        tx = torch.FloatTensor(bal_train_x)
-        ta1 = torch.FloatTensor(bal_train_a1)
-        ta2 = torch.FloatTensor(bal_train_a2)
-        ty = torch.LongTensor(bal_train_y)
-        train_dataset = TensorDataset(tx, ta1, ta2, ty)
+        train_dataset = LazyKULKuruvilaDataset(bal_chunks, train_data, win_samples)
         
         train_loader = DataLoader(train_dataset, batch_size=BATCH_SIZE, shuffle=True, drop_last=True)
         
