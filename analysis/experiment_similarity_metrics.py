@@ -7,6 +7,11 @@ from collections import defaultdict
 from sklearn.cross_decomposition import CCA
 from sklearn.metrics import mutual_info_score
 import time
+import warnings
+from sklearn.exceptions import ConvergenceWarning
+
+warnings.filterwarnings("ignore", category=ConvergenceWarning)
+warnings.filterwarnings("ignore", category=UserWarning)
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT))
