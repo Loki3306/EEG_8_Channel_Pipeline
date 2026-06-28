@@ -100,19 +100,24 @@ def main():
     print(f"Running Phase 1: EEG Ablation Experiments on {device}")
     
     # 1. We need a trained LOSO model. We assume the last fold (e.g. S16) completed.
-    # Let's find an available checkpoint.
-    ckpt_dir = REPO_ROOT / "checkpoints"
-    if not ckpt_dir.exists():
-        print("No checkpoints found. Please run KUL LOSO training first.")
-        return
-        
-    ckpts = list(ckpt_dir.glob("matchnet_kul_balanced_fold_S*_best.pth"))
-    if not ckpts:
-        print("No balanced KUL LOSO checkpoints found.")
-        return
-        
-    # Just grab the first one (e.g., S1 or S16 depending on what finished)
-    ckpt_path = ckpts[0]
+    if len(sys.argv) > 1:
+        ckpt_path = Path(sys.argv[1])
+        if not ckpt_path.exists():
+            print(f"Provided checkpoint not found: {ckpt_path}")
+            return
+    else:
+        ckpt_dir = REPO_ROOT / "checkpoints"
+        if not ckpt_dir.exists():
+            print("No checkpoints found. Please run KUL LOSO training first.")
+            return
+            
+        ckpts = list(ckpt_dir.glob("matchnet_kul_balanced_fold_S*_best.pth"))
+        if not ckpts:
+            print("No balanced KUL LOSO checkpoints found.")
+            return
+            
+        # Just grab the first one
+        ckpt_path = ckpts[0]
     
     m = re.search(r"fold_(S\d+)_best", ckpt_path.name)
     if not m:
