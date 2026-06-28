@@ -176,6 +176,7 @@ def evaluate_fold(model, test_data, device, window_sec=DECISION_WINDOW_SEC, fs=F
     
     total_trials = len(test_data)
     correct_trials = 0.0
+    total_trials_processed = 0
     
     with torch.no_grad():
         for x, ya, yb in test_data:
@@ -206,14 +207,24 @@ def evaluate_fold(model, test_data, device, window_sec=DECISION_WINDOW_SEC, fs=F
             if trial_sim_a:
                 mean_a = np.mean(trial_sim_a)
                 mean_b = np.mean(trial_sim_b)
+                
+                # DIAGNOSTICS: print each trial's similarities and prediction
+                pred = "CORRECT" if mean_a > mean_b else "WRONG" if mean_a < mean_b else "TIE"
+                print(f"    Trial {total_trials_processed+1:02d}: sim_a={mean_a:.4f}, sim_b={mean_b:.4f} -> {pred}")
+                
                 if mean_a > mean_b: correct_trials += 1.0
                 elif mean_a == mean_b: correct_trials += 0.5
+                total_trials_processed += 1
                 
     win_acc = correct_windows / max(total_windows, 1)
-    trial_acc = correct_trials / max(total_trials, 1)
+    trial_acc = correct_trials / max(total_trials_processed, 1)
     mean_margin = np.mean(margins) if margins else 0.0
     
-    return win_acc, trial_acc, mean_margin, total_trials
+    # DIAGNOSTICS: print summary for this fold
+    print(f"  [EVAL SUMMARY] Total Trials Evaluated: {total_trials_processed}")
+    print(f"  [EVAL SUMMARY] Correct: {correct_trials}, Accuracy: {trial_acc*100:.2f}%")
+    
+    return win_acc, trial_acc, mean_margin, total_trials_processed
 
 def train_matchnet_kul_loso():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
