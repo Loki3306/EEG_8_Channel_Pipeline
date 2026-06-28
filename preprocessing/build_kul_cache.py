@@ -178,7 +178,9 @@ def build_cache(dataset_dir=None, output_dir="data/processed_kul"):
                     "TrialID": getattr(t, "TrialID", i+1),
                     "experiment": getattr(t, "experiment", "Unknown"),
                     "attended_ear": att_ear,
-                    "attended_track": "1" if att_ear == 'L' else "2"
+                    "attended_track": "1" if att_ear == 'L' else "2",
+                    "stimuli_left": str(stimuli[0]).strip(),
+                    "stimuli_right": str(stimuli[1]).strip()
                 }
                 
                 # Convert to torch tensors to save loading time during training
