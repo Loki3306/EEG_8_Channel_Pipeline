@@ -83,7 +83,7 @@ def evaluate_ablation(model, test_data, device, mode="control"):
                 margin = mean_a - mean_b
                 
                 pred = "CORRECT" if mean_a > mean_b else "WRONG" if mean_a < mean_b else "TIE"
-                print(f"Trial {meta['TrialID']:02d} | Exp {meta['experiment']} | Track {meta['attended_track']} | Margin: {margin:+.4f} | Pred: {pred}")
+                print(f"Trial {meta['TrialID']:02d} | Exp {meta['experiment']} | Track {meta['attended_track']} | SimA: {mean_a:+.4f} | SimB: {mean_b:+.4f} | Margin: {margin:+.4f} | Pred: {pred}")
                 
                 if mean_a > mean_b: correct_trials += 1.0
                 elif mean_a == mean_b: correct_trials += 0.5
