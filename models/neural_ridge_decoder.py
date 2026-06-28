@@ -21,10 +21,11 @@ class MultiScaleConv1d(nn.Module):
         self.c4 = CausalConv1d(in_channels, out_channels - 3*c, kernel_size=31)
         self.bn = nn.BatchNorm1d(out_channels)
         self.relu = nn.ReLU()
+        self.dropout = nn.Dropout1d(0.1)
         
     def forward(self, x):
         out = torch.cat([self.c1(x), self.c2(x), self.c3(x), self.c4(x)], dim=1)
-        return self.relu(self.bn(out))
+        return self.dropout(self.relu(self.bn(out)))
 
 class DilatedResidualBlock(nn.Module):
     def __init__(self, channels, dilation):
@@ -34,12 +35,13 @@ class DilatedResidualBlock(nn.Module):
         self.relu = nn.ReLU()
         self.conv2 = CausalConv1d(channels, channels, kernel_size=3, dilation=dilation)
         self.bn2 = nn.BatchNorm1d(channels)
+        self.dropout = nn.Dropout1d(0.1)
         
     def forward(self, x):
         residual = x
-        out = self.relu(self.bn1(self.conv1(x)))
+        out = self.dropout(self.relu(self.bn1(self.conv1(x))))
         out = self.bn2(self.conv2(out))
-        return self.relu(out + residual)
+        return self.dropout(self.relu(out + residual))
 
 class ResidualNeuralRidgeDecoder(nn.Module):
     def __init__(self, in_channels=8, out_channels=28, lags=16):

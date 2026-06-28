@@ -253,6 +253,10 @@ def main():
         mv_windows_correct = 0
         mv_windows_total = 0
         
+        base_trial_correct = 0
+        base_windows_correct = 0
+        base_trial_margins = []
+        
         val_plot_data = [] # For visualization
         trial_margins = []
         
@@ -277,6 +281,7 @@ def main():
                 audio_b_norm = (audio_b - audio_b_mean) / audio_b_std
                 
                 pred = model(eeg_norm) # (1, 28, Time)
+                base_env = model.base_ridge(eeg_norm)
                 
                 # Eval Loss
                 loss_val = custom_loss(pred, audio_a_norm, mse_weight=0.5, corr_weight=0.5).item()
@@ -284,6 +289,7 @@ def main():
                 total_val_samples += 1
                 
                 pred_np = pred.squeeze(0).cpu().numpy()
+                base_np = base_env.squeeze(0).cpu().numpy()
                 wav_a_np = audio_a_norm.squeeze(0).cpu().numpy()
                 wav_b_np = audio_b_norm.squeeze(0).cpu().numpy()
                 
@@ -299,12 +305,23 @@ def main():
                 trial_margin = c_att - c_unatt
                 trial_margins.append(trial_margin)
                 
-                # AAD Window Evaluation (10s windows, 1s hop)
+                # Base Ridge metrics
+                c_att_base = np.mean([safe_corr_np(base_np[i], wav_a_np[i]) for i in range(num_bands)])
+                c_unatt_base = np.mean([safe_corr_np(base_np[i], wav_b_np[i]) for i in range(num_bands)])
+                base_trial_margins.append(c_att_base - c_unatt_base)
+                
+                # AAD Window Evaluation for Neural Model (10s windows, 1s hop)
                 trial_ok, n_win, c_win = evaluate_trial_majority_vote_multiband(pred_np, wav_a_np, wav_b_np, window_seconds=10, hop_seconds=1.0, fs=64)
                 if trial_ok:
                     mv_trial_correct += 1
                 mv_windows_total += n_win
                 mv_windows_correct += c_win
+                
+                # AAD Window Evaluation for Base Ridge
+                trial_ok_base, _, c_win_base = evaluate_trial_majority_vote_multiband(base_np, wav_a_np, wav_b_np, window_seconds=10, hop_seconds=1.0, fs=64)
+                if trial_ok_base:
+                    base_trial_correct += 1
+                base_windows_correct += c_win_base
                 
                 # Save plot data for the first trial
                 if len(val_plot_data) == 0 and n_win > 0:
@@ -319,6 +336,10 @@ def main():
         win_acc = mv_windows_correct / mv_windows_total if mv_windows_total > 0 else 0
         epoch_margin = mean_corr_att - mean_corr_unatt
         
+        base_trial_acc = base_trial_correct / total_val_samples if total_val_samples > 0 else 0
+        base_win_acc = base_windows_correct / mv_windows_total if mv_windows_total > 0 else 0
+        base_median_margin = np.median(base_trial_margins)
+        
         print(f"Epoch {epoch}/{epochs}")
         print(f"  Train Loss:       {train_loss:.6f}")
         print(f"  Val Loss:         {val_loss:.6f}")
@@ -326,7 +347,17 @@ def main():
         print(f"  Mean Corr(unatt): {mean_corr_unatt:.4f}")
         print(f"  Overall Margin:   {epoch_margin:.4f}")
         
-        print(f"\n  [Trial Margins]")
+        print(f"\n  [Model A: Base Ridge]")
+        print(f"    Trial Acc:  {base_trial_acc*100:.1f}%")
+        print(f"    Window Acc: {base_win_acc*100:.1f}%")
+        print(f"    Med Margin: {base_median_margin:.4f}")
+        
+        print(f"\n  [Model C: Ridge + Neural]")
+        print(f"    Trial Acc:  {trial_acc*100:.1f}%")
+        print(f"    Window Acc: {win_acc*100:.1f}%")
+        print(f"    Med Margin: {np.median(trial_margins):.4f}")
+        
+        print(f"\n  [Trial Margins (Neural)]")
         for i, m in enumerate(trial_margins):
             print(f"    Trial {i+1:02d}: {m:.4f}")
             
