@@ -168,6 +168,8 @@ def main():
         
         for sub in subject_ids:
             if sub != held_out_subject and sub != val_subject:
+                for t in all_subject_data[sub]:
+                    t["meta"]["Subject"] = sub
                 train_data.extend(all_subject_data[sub])
                 
         # Extract all chunks without trial-level balancing
