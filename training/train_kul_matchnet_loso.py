@@ -163,10 +163,6 @@ def chunk_data(x, ya, yb, window_sec, hop_sec, fs=FS):
     return chunks_x, chunks_ya, chunks_yb
 
 def evaluate_fold(model, test_data, device, window_sec=DECISION_WINDOW_SEC, fs=FS):
-    """
-    Evaluates a single subject (list of trials).
-    Returns Window Accuracy, Trial Accuracy, Mean Margin, and Number of Trials.
-    """
     model.eval()
     win_samples = int(window_sec * fs)
     
@@ -179,7 +175,12 @@ def evaluate_fold(model, test_data, device, window_sec=DECISION_WINDOW_SEC, fs=F
     total_trials_processed = 0
     
     with torch.no_grad():
-        for x, ya, yb, meta in test_data:
+        for t in test_data:
+            x = t["eeg"].numpy()
+            ya = t["audio_a"].numpy()
+            yb = t["audio_b"].numpy()
+            meta = t["meta"]
+            
             start = 0
             trial_sim_a = []
             trial_sim_b = []
@@ -220,7 +221,6 @@ def evaluate_fold(model, test_data, device, window_sec=DECISION_WINDOW_SEC, fs=F
     trial_acc = correct_trials / max(total_trials_processed, 1)
     mean_margin = np.mean(margins) if margins else 0.0
     
-    # DIAGNOSTICS: print summary for this fold
     print(f"  [EVAL SUMMARY] Total Trials Evaluated: {total_trials_processed}")
     print(f"  [EVAL SUMMARY] Correct: {correct_trials}, Accuracy: {trial_acc*100:.2f}%")
     
@@ -230,85 +230,43 @@ def train_matchnet_kul_loso():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Starting KUL LOSO Pipeline on {device}...")
     
-    subject_paths = get_kul_subject_files()
-    if not subject_paths:
+    os.makedirs(REPO_ROOT / "checkpoints", exist_ok=True)
+    
+    from data.kul_cached_dataset import KULCachedLoader
+    
+    loader = KULCachedLoader(REPO_ROOT / "data" / "processed_kul")
+    try:
+        all_subject_data = loader.load_all()
+    except FileNotFoundError as e:
+        print(f"Error: {e}")
+        print("Please run `python preprocessing/build_kul_cache.py` first!")
         return
         
-    print(f"Found {len(subject_paths)} subjects. Reading and preprocessing all data into RAM...")
-    
-    computed_envelope_cache = {}
-    
-    all_subject_data = {}
-    for p in subject_paths:
-        m = re.search(r"S(\d+)", p.name, re.IGNORECASE)
-        sub_id = f"S{m.group(1)}"
-        trials = load_kul_trials(str(p))
-        
-        valid_trials = []
-        discard_reasons = {}
-        
-        print(f"\nProcessing Subject {sub_id} ({len(trials)} trials)...")
-        for i, t in enumerate(trials):
-            sys.stdout.write(f"\r  Trial {i+1}/{len(trials)}")
-            sys.stdout.flush()
-            
-            x, ya, yb, reason = preprocess_trial(t, computed_envelope_cache, apply_car=True)
-            if x is not None:
-                meta = {
-                    "TrialID": getattr(t, "TrialID", i+1),
-                    "experiment": getattr(t, "experiment", "Unknown"),
-                    "attended_track": getattr(t, "attended_track", "Unknown")
-                }
-                valid_trials.append((x, ya, yb, meta))
-            else:
-                discard_reasons[reason] = discard_reasons.get(reason, 0) + 1
-        print() # newline after trial progress
-                
-        all_subject_data[sub_id] = valid_trials
-        
-        print(f"Total trials in MAT file:      {len(trials)}")
-        print(f"Trials after preprocessing:    {len(valid_trials)}")
-        print(f"Trials discarded:              {len(trials) - len(valid_trials)}")
-        if discard_reasons:
-            print("\nReasons:")
-            for reason, count in discard_reasons.items():
-                print(f"  {reason}: {count}")
-        print("-" * 40)
-        
-    os.makedirs(REPO_ROOT / "checkpoints", exist_ok=True)
+    subject_paths = list(all_subject_data.keys())
     
     results = {}
     
-    for held_out_idx, held_out_path in enumerate(subject_paths):
-        m = re.search(r"S(\d+)", held_out_path.name, re.IGNORECASE)
-        held_out_id = f"S{m.group(1)}"
-        
+    for held_out_idx, held_out_id in enumerate(sorted(subject_paths)):
         print(f"\n==================================================")
         print(f"Evaluating fold with held-out subject: {held_out_id}")
         print(f"==================================================")
         
-        # Build Train and Val sets
-        train_data_full = []
-        for p in subject_paths:
-            m2 = re.search(r"S(\d+)", p.name, re.IGNORECASE)
-            sub_id = f"S{m2.group(1)}"
-            if sub_id != held_out_id:
-                train_data_full.extend(all_subject_data[sub_id])
-                
         test_data = all_subject_data[held_out_id]
         
-        # 10% Validation split from the training pool (trial level)
+        train_data_full = []
+        for other_id in sorted(subject_paths):
+            if other_id != held_out_id:
+                train_data_full.extend(all_subject_data[other_id])
+                
         np.random.seed(42)
         np.random.shuffle(train_data_full)
-        val_split = int(0.1 * len(train_data_full))
-        
+        val_split = int(len(train_data_full) * 0.1)
         val_data = train_data_full[:val_split]
         train_data = train_data_full[val_split:]
         
-        # Chunk training data
         tr_x, tr_ya, tr_yb = [], [], []
-        for x, ya, yb, _ in train_data:
-            cx, cya, cyb = chunk_data(x, ya, yb, TRAIN_WINDOW_SEC, TRAIN_HOP_SEC)
+        for t in train_data:
+            cx, cya, cyb = chunk_data(t["eeg"].numpy(), t["audio_a"].numpy(), t["audio_b"].numpy(), TRAIN_WINDOW_SEC, TRAIN_HOP_SEC)
             tr_x.extend(cx); tr_ya.extend(cya); tr_yb.extend(cyb)
             
         print(f"Training on {len(tr_x)} chunks | Validating on {len(val_data)} full trials...")
