@@ -174,6 +174,8 @@ def build_cache(dataset_dir=None, output_dir="data/processed_kul"):
             
             x, ya, yb, reason = preprocess_trial(t, computed_envelope_cache, apply_car=True)
             if x is not None:
+                att_ear = t.attended_ear
+                stimuli = t.stimuli
                 meta = {
                     "TrialID": getattr(t, "TrialID", i+1),
                     "experiment": getattr(t, "experiment", "Unknown"),
