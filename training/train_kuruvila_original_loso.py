@@ -327,7 +327,8 @@ def main():
                 
                 with torch.cuda.amp.autocast():
                     logits = model(batch_x, batch_a1, batch_a2)
-                    loss = criterion(logits, one_hot_y)
+                    
+                loss = criterion(logits.float(), one_hot_y)
                     
                 scaler.scale(loss).backward()
                 
