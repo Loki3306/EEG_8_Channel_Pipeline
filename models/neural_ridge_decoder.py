@@ -74,6 +74,7 @@ class ResidualNeuralRidgeDecoder(nn.Module):
         )
         
         self.out = CausalConv1d(32, out_channels, kernel_size=1, bias=True)
+        self.alpha = nn.Parameter(torch.tensor(0.05))
         
     def forward(self, x):
         # x: (Batch, 8, Time)
@@ -86,9 +87,9 @@ class ResidualNeuralRidgeDecoder(nn.Module):
         out = self.res3(out)
         out = self.res4(out)
         out = self.down(out)
-        delta_env = self.out(out)
+        delta_env = self.alpha * self.out(out)
         
-        return base_env + delta_env
+        return base_env, delta_env
 
     def load_ridge_weights(self, weights_matrix, bias_vector=None):
         """

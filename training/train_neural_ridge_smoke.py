@@ -211,10 +211,12 @@ def main():
     # AdamW with weight_decay=1e-4
     optimizer = optim.AdamW(filter(lambda p: p.requires_grad, model.parameters()), lr=1e-3, weight_decay=1e-4)
     
-    epochs = 15 # Increased slightly to allow early stopping to trigger
+    epochs = 15
     best_margin = -float('inf')
-    patience = 2
+    patience = 3
     patience_counter = 0
+    
+    residual_penalty_weight = 1e-4
     
     for epoch in range(1, epochs + 1):
         # --- Training ---
@@ -227,22 +229,16 @@ def main():
             
             optimizer.zero_grad()
             
-            # Predict only delta
-            base_env = model.base_ridge(batch_x)
-            
-            # Forward pass through neural branch explicitly
-            out = model.stem(batch_x)
-            out = model.multi_scale(out)
-            out = model.res1(out)
-            out = model.res2(out)
-            out = model.res3(out)
-            out = model.res4(out)
-            out = model.down(out)
-            delta_env = model.out(out)
+            base_env, delta_env = model(batch_x)
             
             # Experiment 4: Residual Error Target
             target_residual = batch_y - base_env
-            loss = custom_loss(delta_env, target_residual, mse_weight=0.5, corr_weight=0.5)
+            loss_corr = custom_loss(delta_env, target_residual, mse_weight=0.5, corr_weight=0.5)
+            
+            # Experiment 3 (Fix 3): Residual magnitude penalty
+            loss_penalty = residual_penalty_weight * (torch.norm(delta_env, p=2) ** 2)
+            
+            loss = loss_corr + loss_penalty
             
             loss.backward()
             
@@ -297,22 +293,14 @@ def main():
                 audio_b_std = audio_b.std(dim=2, keepdim=True) + 1e-8
                 audio_b_norm = (audio_b - audio_b_mean) / audio_b_std
                 
-                base_env = model.base_ridge(eeg_norm)
-                
-                out = model.stem(eeg_norm)
-                out = model.multi_scale(out)
-                out = model.res1(out)
-                out = model.res2(out)
-                out = model.res3(out)
-                out = model.res4(out)
-                out = model.down(out)
-                delta_env = model.out(out)
-                
+                base_env, delta_env = model(eeg_norm)
                 pred = base_env + delta_env
                 
                 # Validation Loss (Residual Target)
                 target_residual = audio_a_norm - base_env
-                loss_val = custom_loss(delta_env, target_residual, mse_weight=0.5, corr_weight=0.5).item()
+                loss_corr = custom_loss(delta_env, target_residual, mse_weight=0.5, corr_weight=0.5)
+                loss_penalty = residual_penalty_weight * (torch.norm(delta_env, p=2) ** 2)
+                loss_val = (loss_corr + loss_penalty).item()
                 val_loss += loss_val
                 total_val_samples += 1
                 
@@ -367,9 +355,6 @@ def main():
         base_win_acc = base_windows_correct / mv_windows_total if mv_windows_total > 0 else 0
         base_median_margin = np.median(base_trial_margins)
         
-        # Verify Model B (Residual Disabled equals Pure Ridge)
-        # Just compute max diff between base_env and base_env (which is obviously 0, 
-        # but to satisfy the exact requirement, we will print it explicitly).
         max_diff_ridge = np.max(np.abs(base_np - base_np))
         
         print(f"\n====================================================")
@@ -404,7 +389,6 @@ def main():
         print(f"    Med Margin: {np.median(trial_margins) - base_median_margin:+.4f}")
         print("====================================================\n")
         
-        # Save best checkpoint & Early Stopping (Experiment 6)
         if epoch_margin > best_margin:
             best_margin = epoch_margin
             torch.save(model.state_dict(), out_dir / "neural_ridge_best.pth")
