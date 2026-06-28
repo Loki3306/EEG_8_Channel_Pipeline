@@ -20,7 +20,7 @@ def get_mat_path(subject_id):
     ]
     for d in base_dirs:
         if d.exists():
-            files = list(d.rglob(f"{subject_id}.mat"))
+            files = list(d.rglob(f"{subject_id}*.mat"))
             if files:
                 return files[0]
     return None
