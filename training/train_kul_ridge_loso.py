@@ -37,12 +37,13 @@ def run_ridge_loso_window(window_sec, all_subject_data):
         for t in all_subject_data[sub_id]:
             # Audio A is ALWAYS the attended track in our KUL Cache.
             # DTU ridge expects EEG as (Time, Channels), but KUL cache is (Channels, Time).
+            # KUL audio is Gammatone (28, Time), Ridge needs a single envelope (Time,).
             ex = TrialExample(
                 subject=sub_id,
                 trial_index=t["meta"].get("TrialID", 0),
                 eeg=t["eeg"].numpy().T,
-                wav_a=t["audio_a"].numpy().ravel(),
-                wav_b=t["audio_b"].numpy().ravel(),
+                wav_a=t["audio_a"].numpy().mean(axis=0),
+                wav_b=t["audio_b"].numpy().mean(axis=0),
                 label=1  # We use label=1 because wav_a is always the target.
             )
             examples.append(ex)
