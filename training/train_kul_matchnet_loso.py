@@ -179,7 +179,7 @@ def evaluate_fold(model, test_data, device, window_sec=DECISION_WINDOW_SEC, fs=F
     total_trials_processed = 0
     
     with torch.no_grad():
-        for x, ya, yb in test_data:
+        for x, ya, yb, meta in test_data:
             start = 0
             trial_sim_a = []
             trial_sim_b = []
@@ -207,10 +207,10 @@ def evaluate_fold(model, test_data, device, window_sec=DECISION_WINDOW_SEC, fs=F
             if trial_sim_a:
                 mean_a = np.mean(trial_sim_a)
                 mean_b = np.mean(trial_sim_b)
+                margin = mean_a - mean_b
                 
-                # DIAGNOSTICS: print each trial's similarities and prediction
                 pred = "CORRECT" if mean_a > mean_b else "WRONG" if mean_a < mean_b else "TIE"
-                print(f"    Trial {total_trials_processed+1:02d}: sim_a={mean_a:.4f}, sim_b={mean_b:.4f} -> {pred}")
+                print(f"    Trial {meta['TrialID']:02d} | Exp: {meta['experiment']} | Track Attended: {meta['attended_track']} | Pred: {pred} | Margin: {margin:.4f}")
                 
                 if mean_a > mean_b: correct_trials += 1.0
                 elif mean_a == mean_b: correct_trials += 0.5
@@ -254,7 +254,12 @@ def train_matchnet_kul_loso():
             
             x, ya, yb, reason = preprocess_trial(t, computed_envelope_cache, apply_car=True)
             if x is not None:
-                valid_trials.append((x, ya, yb))
+                meta = {
+                    "TrialID": getattr(t, "TrialID", i+1),
+                    "experiment": getattr(t, "experiment", "Unknown"),
+                    "attended_track": getattr(t, "attended_track", "Unknown")
+                }
+                valid_trials.append((x, ya, yb, meta))
             else:
                 discard_reasons[reason] = discard_reasons.get(reason, 0) + 1
         print() # newline after trial progress
@@ -302,7 +307,7 @@ def train_matchnet_kul_loso():
         
         # Chunk training data
         tr_x, tr_ya, tr_yb = [], [], []
-        for x, ya, yb in train_data:
+        for x, ya, yb, _ in train_data:
             cx, cya, cyb = chunk_data(x, ya, yb, TRAIN_WINDOW_SEC, TRAIN_HOP_SEC)
             tr_x.extend(cx); tr_ya.extend(cya); tr_yb.extend(cyb)
             
