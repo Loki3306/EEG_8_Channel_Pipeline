@@ -20,14 +20,9 @@ FS = 64
 def evaluate_ablation(model, test_data, device, mode="control"):
     """
     Evaluates trials under different EEG ablation conditions.
-    Modes:
-      - 'control': Normal evaluation
-      - 'zero': eeg is replaced by zeros
-      - 'random': eeg is replaced by random noise
-      - 'shuffle': eeg is swapped with a randomly chosen trial
-    """
+def evaluate_ablation(model, test_data, device, mode="control", window_sec=DECISION_WINDOW_SEC, fs=FS):
     model.eval()
-    win_samples = int(DECISION_WINDOW_SEC * FS)
+    win_samples = int(window_sec * fs)
     
     total_trials = len(test_data)
     correct_trials = 0.0
@@ -37,7 +32,11 @@ def evaluate_ablation(model, test_data, device, mode="control"):
     print(f"==================================================")
     
     with torch.no_grad():
-        for i, (x, ya, yb, meta) in enumerate(test_data):
+        for i, t in enumerate(test_data):
+            x = t["eeg"].numpy()
+            ya = t["audio_a"].numpy()
+            yb = t["audio_b"].numpy()
+            meta = t["meta"]
             
             # Apply ablation to EEG (x)
             x_test = x.copy()
@@ -51,7 +50,7 @@ def evaluate_ablation(model, test_data, device, mode="control"):
             elif mode == "shuffle":
                 # Pick a random other trial for EEG
                 rand_idx = np.random.randint(0, len(test_data))
-                x_other, _, _, _ = test_data[rand_idx]
+                x_other = test_data[rand_idx]["eeg"].numpy()
                 
                 # We need to make sure the lengths match. We truncate to the min length
                 min_len = min(x_other.shape[1], x.shape[1])
@@ -83,7 +82,7 @@ def evaluate_ablation(model, test_data, device, mode="control"):
                 margin = mean_a - mean_b
                 
                 pred = "CORRECT" if mean_a > mean_b else "WRONG" if mean_a < mean_b else "TIE"
-                print(f"Trial {meta['TrialID']:02d} | Exp {meta['experiment']} | Track {meta['attended_track']} | SimA: {mean_a:+.4f} | SimB: {mean_b:+.4f} | Margin: {margin:+.4f} | Pred: {pred}")
+                print(f"Trial {meta.get('TrialID', i+1):02d} | Exp {meta.get('experiment', 'Unknown')} | Track {meta.get('attended_track', 'Unknown')} | Margin: {margin:+.4f} | Pred: {pred}")
                 
                 if mean_a > mean_b: correct_trials += 1.0
                 elif mean_a == mean_b: correct_trials += 0.5
@@ -99,7 +98,7 @@ def main():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Running Phase 1: EEG Ablation Experiments on {device}")
     
-    # 1. We need a trained LOSO model. We assume the last fold (e.g. S16) completed.
+    # 1. We need a trained LOSO model.
     if len(sys.argv) > 1:
         ckpt_path = Path(sys.argv[1])
         if not ckpt_path.exists():
@@ -111,9 +110,9 @@ def main():
             print("No checkpoints found. Please run KUL LOSO training first.")
             return
             
-        ckpts = list(ckpt_dir.glob("matchnet_kul_balanced_fold_S*_best.pth"))
+        ckpts = list(ckpt_dir.glob("matchnet_kul_fold_S*_best.pth"))
         if not ckpts:
-            print("No balanced KUL LOSO checkpoints found.")
+            print("No KUL LOSO checkpoints found.")
             return
             
         # Just grab the first one
@@ -132,34 +131,20 @@ def main():
     model.load_state_dict(torch.load(ckpt_path, map_location=device))
     model.eval()
     
-    # 3. Load the data for this specific held-out subject
-    subject_paths = get_kul_subject_files()
-    target_path = None
-    for p in subject_paths:
-        if f"S{re.search(r'S(\d+)', p.name, re.IGNORECASE).group(1)}" == held_out_id:
-            target_path = p
-            break
-            
-    if not target_path:
-        print(f"Could not find data for {held_out_id}")
+    # 3. Load the cached data for this specific held-out subject
+    from data.kul_cached_dataset import KULCachedLoader
+    loader = KULCachedLoader(REPO_ROOT / "data" / "processed_kul")
+    try:
+        all_subject_data = loader.load_all()
+    except FileNotFoundError:
+        print("Could not find cached KUL dataset. Run preprocessing/build_kul_cache.py first.")
         return
         
-    print(f"Loading data from {target_path}...")
-    trials = load_kul_trials(str(target_path))
-    
-    computed_envelope_cache = {}
-    test_data = []
-    
-    for i, t in enumerate(trials):
-        x, ya, yb, _ = preprocess_trial(t, computed_envelope_cache, apply_car=True)
-        if x is not None:
-            meta = {
-                "TrialID": getattr(t, "TrialID", i+1),
-                "experiment": getattr(t, "experiment", "Unknown"),
-                "attended_track": getattr(t, "attended_track", "Unknown")
-            }
-            test_data.append((x, ya, yb, meta))
-            
+    if held_out_id not in all_subject_data:
+        print(f"Could not find data for {held_out_id} in cache.")
+        return
+        
+    test_data = all_subject_data[held_out_id]
     print(f"Loaded {len(test_data)} valid trials for {held_out_id}.")
     
     # 4. Run Ablations
