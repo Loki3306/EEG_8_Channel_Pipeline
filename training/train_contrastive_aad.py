@@ -60,14 +60,15 @@ class ContrastiveDataset(Dataset):
 def evaluate_ablated_probes(model, all_subject_data, test_sub, device, window_sec=10.0, hop_sec=1.0, fs=64):
     """
     Trains and evaluates multiple linear probes to measure where information originates.
-    Returns dictionary with metrics for EEG, Audio, and Joint representations.
+    Note: EEG-only probe was removed as it is mathematically invalid for this task 
+    (there is no audio-independent 'attended' label for the EEG itself).
+    Returns dictionary with metrics for Audio-Only and Joint representations.
     """
     model.eval()
     win_samples = int(window_sec * fs)
     hop_samples = int(hop_sec * fs)
     
-    print("    Extracting frozen representations for Linear Probes...")
-    train_features_joint, train_features_eeg, train_features_aud = [], [], []
+    train_features_joint, train_features_aud = [], []
     train_labels = []
     
     with torch.no_grad():
@@ -106,24 +107,19 @@ def evaluate_ablated_probes(model, all_subject_data, test_sub, device, window_se
                 
                 # Positive pairs
                 train_features_joint.append(e_rep * a_rep)
-                train_features_eeg.append(e_rep)
                 train_features_aud.append(a_rep)
                 train_labels.append(np.ones(len(e_rep)))
                 
                 # Negative pairs
                 train_features_joint.append(e_rep * b_rep)
-                train_features_eeg.append(e_rep)
                 train_features_aud.append(b_rep)
                 train_labels.append(np.zeros(len(e_rep)))
                 
     X_joint = np.concatenate(train_features_joint, axis=0)
-    X_eeg = np.concatenate(train_features_eeg, axis=0)
     X_aud = np.concatenate(train_features_aud, axis=0)
     y_train = np.concatenate(train_labels, axis=0)
     
-    print("    Training Logistic Regressions...")
     clf_joint = LogisticRegression(max_iter=1000, n_jobs=-1).fit(X_joint, y_train)
-    clf_eeg = LogisticRegression(max_iter=1000, n_jobs=-1).fit(X_eeg, y_train)
     clf_aud = LogisticRegression(max_iter=1000, n_jobs=-1).fit(X_aud, y_train)
     
     # --- Evaluation ---
@@ -131,7 +127,6 @@ def evaluate_ablated_probes(model, all_subject_data, test_sub, device, window_se
     
     metrics = {
         "joint": {"windows": 0, "windows_correct": 0, "trials_correct": 0},
-        "eeg": {"windows": 0, "windows_correct": 0, "trials_correct": 0},
         "aud": {"windows": 0, "windows_correct": 0, "trials_correct": 0}
     }
     
@@ -171,7 +166,6 @@ def evaluate_ablated_probes(model, all_subject_data, test_sub, device, window_se
             
             for key, (feat_a, feat_b, clf) in [
                 ("joint", (e_rep * a_rep, e_rep * b_rep, clf_joint)),
-                ("eeg", (e_rep, e_rep, clf_eeg)),
                 ("aud", (a_rep, b_rep, clf_aud))
             ]:
                 prob_a = clf.predict_proba(feat_a)[:, 1]
@@ -234,21 +228,36 @@ def main():
     out_dir.mkdir(parents=True, exist_ok=True)
     
     all_results = []
+    
+    eval_epochs = [5] if args.smoke else [5, 10, 20, 40]
 
     for test_sub in subs:
         print(f"\n--- Fold: Test Subject {test_sub} ---")
         
-        # 1. Evaluate Random Encoder Baseline (Joint)
-        print("  Evaluating Random Encoder Baseline...")
-        random_model = ContrastiveAADModel().to(device)
-        random_results = evaluate_ablated_probes(random_model, all_subject_data, test_sub, device, window_sec=window_sec, hop_sec=hop_sec)
-        
-        # 2. Train Model
-        print("  Pretraining Contrastive Encoders...")
         train_ds = ContrastiveDataset(all_subject_data, test_sub, window_sec=window_sec, steps_per_epoch=steps_per_epoch, batch_size=batch_size)
         train_loader = DataLoader(train_ds, batch_size=batch_size, shuffle=True, num_workers=2, drop_last=True)
         
+        print(f"  Training windows per epoch: {len(train_ds)}")
+        print(f"  Testing trials: {len(all_subject_data[test_sub])}")
+        
+        # 1. Evaluate Random Encoder Baseline (Epoch 0)
+        print("\n  [Epoch  0] Evaluating Random Encoder Baseline...")
         model = ContrastiveAADModel().to(device)
+        random_results = evaluate_ablated_probes(model, all_subject_data, test_sub, device, window_sec=window_sec, hop_sec=hop_sec)
+        
+        all_results.append({
+            "Subject": test_sub,
+            "Epoch": 0,
+            "Audio_Only_Win": random_results["aud"]["win_acc"],
+            "Audio_Only_Trial": random_results["aud"]["trial_acc"],
+            "Joint_Win": random_results["joint"]["win_acc"],
+            "Joint_Trial": random_results["joint"]["trial_acc"],
+        })
+        print(f"    Audio-only | Window: {random_results['aud']['win_acc']*100:.1f}% | Trial: {random_results['aud']['trial_acc']*100:.1f}%")
+        print(f"    Joint      | Window: {random_results['joint']['win_acc']*100:.1f}% | Trial: {random_results['joint']['trial_acc']*100:.1f}%")
+        
+        # 2. Train Model and Evaluate at Intervals
+        print("\n  Pretraining Contrastive Encoders...")
         optimizer = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=1e-4)
         scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=epochs)
         
@@ -269,31 +278,25 @@ def main():
                 
             scheduler.step()
             avg_loss = total_loss / len(train_loader)
+            
             if epoch == 1 or epoch % (1 if args.smoke else 10) == 0:
                 print(f"    Epoch {epoch:2d}/{epochs} | InfoNCE Loss: {avg_loss:.4f} | Temp: {model.criterion.logit_scale.exp().clamp(max=100.0).item():.2f}")
                 
-        # 3. Evaluate Ablated Probes
-        trained_results = evaluate_ablated_probes(model, all_subject_data, test_sub, device, window_sec=window_sec, hop_sec=hop_sec)
-        
-        # Consolidate metrics
-        fold_metrics = {
-            "Subject": test_sub,
-            "Random_Win": random_results["joint"]["win_acc"],
-            "Random_Trial": random_results["joint"]["trial_acc"],
-            "EEG_Only_Win": trained_results["eeg"]["win_acc"],
-            "EEG_Only_Trial": trained_results["eeg"]["trial_acc"],
-            "Audio_Only_Win": trained_results["aud"]["win_acc"],
-            "Audio_Only_Trial": trained_results["aud"]["trial_acc"],
-            "Joint_Win": trained_results["joint"]["win_acc"],
-            "Joint_Trial": trained_results["joint"]["trial_acc"],
-        }
-        all_results.append(fold_metrics)
-        
-        print("\n  Fold Results:")
-        print(f"    Random   | Window: {fold_metrics['Random_Win']*100:.1f}% | Trial: {fold_metrics['Random_Trial']*100:.1f}%")
-        print(f"    EEG-only | Window: {fold_metrics['EEG_Only_Win']*100:.1f}% | Trial: {fold_metrics['EEG_Only_Trial']*100:.1f}%")
-        print(f"    Aud-only | Window: {fold_metrics['Audio_Only_Win']*100:.1f}% | Trial: {fold_metrics['Audio_Only_Trial']*100:.1f}%")
-        print(f"    Joint    | Window: {fold_metrics['Joint_Win']*100:.1f}% | Trial: {fold_metrics['Joint_Trial']*100:.1f}%")
+            if epoch in eval_epochs:
+                print(f"\n  [Epoch {epoch:2d}] Evaluating Trained Probes...")
+                trained_results = evaluate_ablated_probes(model, all_subject_data, test_sub, device, window_sec=window_sec, hop_sec=hop_sec)
+                
+                all_results.append({
+                    "Subject": test_sub,
+                    "Epoch": epoch,
+                    "Audio_Only_Win": trained_results["aud"]["win_acc"],
+                    "Audio_Only_Trial": trained_results["aud"]["trial_acc"],
+                    "Joint_Win": trained_results["joint"]["win_acc"],
+                    "Joint_Trial": trained_results["joint"]["trial_acc"],
+                })
+                print(f"    Audio-only | Window: {trained_results['aud']['win_acc']*100:.1f}% | Trial: {trained_results['aud']['trial_acc']*100:.1f}%")
+                print(f"    Joint      | Window: {trained_results['joint']['win_acc']*100:.1f}% | Trial: {trained_results['joint']['trial_acc']*100:.1f}%")
+                print()
         
     df = pd.DataFrame(all_results)
     csv_path = out_dir / "representation_ablation.csv"
