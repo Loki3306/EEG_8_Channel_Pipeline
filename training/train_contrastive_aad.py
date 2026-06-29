@@ -98,8 +98,8 @@ def evaluate_linear_probe(model, all_subject_data, test_sub, device, window_sec=
                 e_rep, a_rep = model.get_representations(eeg_wins, a_wins)
                 _, b_rep = model.get_representations(eeg_wins, b_wins)
                 
-                pos_feat = torch.cat([e_rep, a_rep], dim=-1).cpu().numpy()
-                neg_feat = torch.cat([e_rep, b_rep], dim=-1).cpu().numpy()
+                pos_feat = (e_rep * a_rep).cpu().numpy()
+                neg_feat = (e_rep * b_rep).cpu().numpy()
                 
                 train_features.append(pos_feat)
                 train_labels.append(np.ones(len(pos_feat)))
@@ -147,8 +147,8 @@ def evaluate_linear_probe(model, all_subject_data, test_sub, device, window_sec=
             e_rep, a_rep = model.get_representations(eeg_wins, a_wins)
             _, b_rep = model.get_representations(eeg_wins, b_wins)
             
-            feat_a = torch.cat([e_rep, a_rep], dim=-1).cpu().numpy()
-            feat_b = torch.cat([e_rep, b_rep], dim=-1).cpu().numpy()
+            feat_a = (e_rep * a_rep).cpu().numpy()
+            feat_b = (e_rep * b_rep).cpu().numpy()
             
             prob_a = clf.predict_proba(feat_a)[:, 1]
             prob_b = clf.predict_proba(feat_b)[:, 1]
