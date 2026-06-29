@@ -201,11 +201,25 @@ def main():
     steps_per_epoch = 25
     test_subs = ["S1", "S9"]
 
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--cache_dir", type=str, default=None, help="Path to KUL cache")
+    args = parser.parse_args()
+    
+    if args.cache_dir:
+        cache_dir = Path(args.cache_dir)
+    elif Path("/kaggle/input/datasets/lowk1ee/kul-preprocessed-cache/data/processed_kul").exists():
+        cache_dir = Path("/kaggle/input/datasets/lowk1ee/kul-preprocessed-cache/data/processed_kul")
+    elif Path("/kaggle/input/kul-preprocessed-cache/data/processed_kul").exists():
+        cache_dir = Path("/kaggle/input/kul-preprocessed-cache/data/processed_kul")
+    else:
+        cache_dir = REPO_ROOT / "data" / "processed_kul"
+        
     out_dir = REPO_ROOT / "results" / "diagnostics"
     out_dir.mkdir(parents=True, exist_ok=True)
 
     # Load Data
-    loader = KULCachedLoader(REPO_ROOT / "data" / "processed_kul")
+    loader = KULCachedLoader(cache_dir)
     try:
         all_subject_data = loader.load_all()
     except FileNotFoundError:
