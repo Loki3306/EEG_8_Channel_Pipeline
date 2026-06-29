@@ -63,7 +63,7 @@ def extract_evaluation_windows(all_subject_data, test_subs, window_sec=10.0, hop
         if sub not in all_subject_data:
             continue
             
-        for t in all_subject_data[sub]:
+        for trial_idx, t in enumerate(all_subject_data[sub]):
             eeg = t["eeg"]
             a = t["audio_a"]
             b = t["audio_b"]
@@ -75,14 +75,13 @@ def extract_evaluation_windows(all_subject_data, test_subs, window_sec=10.0, hop
             
             att_ear = meta.get("attended_ear", "Unknown")
             att_story = meta.get("stimuli_left", "Unknown") if att_ear == "L" else meta.get("stimuli_right", "Unknown")
-            trial_id = meta.get("TrialID", 0)
             
             start = 0
             while start + win_samples <= eeg.shape[1]:
                 end = start + win_samples
                 windows.append({
                     "subject": sub,
-                    "trial_id": f"{sub}_{trial_id}",
+                    "trial_id": f"{sub}_{trial_idx}",
                     "attended_ear": att_ear,
                     "attended_story": att_story,
                     "eeg": eeg[:, start:end],
@@ -280,15 +279,22 @@ def main():
     print("   DIAGNOSTIC RESULTS SUMMARY")
     print("="*70)
     
+    # Calculate exact chance levels based on the evaluation dataset
+    num_stories = len(np.unique(metadata["story"]))
+    num_subjects = len(np.unique(metadata["subject"]))
+    num_ears = len(np.unique(metadata["ear"]))
+    
+    print(f"Chance Levels -> Margin: 50.0% | L/R: {100.0/max(1, num_ears):.1f}% | Story: {100.0/max(1, num_stories):.1f}% | Subject: {100.0/max(1, num_subjects):.1f}%")
+    
     for e in [0, 5]:
         row = df[df["Epoch"] == e].iloc[0]
         print(f"\n[Epoch {e}]")
-        print(f"  Margin Separation:   {row['Margin_Mean']:.4f} (Acc: {row['Margin_Acc']*100:.1f}%, AUC: {row['Margin_AUC']:.3f})")
-        print(f"  EEG->Ear Acc:        {row['Acc_Ear']*100:.1f}%")
-        print(f"  EEG->Story Acc:      {row['Acc_Story']*100:.1f}%")
-        print(f"  EEG->Subject Acc:    {row['Acc_Subject']*100:.1f}%")
-        print(f"  Effective Rank:      {row['Effective_Rank']:.1f}")
-        print(f"  Mean Dim Std:        {row['Mean_Dim_Std']:.4f}")
+        print(f"  Margin Separation:          {row['Margin_Mean']:.4f} (Acc: {row['Margin_Acc']*100:.1f}%, AUC: {row['Margin_AUC']:.3f})")
+        print(f"  Left/Right Classification:  {row['Acc_Ear']*100:.1f}%")
+        print(f"  EEG->Story Acc:             {row['Acc_Story']*100:.1f}%")
+        print(f"  EEG->Subject Acc:           {row['Acc_Subject']*100:.1f}%")
+        print(f"  Effective Rank:             {row['Effective_Rank']:.1f}")
+        print(f"  Mean Dim Std:               {row['Mean_Dim_Std']:.4f}")
         
     csv_path = out_dir / "high_roi_diagnostics.csv"
     df.to_csv(csv_path, index=False)
