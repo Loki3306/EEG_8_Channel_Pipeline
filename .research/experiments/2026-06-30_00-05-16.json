@@ -1,0 +1,34 @@
+{
+  "summary": "An EEG validation script was updated to replace a random train/test split with a LOSO-style subject split and to replace an invalid contrastive loss implementation with a symmetric InfoNCE-style objective. The review passed after resolving the previously identified train/test leakage and runtime error, with only non-blocking design warnings remaining.",
+  "datasets": [
+    "Synthetic EEG toy dataset (5 subjects, 20 trials per subject)"
+  ],
+  "models": [
+    "Symmetric InfoNCE contrastive learning",
+    "EEG-audio contrastive embedding model"
+  ],
+  "keywords": [
+    "EEG",
+    "LOSO",
+    "Leave-One-Subject-Out",
+    "subject-level split",
+    "contrastive learning",
+    "InfoNCE",
+    "symmetric cross-entropy",
+    "representation pooling",
+    "train/test leakage",
+    "runtime validation",
+    "tensor normalization"
+  ],
+  "lessons": [
+    "Use subject-level splits for LOSO rather than random train/test splits.",
+    "Validate tensor dimensions to prevent runtime reduction errors.",
+    "Construct pairwise similarity matrices for InfoNCE instead of collapsing representations prematurely.",
+    "Treat temporal pooling as an explicit modeling assumption because it discards temporal information.",
+    "Avoid resetting the global random number generator inside reusable data-loading functions.",
+    "Toy synthetic datasets are useful for validation but are not substitutes for realistic EEG preprocessing or subject metadata."
+  ],
+  "experiment_id": "2026-06-30_00-05-16",
+  "task": "Validate EEG script",
+  "status": "PASS"
+}

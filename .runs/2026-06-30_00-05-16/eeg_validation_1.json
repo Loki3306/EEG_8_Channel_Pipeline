@@ -1,0 +1,8 @@
+{
+  "passed": false,
+  "issues": [
+    "scratch/flawed_eeg.py: Potential LOSO leakage - using random train_test_split instead of Leave-One-Subject-Out."
+  ],
+  "warnings": [],
+  "memory": ""
+}
