@@ -12,6 +12,7 @@ import scipy.cluster.hierarchy as sch
 from scipy.signal import welch
 from sklearn.metrics.pairwise import cosine_similarity, euclidean_distances
 from numpy.lib.stride_tricks import as_strided
+from joblib import Parallel, delayed
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT))
@@ -54,14 +55,12 @@ def extract_story_part(stim_str):
         return f"Part {m.group(1)}"
     return "Unknown"
 
-def evaluate_trial_ultra_fast(pred, wav_a, wav_b, window_sec=10, hop_sec=1.0, fs=64):
-    """True 1000x Speedup: Eliminates Python loops entirely using sliding window view and 3D matrix correlation."""
+def evaluate_trial_ultra_fast(pred, a_w, b_w, window_sec=10, hop_sec=1.0, fs=64):
+    """True 1000x Speedup: Eliminates Python loops and expects pre-windowed audio."""
     win_samples = int(window_sec * fs)
     hop_samples = int(hop_sec * fs)
     
     pred_w = create_windows(pred, win_samples, hop_samples)
-    a_w = create_windows(wav_a, win_samples, hop_samples)
-    b_w = create_windows(wav_b, win_samples, hop_samples)
     
     # corr_a shape: (bands, windows) -> mean over bands -> shape: (windows,)
     corr_a = batch_corr_3d(pred_w, a_w, axis=2).mean(axis=0)
@@ -75,6 +74,38 @@ def evaluate_trial_ultra_fast(pred, wav_a, wav_b, window_sec=10, hop_sec=1.0, fs
         
     trial_correct = (correct_windows > total_windows / 2.0)
     return trial_correct, total_windows, correct_windows
+
+def compute_transfer_row(i, train_sub, subs, all_subject_data, subject_xtx, subject_xty, trial_xtx, trial_xty, decoders, ridge_lambda, feature_count):
+    row_results = np.zeros(len(subs))
+    t0 = time.time()
+    for j, test_sub in enumerate(subs):
+        correct = 0
+        trials = all_subject_data[test_sub]
+        for idx, t in enumerate(trials):
+            # Diagonal Fix: Use LOTO so it evaluates Generalization, not Memorization
+            if train_sub == test_sub:
+                if len(trials) > 1:
+                    o_xtx = subject_xtx[train_sub] - trial_xtx[train_sub][idx]
+                    o_xty = subject_xty[train_sub] - trial_xty[train_sub][idx]
+                    W = np.linalg.solve(o_xtx + ridge_lambda * np.eye(feature_count), o_xty)
+                else:
+                    W = decoders[train_sub]
+            else:
+                W = decoders[train_sub]
+                
+            X_mat = t["cached_X_mat"]
+            pred = (X_mat @ W).T
+            
+            a_w = t["cached_a_w"]
+            b_w = t["cached_b_w"]
+            
+            # Use fully vectorized windowed majority voting with pre-cached audio windows
+            t_ok, _, _ = evaluate_trial_ultra_fast(pred, a_w, b_w)
+            if t_ok: correct += 1
+            
+        row_results[j] = correct / len(trials)
+    print(f"  [{i+1}/{len(subs)}] Evaluated Decoder {train_sub} across all subjects in {time.time()-t0:.2f}s", flush=True)
+    return i, row_results
 
 def main():
     print("================================================================")
@@ -165,6 +196,12 @@ def main():
             t["cached_a_norm"] = a_norm
             t["cached_b_norm"] = (b_np - b_np.mean(axis=1, keepdims=True)) / (b_np.std(axis=1, keepdims=True) + 1e-12)
             
+            # Pre-cache stride windows for audio to avoid rebuilding 5440 times
+            win_samples = int(10 * fs)
+            hop_samples = int(1.0 * fs)
+            t["cached_a_w"] = create_windows(a_norm, win_samples, hop_samples)
+            t["cached_b_w"] = create_windows(t["cached_b_norm"], win_samples, hop_samples)
+            
             t_xtx = X_mat.T @ X_mat
             t_xty = X_mat.T @ (a_norm.T)
             
@@ -254,37 +291,17 @@ def main():
     plt.savefig(out_dir / "subject_decoder_similarity.png")
     plt.close()
     
-    # Transfer Matrix (16x16)
+    # Transfer Matrix (16x16) - Fully Parallelized
+    print(f"Distributing transfer matrix over {os.cpu_count() or 4} CPU cores...")
     transfer_matrix = np.zeros((16, 16))
-    for i, train_sub in enumerate(subs):
-        t0 = time.time()
-        for j, test_sub in enumerate(subs):
-            correct = 0
-            trials = all_subject_data[test_sub]
-            for idx, t in enumerate(trials):
-                # Diagonal Fix: Use LOTO so it evaluates Generalization, not Memorization
-                if train_sub == test_sub:
-                    if len(trials) > 1:
-                        o_xtx = subject_xtx[train_sub] - trial_xtx[train_sub][idx]
-                        o_xty = subject_xty[train_sub] - trial_xty[train_sub][idx]
-                        W = np.linalg.solve(o_xtx + ridge_lambda * np.eye(feature_count), o_xty)
-                    else:
-                        W = decoders[train_sub]
-                else:
-                    W = decoders[train_sub]
-                    
-                X_mat = t["cached_X_mat"]
-                pred = (X_mat @ W).T
-                
-                a_np = t["cached_a_norm"]
-                b_np = t["cached_b_norm"]
-                
-                # Use fully vectorized windowed majority voting
-                t_ok, _, _ = evaluate_trial_ultra_fast(pred, a_np, b_np)
-                if t_ok: correct += 1
-                
-            transfer_matrix[i, j] = correct / len(trials)
-        print(f"  [{i+1}/{len(subs)}] Evaluated Decoder {train_sub} across all subjects in {time.time()-t0:.2f}s", flush=True)
+    
+    results = Parallel(n_jobs=-1, backend="multiprocessing")(
+        delayed(compute_transfer_row)(i, train_sub, subs, all_subject_data, subject_xtx, subject_xty, trial_xtx, trial_xty, decoders, ridge_lambda, feature_count)
+        for i, train_sub in enumerate(subs)
+    )
+    
+    for i, row_results in results:
+        transfer_matrix[i, :] = row_results
             
     df_trans = pd.DataFrame(transfer_matrix, index=subs, columns=subs)
     df_trans.to_csv(out_dir / "transfer_matrix.csv")
@@ -332,7 +349,7 @@ def main():
             
             # Story Accuracy uses vectorized windowed majority voting
             part = story_parts[sub][idx]
-            t_ok, _, _ = evaluate_trial_ultra_fast(pred, a_np, b_np)
+            t_ok, _, _ = evaluate_trial_ultra_fast(pred, t["cached_a_w"], t["cached_b_w"])
             story_acc[sub][part].append(1 if t_ok else 0)
             
     # Plot Margins
