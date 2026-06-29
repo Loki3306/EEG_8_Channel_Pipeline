@@ -295,7 +295,7 @@ def main():
     print(f"Distributing transfer matrix over {os.cpu_count() or 4} CPU cores...")
     transfer_matrix = np.zeros((16, 16))
     
-    results = Parallel(n_jobs=-1, backend="multiprocessing")(
+    results = Parallel(n_jobs=-1, backend="threading")(
         delayed(compute_transfer_row)(i, train_sub, subs, all_subject_data, subject_xtx, subject_xty, trial_xtx, trial_xty, decoders, ridge_lambda, feature_count)
         for i, train_sub in enumerate(subs)
     )
