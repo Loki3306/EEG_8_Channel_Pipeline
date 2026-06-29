@@ -68,7 +68,7 @@ def evaluate_ablated_probes(model, all_subject_data, test_sub, device, window_se
     win_samples = int(window_sec * fs)
     hop_samples = int(hop_sec * fs)
     
-    train_features_joint, train_features_aud = [], []
+    train_features_aud = []
     train_labels = []
     
     with torch.no_grad():
@@ -105,21 +105,17 @@ def evaluate_ablated_probes(model, all_subject_data, test_sub, device, window_se
                 a_rep = a_rep.cpu().numpy()
                 b_rep = b_rep.cpu().numpy()
                 
-                # Positive pairs
-                train_features_joint.append(e_rep * a_rep)
+                # Positive pairs (only for Audio Linear Probe)
                 train_features_aud.append(a_rep)
                 train_labels.append(np.ones(len(e_rep)))
                 
                 # Negative pairs
-                train_features_joint.append(e_rep * b_rep)
                 train_features_aud.append(b_rep)
                 train_labels.append(np.zeros(len(e_rep)))
                 
-    X_joint = np.concatenate(train_features_joint, axis=0)
     X_aud = np.concatenate(train_features_aud, axis=0)
     y_train = np.concatenate(train_labels, axis=0)
     
-    clf_joint = LogisticRegression(max_iter=1000, n_jobs=-1).fit(X_joint, y_train)
     clf_aud = LogisticRegression(max_iter=1000, n_jobs=-1).fit(X_aud, y_train)
     
     # --- Evaluation ---
@@ -164,19 +160,25 @@ def evaluate_ablated_probes(model, all_subject_data, test_sub, device, window_se
             
             num_wins = len(e_rep)
             
-            for key, (feat_a, feat_b, clf) in [
-                ("joint", (e_rep * a_rep, e_rep * b_rep, clf_joint)),
-                ("aud", (a_rep, b_rep, clf_aud))
-            ]:
-                prob_a = clf.predict_proba(feat_a)[:, 1]
-                prob_b = clf.predict_proba(feat_b)[:, 1]
+            # 1. Zero-Shot Cosine Similarity for Joint
+            sim_a = (e_rep * a_rep).sum(axis=-1)
+            sim_b = (e_rep * b_rep).sum(axis=-1)
+            wins_correct_joint = (sim_a > sim_b).sum()
+            
+            metrics["joint"]["windows"] += num_wins
+            metrics["joint"]["windows_correct"] += wins_correct_joint
+            if wins_correct_joint > num_wins / 2.0:
+                metrics["joint"]["trials_correct"] += 1
                 
-                wins_correct = (prob_a > prob_b).sum()
-                metrics[key]["windows"] += num_wins
-                metrics[key]["windows_correct"] += wins_correct
-                
-                if wins_correct > num_wins / 2.0:
-                    metrics[key]["trials_correct"] += 1
+            # 2. Linear Probe for Audio (Diagnostic)
+            prob_a = clf_aud.predict_proba(a_rep)[:, 1]
+            prob_b = clf_aud.predict_proba(b_rep)[:, 1]
+            wins_correct_aud = (prob_a > prob_b).sum()
+            
+            metrics["aud"]["windows"] += num_wins
+            metrics["aud"]["windows_correct"] += wins_correct_aud
+            if wins_correct_aud > num_wins / 2.0:
+                metrics["aud"]["trials_correct"] += 1
                     
     results = {}
     for k in metrics.keys():
