@@ -7,7 +7,8 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 from sklearn.svm import LinearSVC
-from sklearn.model_selection import cross_val_score
+from sklearn.model_selection import cross_val_score, GroupKFold
+from sklearn.metrics import roc_auc_score
 import warnings
 
 warnings.filterwarnings("ignore", category=UserWarning)
@@ -74,12 +75,14 @@ def extract_evaluation_windows(all_subject_data, test_subs, window_sec=10.0, hop
             
             att_ear = meta.get("attended_ear", "Unknown")
             att_story = meta.get("stimuli_left", "Unknown") if att_ear == "L" else meta.get("stimuli_right", "Unknown")
+            trial_id = meta.get("TrialID", 0)
             
             start = 0
             while start + win_samples <= eeg.shape[1]:
                 end = start + win_samples
                 windows.append({
                     "subject": sub,
+                    "trial_id": f"{sub}_{trial_id}",
                     "attended_ear": att_ear,
                     "attended_story": att_story,
                     "eeg": eeg[:, start:end],
@@ -143,6 +146,11 @@ def run_diagnostics(E, A, B, metadata):
     diagnostics["Margin_Mean"] = margin.mean()
     diagnostics["Margin_Std"] = margin.std()
     
+    diagnostics["Margin_Acc"] = (margin > 0).mean()
+    y_true = np.concatenate([np.ones_like(cos_att), np.zeros_like(cos_unatt)])
+    y_scores = np.concatenate([cos_att, cos_unatt])
+    diagnostics["Margin_AUC"] = roc_auc_score(y_true, y_scores)
+    
     # Collapse Metrics
     trace, dim_std, er = get_collapse_metrics(E)
     diagnostics["Cov_Trace"] = trace
@@ -153,20 +161,27 @@ def run_diagnostics(E, A, B, metadata):
     labels_ear = (metadata["ear"] == "L").astype(int)
     labels_subj = metadata["subject"].astype('category').cat.codes
     labels_story = metadata["story"].astype('category').cat.codes
+    groups = metadata["trial_id"].values
     
-    # Use cross-validation to get unbiased estimate
     clf = LinearSVC(max_iter=2000, dual=False)
+    gkf = GroupKFold(n_splits=5)
     
-    diagnostics["Acc_Attention"] = cross_val_score(clf, E, labels_ear, cv=5).mean()
+    # Only run probes if there are more than 1 class and enough groups
+    num_groups = len(np.unique(groups))
+    cv_splitter = gkf if num_groups >= 5 else 5
     
-    # Only run story/subject probes if there are more than 1 class
+    if len(np.unique(labels_ear)) > 1:
+        diagnostics["Acc_Ear"] = cross_val_score(clf, E, labels_ear, cv=cv_splitter, groups=groups).mean()
+    else:
+        diagnostics["Acc_Ear"] = np.nan
+        
     if len(np.unique(labels_story)) > 1:
-        diagnostics["Acc_Story"] = cross_val_score(clf, E, labels_story, cv=5).mean()
+        diagnostics["Acc_Story"] = cross_val_score(clf, E, labels_story, cv=cv_splitter, groups=groups).mean()
     else:
         diagnostics["Acc_Story"] = np.nan
         
     if len(np.unique(labels_subj)) > 1:
-        diagnostics["Acc_Subject"] = cross_val_score(clf, E, labels_subj, cv=5).mean()
+        diagnostics["Acc_Subject"] = cross_val_score(clf, E, labels_subj, cv=cv_splitter, groups=groups).mean()
     else:
         diagnostics["Acc_Subject"] = np.nan
         
@@ -203,6 +218,7 @@ def main():
     eval_windows = extract_evaluation_windows(all_subject_data, test_subs)
     metadata = pd.DataFrame([{
         "subject": w["subject"],
+        "trial_id": w["trial_id"],
         "story": w["attended_story"],
         "ear": w["attended_ear"]
     } for w in eval_windows])
@@ -267,8 +283,8 @@ def main():
     for e in [0, 5]:
         row = df[df["Epoch"] == e].iloc[0]
         print(f"\n[Epoch {e}]")
-        print(f"  Margin Separation:   {row['Margin_Mean']:.4f} (std: {row['Margin_Std']:.4f})")
-        print(f"  EEG->Attention Acc:  {row['Acc_Attention']*100:.1f}%")
+        print(f"  Margin Separation:   {row['Margin_Mean']:.4f} (Acc: {row['Margin_Acc']*100:.1f}%, AUC: {row['Margin_AUC']:.3f})")
+        print(f"  EEG->Ear Acc:        {row['Acc_Ear']*100:.1f}%")
         print(f"  EEG->Story Acc:      {row['Acc_Story']*100:.1f}%")
         print(f"  EEG->Subject Acc:    {row['Acc_Subject']*100:.1f}%")
         print(f"  Effective Rank:      {row['Effective_Rank']:.1f}")
