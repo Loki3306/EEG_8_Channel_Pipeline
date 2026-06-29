@@ -226,8 +226,6 @@ def main():
         subs = args.subjects
     else:
         subs = sorted(list(all_subject_data.keys()), key=lambda x: int(x[1:]))
-        
-    sub_to_idx = {s: i for i, s in enumerate(subs)}
 
     out_dir = REPO_ROOT / "results" / "contrastive"
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -239,6 +237,10 @@ def main():
     for test_sub in subs:
         print(f"\n--- Fold: Test Subject {test_sub} ---")
         
+        train_subs = [s for s in all_subject_data.keys() if s != test_sub]
+        train_subs = sorted(train_subs, key=lambda x: int(x[1:]))
+        sub_to_idx = {s: i for i, s in enumerate(train_subs)}
+        
         train_ds = ContrastiveDataset(all_subject_data, test_sub, sub_to_idx, window_sec=window_sec, steps_per_epoch=steps_per_epoch, batch_size=batch_size)
         train_loader = DataLoader(train_ds, batch_size=batch_size, shuffle=True, num_workers=2, drop_last=True)
         
@@ -247,8 +249,8 @@ def main():
         
         # 1. Evaluate Random Encoder Baseline (Epoch 0)
         print("\n  [Epoch  0] Evaluating Random Encoder Baseline...")
-        model = ContrastiveAADModel(num_subjects=len(subs)).to(device)
-        model.grl.lam = args.grl_lambda
+        model = ContrastiveAADModel(num_subjects=len(train_subs)).to(device)
+        model.grl.lam = 0.0 # No adversarial loss during eval
         random_results = evaluate_ablated_probes(model, all_subject_data, test_sub, device, window_sec=window_sec, hop_sec=hop_sec)
         
         all_results.append({
@@ -272,7 +274,13 @@ def main():
             total_loss = 0.0
             total_grl = 0.0
             
-            for eeg_batch, a_pos_batch, a_neg_batch, subj_batch in train_loader:
+            num_batches = len(train_loader)
+            for step, (eeg_batch, a_pos_batch, a_neg_batch, subj_batch) in enumerate(train_loader):
+                # DANN schedule for lambda
+                p = float(epoch - 1 + step / num_batches) / epochs
+                current_lambda = (2.0 / (1.0 + np.exp(-10.0 * p)) - 1.0) * args.grl_lambda
+                model.grl.lam = current_lambda
+                
                 eeg_batch = eeg_batch.to(device)
                 a_pos_batch = a_pos_batch.to(device)
                 a_neg_batch = a_neg_batch.to(device)
@@ -282,7 +290,7 @@ def main():
                 infonce_loss, subj_logits = model(eeg_batch, a_pos_batch, a_neg_batch)
                 
                 grl_loss = torch.nn.functional.cross_entropy(subj_logits, subj_batch)
-                loss = infonce_loss + args.grl_lambda * grl_loss
+                loss = infonce_loss + grl_loss  # lam is handled directly inside the GRL backward pass
                 
                 loss.backward()
                 torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
@@ -296,7 +304,7 @@ def main():
             avg_grl = total_grl / len(train_loader)
             
             if epoch == 1 or epoch % (1 if args.smoke else 10) == 0:
-                print(f"    Epoch {epoch:2d}/{epochs} | InfoNCE Loss: {avg_loss:.4f} | Subj Loss: {avg_grl:.4f} | Temp: {model.criterion.logit_scale.exp().clamp(max=100.0).item():.2f}")
+                print(f"    Epoch {epoch:2d}/{epochs} | InfoNCE Loss: {avg_loss:.4f} | Subj Loss: {avg_grl:.4f} | GRL lam: {current_lambda:.2f} | Temp: {model.criterion.logit_scale.exp().clamp(max=100.0).item():.2f}")
                 
             if epoch in eval_epochs:
                 print(f"\n  [Epoch {epoch:2d}] Evaluating Trained Probes...")
