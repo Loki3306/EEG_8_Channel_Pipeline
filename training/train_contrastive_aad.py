@@ -194,6 +194,7 @@ def main():
     parser.add_argument("--smoke", action="store_true", help="Run fast smoke test (fewer epochs/steps)")
     parser.add_argument("--subjects", nargs="+", default=None, help="Specific subjects to test (e.g., S1 S2). Default is all.")
     parser.add_argument("--grl_lambda", type=float, default=1.0, help="Weight of the Gradient Reversal Layer subject discriminator loss.")
+    parser.add_argument("--cache_dir", type=str, default=None, help="Path to KUL cache")
     args = parser.parse_args()
 
     print("="*70)
@@ -215,7 +216,16 @@ def main():
     steps_per_epoch = 25 if args.smoke else 150
 
     # Load Data
-    loader = KULCachedLoader(REPO_ROOT / "data" / "processed_kul")
+    if args.cache_dir:
+        cache_dir = Path(args.cache_dir)
+    elif Path("/kaggle/input/datasets/lowk1ee/kul-preprocessed-cache/data/processed_kul").exists():
+        cache_dir = Path("/kaggle/input/datasets/lowk1ee/kul-preprocessed-cache/data/processed_kul")
+    elif Path("/kaggle/input/kul-preprocessed-cache/data/processed_kul").exists():
+        cache_dir = Path("/kaggle/input/kul-preprocessed-cache/data/processed_kul")
+    else:
+        cache_dir = REPO_ROOT / "data" / "processed_kul"
+
+    loader = KULCachedLoader(cache_dir)
     try:
         all_subject_data = loader.load_all()
     except FileNotFoundError:
