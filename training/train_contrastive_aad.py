@@ -19,20 +19,20 @@ from models.contrastive_aad import ContrastiveAADModel
 class ContrastiveDataset(Dataset):
     """
     Randomly samples windows from trials for pretraining.
-    Provides (EEG, Attended_Audio, Unattended_Audio) for hard negatives.
+    Provides (EEG, Attended_Audio, Unattended_Audio, Subject_Label) for GRL.
     """
-    def __init__(self, subject_data_dict, test_sub, window_sec=10.0, fs=64, steps_per_epoch=200, batch_size=128):
+    def __init__(self, subject_data_dict, test_sub, sub_to_idx, window_sec=10.0, fs=64, steps_per_epoch=200, batch_size=128):
         self.trials = []
         for sub, trials in subject_data_dict.items():
             if sub != test_sub:
-                self.trials.extend(trials)
+                for t in trials:
+                    self.trials.append((sub_to_idx[sub], t))
                 
         self.win_samples = int(window_sec * fs)
         self.num_samples = steps_per_epoch * batch_size
         
-        # Pre-standardize all trials to avoid re-computing per window
         self.std_trials = []
-        for t in self.trials:
+        for sub_label, t in self.trials:
             eeg = t["eeg"]
             a = t["audio_a"]
             b = t["audio_b"]
@@ -41,20 +41,20 @@ class ContrastiveDataset(Dataset):
             a = (a - a.mean(dim=1, keepdim=True)) / (a.std(dim=1, keepdim=True) + 1e-12)
             b = (b - b.mean(dim=1, keepdim=True)) / (b.std(dim=1, keepdim=True) + 1e-12)
             
-            self.std_trials.append((eeg, a, b))
+            self.std_trials.append((eeg, a, b, sub_label))
 
     def __len__(self):
         return self.num_samples
         
     def __getitem__(self, idx):
         trial_idx = torch.randint(0, len(self.std_trials), (1,)).item()
-        eeg, a, b = self.std_trials[trial_idx]
+        eeg, a, b, sub_label = self.std_trials[trial_idx]
         
         max_start = eeg.shape[1] - self.win_samples
         start = torch.randint(0, max_start + 1, (1,)).item()
         end = start + self.win_samples
         
-        return eeg[:, start:end], a[:, start:end], b[:, start:end]
+        return eeg[:, start:end], a[:, start:end], b[:, start:end], sub_label
 
 
 def evaluate_ablated_probes(model, all_subject_data, test_sub, device, window_sec=10.0, hop_sec=1.0, fs=64):
@@ -193,6 +193,7 @@ def main():
     parser = argparse.ArgumentParser(description="Contrastive AAD Training with Ablations")
     parser.add_argument("--smoke", action="store_true", help="Run fast smoke test (fewer epochs/steps)")
     parser.add_argument("--subjects", nargs="+", default=None, help="Specific subjects to test (e.g., S1 S2). Default is all.")
+    parser.add_argument("--grl_lambda", type=float, default=1.0, help="Weight of the Gradient Reversal Layer subject discriminator loss.")
     args = parser.parse_args()
 
     print("="*70)
@@ -225,6 +226,8 @@ def main():
         subs = args.subjects
     else:
         subs = sorted(list(all_subject_data.keys()), key=lambda x: int(x[1:]))
+        
+    sub_to_idx = {s: i for i, s in enumerate(subs)}
 
     out_dir = REPO_ROOT / "results" / "contrastive"
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -236,7 +239,7 @@ def main():
     for test_sub in subs:
         print(f"\n--- Fold: Test Subject {test_sub} ---")
         
-        train_ds = ContrastiveDataset(all_subject_data, test_sub, window_sec=window_sec, steps_per_epoch=steps_per_epoch, batch_size=batch_size)
+        train_ds = ContrastiveDataset(all_subject_data, test_sub, sub_to_idx, window_sec=window_sec, steps_per_epoch=steps_per_epoch, batch_size=batch_size)
         train_loader = DataLoader(train_ds, batch_size=batch_size, shuffle=True, num_workers=2, drop_last=True)
         
         print(f"  Training windows per epoch: {len(train_ds)}")
@@ -244,7 +247,8 @@ def main():
         
         # 1. Evaluate Random Encoder Baseline (Epoch 0)
         print("\n  [Epoch  0] Evaluating Random Encoder Baseline...")
-        model = ContrastiveAADModel().to(device)
+        model = ContrastiveAADModel(num_subjects=len(subs)).to(device)
+        model.grl.lam = args.grl_lambda
         random_results = evaluate_ablated_probes(model, all_subject_data, test_sub, device, window_sec=window_sec, hop_sec=hop_sec)
         
         all_results.append({
@@ -266,23 +270,33 @@ def main():
         for epoch in range(1, epochs + 1):
             model.train()
             total_loss = 0.0
-            for eeg_batch, a_pos_batch, a_neg_batch in train_loader:
+            total_grl = 0.0
+            
+            for eeg_batch, a_pos_batch, a_neg_batch, subj_batch in train_loader:
                 eeg_batch = eeg_batch.to(device)
                 a_pos_batch = a_pos_batch.to(device)
                 a_neg_batch = a_neg_batch.to(device)
+                subj_batch = subj_batch.to(device)
                 
                 optimizer.zero_grad()
-                loss = model(eeg_batch, a_pos_batch, a_neg_batch)
+                infonce_loss, subj_logits = model(eeg_batch, a_pos_batch, a_neg_batch)
+                
+                grl_loss = torch.nn.functional.cross_entropy(subj_logits, subj_batch)
+                loss = infonce_loss + args.grl_lambda * grl_loss
+                
                 loss.backward()
                 torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
                 optimizer.step()
-                total_loss += loss.item()
+                
+                total_loss += infonce_loss.item()
+                total_grl += grl_loss.item()
                 
             scheduler.step()
             avg_loss = total_loss / len(train_loader)
+            avg_grl = total_grl / len(train_loader)
             
             if epoch == 1 or epoch % (1 if args.smoke else 10) == 0:
-                print(f"    Epoch {epoch:2d}/{epochs} | InfoNCE Loss: {avg_loss:.4f} | Temp: {model.criterion.logit_scale.exp().clamp(max=100.0).item():.2f}")
+                print(f"    Epoch {epoch:2d}/{epochs} | InfoNCE Loss: {avg_loss:.4f} | Subj Loss: {avg_grl:.4f} | Temp: {model.criterion.logit_scale.exp().clamp(max=100.0).item():.2f}")
                 
             if epoch in eval_epochs:
                 print(f"\n  [Epoch {epoch:2d}] Evaluating Trained Probes...")

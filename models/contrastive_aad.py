@@ -3,6 +3,24 @@ import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
 
+class GradientReversalFunction(torch.autograd.Function):
+    @staticmethod
+    def forward(ctx, x, lam):
+        ctx.lam = lam
+        return x.view_as(x)
+
+    @staticmethod
+    def backward(ctx, grad_output):
+        return grad_output.neg() * ctx.lam, None
+
+class GradientReversal(nn.Module):
+    def __init__(self, lam=1.0):
+        super().__init__()
+        self.lam = lam
+
+    def forward(self, x):
+        return GradientReversalFunction.apply(x, self.lam)
+
 class EEGEncoder(nn.Module):
     """
     EEGNet-based base encoder. Output is the raw representation.
@@ -131,7 +149,7 @@ class InfoNCELossWithHardNegatives(nn.Module):
 
 
 class ContrastiveAADModel(nn.Module):
-    def __init__(self, rep_dim=128, embed_dim=128):
+    def __init__(self, rep_dim=128, embed_dim=128, num_subjects=16):
         super().__init__()
         self.eeg_encoder = EEGEncoder(rep_dim=rep_dim)
         self.audio_encoder = AudioEncoder(rep_dim=rep_dim)
@@ -140,6 +158,14 @@ class ContrastiveAADModel(nn.Module):
         self.aud_proj = ProjectionHead(rep_dim, embed_dim)
         
         self.criterion = InfoNCELossWithHardNegatives()
+        
+        # Subject Discriminator branch for adversarial domain adaptation
+        self.grl = GradientReversal(lam=1.0)
+        self.subject_discriminator = nn.Sequential(
+            nn.Linear(rep_dim, 64),
+            nn.GELU(),
+            nn.Linear(64, num_subjects)
+        )
         
     def forward(self, eeg, audio_pos, audio_neg):
         """
@@ -153,7 +179,13 @@ class ContrastiveAADModel(nn.Module):
         ap_emb = self.aud_proj(ap_rep)
         an_emb = self.aud_proj(an_rep)
         
-        return self.criterion(e_emb, ap_emb, an_emb)
+        infonce_loss = self.criterion(e_emb, ap_emb, an_emb)
+        
+        # Adversarial subject discriminator
+        e_rep_grl = self.grl(e_rep)
+        subj_logits = self.subject_discriminator(e_rep_grl)
+        
+        return infonce_loss, subj_logits
         
     def get_representations(self, eeg, audio):
         """
