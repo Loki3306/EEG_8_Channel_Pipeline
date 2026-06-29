@@ -97,11 +97,23 @@ def run_experiment():
         
     # 3. Spatial Filter Response
     print("\n--- MatchNet Spatial Filter Response ---")
-    model_path = "/kaggle/input/datasets/lowk1ee/matchnet-checkpoints/best_model.pt"
-    if not os.path.exists(model_path):
-        model_path = "checkpoints/best_model.pt"
+    model_path = None
+    for r, d, f in os.walk("/kaggle/input"):
+        for file in f:
+            if file in ["best_model.pt", "best_model.pth", "checkpoint.pt", "checkpoint.pth", "matchnet.pt", "matchnet.pth"]:
+                model_path = os.path.join(r, file)
+                break
+        if model_path: break
         
-    if not os.path.exists(model_path):
+    if not model_path:
+        for r, d, f in os.walk("checkpoints"):
+            for file in f:
+                if file in ["best_model.pt", "best_model.pth", "checkpoint.pt", "checkpoint.pth", "matchnet.pt", "matchnet.pth"]:
+                    model_path = os.path.join(r, file)
+                    break
+            if model_path: break
+            
+    if not model_path:
         print("Could not find MatchNet checkpoint.")
         return
         

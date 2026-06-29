@@ -29,6 +29,33 @@ def extract_story_part(stim_str):
         return f"Part {m.group(1)}"
     return "Unknown"
 
+def evaluate_trial(pred, wav_a, wav_b, window_sec=10, hop_sec=1.0, fs=64):
+    num_bands = pred.shape[0]
+    win_samples = int(window_sec * fs)
+    hop_samples = int(hop_sec * fs)
+    
+    if win_samples >= pred.shape[1]:
+        c_a = np.mean([safe_corr_np(pred[i], wav_a[i]) for i in range(num_bands)])
+        c_b = np.mean([safe_corr_np(pred[i], wav_b[i]) for i in range(num_bands)])
+        return c_a > c_b, 1, 1 if c_a > c_b else 0
+        
+    correct_windows = 0
+    total_windows = 0
+    
+    for start in range(0, pred.shape[1] - win_samples + 1, hop_samples):
+        stop = start + win_samples
+        c_a = np.mean([safe_corr_np(pred[i, start:stop], wav_a[i, start:stop]) for i in range(num_bands)])
+        c_b = np.mean([safe_corr_np(pred[i, start:stop], wav_b[i, start:stop]) for i in range(num_bands)])
+        if c_a > c_b:
+            correct_windows += 1
+        total_windows += 1
+        
+    if total_windows == 0:
+        return False, 0, 0
+        
+    trial_correct = (correct_windows > total_windows / 2.0)
+    return trial_correct, total_windows, correct_windows
+
 def main():
     print("================================================================")
     print("            SUBJECT FORENSICS ANALYSIS PIPELINE                 ")
@@ -205,11 +232,21 @@ def main():
     # Transfer Matrix (16x16)
     transfer_matrix = np.zeros((16, 16))
     for i, train_sub in enumerate(subs):
-        W = decoders[train_sub]
         for j, test_sub in enumerate(subs):
             correct = 0
             trials = all_subject_data[test_sub]
             for idx, t in enumerate(trials):
+                # Diagonal Fix: Use LOTO so it evaluates Generalization, not Memorization
+                if train_sub == test_sub:
+                    if len(trials) > 1:
+                        o_xtx = subject_xtx[train_sub] - trial_xtx[train_sub][idx]
+                        o_xty = subject_xty[train_sub] - trial_xty[train_sub][idx]
+                        W = np.linalg.solve(o_xtx + ridge_lambda * np.eye(feature_count), o_xty)
+                    else:
+                        W = decoders[train_sub]
+                else:
+                    W = decoders[train_sub]
+                    
                 eeg_np = t["eeg"].numpy()
                 e_mean = eeg_np.mean(axis=1, keepdims=True)
                 e_std = eeg_np.std(axis=1, keepdims=True) + 1e-12
@@ -221,14 +258,13 @@ def main():
                 X_mat = np.concatenate(lagged, axis=1)
                 
                 pred = (X_mat @ W).T
-                
                 a_np = t["audio_a"].numpy()
                 b_np = t["audio_b"].numpy()
                 
-                ca = np.mean([safe_corr_np(pred[k], a_np[k]) for k in range(num_bands)])
-                cb = np.mean([safe_corr_np(pred[k], b_np[k]) for k in range(num_bands)])
+                # Use identical windowed majority voting as Oracle Experiment
+                t_ok, _, _ = evaluate_trial(pred, a_np, b_np)
+                if t_ok: correct += 1
                 
-                if ca > cb: correct += 1
             transfer_matrix[i, j] = correct / len(trials)
             
     df_trans = pd.DataFrame(transfer_matrix, index=subs, columns=subs)
@@ -274,6 +310,7 @@ def main():
             a_np = t["audio_a"].numpy()
             b_np = t["audio_b"].numpy()
             
+            # Margin is computed identically to experiment_subject_oracle (full trial)
             ca = np.mean([safe_corr_np(pred[k], a_np[k]) for k in range(num_bands)])
             cb = np.mean([safe_corr_np(pred[k], b_np[k]) for k in range(num_bands)])
             
@@ -282,8 +319,10 @@ def main():
             all_margins["Group"].append(get_group(sub))
             all_margins["Margin"].append(marg)
             
+            # Story Accuracy uses windowed majority voting
             part = story_parts[sub][idx]
-            story_acc[sub][part].append(1 if marg > 0 else 0)
+            t_ok, _, _ = evaluate_trial(pred, a_np, b_np)
+            story_acc[sub][part].append(1 if t_ok else 0)
             
     # Plot Margins
     df_marg = pd.DataFrame(all_margins)
@@ -313,14 +352,10 @@ def main():
     print("Computing Basic Statistics...")
     stats = []
     for sub in subs:
-        eeg = subject_eeg_concat[sub]
         enva = subject_env_a_concat[sub]
         envb = subject_env_b_concat[sub]
         
-        eeg_var = np.var(eeg, axis=1).mean()
-        eeg_rms = np.sqrt(np.mean(eeg**2))
         cov_det = np.linalg.det(cov_matrices[sub])
-        
         enva_var = np.var(enva)
         envb_var = np.var(envb)
         env_xcorr = np.mean([safe_corr_np(enva[k], envb[k]) for k in range(num_bands)])
@@ -328,8 +363,6 @@ def main():
         stats.append({
             "Subject": sub,
             "Group": get_group(sub),
-            "EEG_Mean_Var": eeg_var,
-            "EEG_RMS": eeg_rms,
             "Covariance_Det": cov_det,
             "Env_Att_Var": enva_var,
             "Env_Unatt_Var": envb_var,
@@ -346,9 +379,6 @@ def main():
     print("FINAL FORENSIC REPORT")
     print("="*80)
     
-    s9_cov = frob_dist[subs.index("S9")]
-    s1_cov = frob_dist[subs.index("S1")]
-    
     print("\n1. Why does S9 improve by +60%?")
     print("   -> Looking at the decoder_similarity.csv and transfer_matrix.csv:")
     print(f"      S9's decoder is highly orthogonal to others (max transfer to others is ~{np.max(df_trans.loc['S9'].drop('S9')):.2f}).")
@@ -359,19 +389,15 @@ def main():
     print("      indicating the LOTO oracle violently overfit to noise. S1 benefits from the global model regularizing them.")
     
     print("\n3. Are improvements explained by EEG quality?")
-    mean_var_A = df_stats[df_stats["Group"]=="A (High Gain)"]["EEG_Mean_Var"].mean()
-    mean_var_C = df_stats[df_stats["Group"]=="C (Negative Gain)"]["EEG_Mean_Var"].mean()
-    print(f"   -> Group A EEG Variance: {mean_var_A:.4f} | Group C EEG Variance: {mean_var_C:.4f}")
-    if mean_var_A > mean_var_C * 1.5:
-        print("      Yes. Group A has significantly higher signal variance, suggesting cleaner electrode contact.")
-    else:
-        print("      No. Variance is comparable. It's not pure signal quality, but structural neural mapping.")
+    print("   -> (Hypothesis Rejected) This hypothesis cannot be tested using the preprocessed KUL cache,")
+    print("      because `build_kul_cache.py` aggressively standardized every trial to have a standard deviation")
+    print("      of 1.0 before saving. Absolute EEG amplitude (microvolts) variance was permanently destroyed,")
+    print("      so all subjects possess identically normalized signal variance in this analysis.")
         
     print("\n4. Are improvements explained by decoder similarity?")
     print("   -> Yes. The transfer matrix shows that Group A subjects learn decoders that DO NOT generalize to others.")
     
     print("\n5. Are there multiple decoder families?")
-    # Check clustering
     print("   -> Looking at subject_decoder_similarity.png, there are clear hierarchical clusters (families),")
     print("      but they do not collapse into a single universal tree. S9, S15, S16 often isolate.")
     
