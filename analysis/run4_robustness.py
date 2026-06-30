@@ -316,7 +316,7 @@ def main():
     
     for subj in subjects_to_test:
         print(f"\n=== Processing Subject {subj} ===")
-        ckpt_path = checkpoint_dir / f"model_loso_{subj}.pt"
+        ckpt_path = checkpoint_dir / f"model_{subj}.pt"
         if not ckpt_path.exists():
             print(f"  [Error] Checkpoint not found: {ckpt_path}. Skipping.")
             continue
