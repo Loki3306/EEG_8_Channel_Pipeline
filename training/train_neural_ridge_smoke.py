@@ -155,11 +155,18 @@ def prepare_data_and_ridge(subject_data, window_sec=10, hop_sec=2, fs=64, lags=1
 
 def main():
     print("Loading KUL Cache...")
-    loader = KULCachedLoader(REPO_ROOT / "data" / "processed_kul")
+    if Path("/kaggle/input/datasets/lowk1ee/kul-preprocessed-cache/data/processed_kul").exists():
+        cache_dir = Path("/kaggle/input/datasets/lowk1ee/kul-preprocessed-cache/data/processed_kul")
+    elif Path("/kaggle/input/kul-preprocessed-cache/data/processed_kul").exists():
+        cache_dir = Path("/kaggle/input/kul-preprocessed-cache/data/processed_kul")
+    else:
+        cache_dir = REPO_ROOT / "data" / "processed_kul"
+        
+    loader = KULCachedLoader(cache_dir)
     try:
         all_subject_data = loader.load_all()
     except FileNotFoundError:
-        print("KUL Cache not found.")
+        print(f"KUL Cache not found at {cache_dir}.")
         return
         
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
