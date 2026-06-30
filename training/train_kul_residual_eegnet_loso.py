@@ -114,7 +114,7 @@ def run_residual_loso_window(window_sec, all_subject_data):
         weights = np.linalg.solve(train_xtx + RIDGE_LAMBDA * np.eye(feature_count, dtype=float), train_xty)
         
         # 4. Initialize Neural Residual Model
-        model = ResidualEEGNetRidge(ridge_feature_count=feature_count, in_channels=64).to(DEVICE)
+        model = ResidualEEGNetRidge(ridge_feature_count=feature_count, in_channels=8).to(DEVICE)
         model.load_ridge_weights(weights)
         
         optimizer = optim.Adam(filter(lambda p: p.requires_grad, model.parameters()), lr=LR)
