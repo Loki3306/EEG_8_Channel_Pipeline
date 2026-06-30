@@ -14,7 +14,13 @@ from training.train_conformer_loso import prepare_data, evaluate_trial_majority_
 
 def main():
     print("Loading KUL Cache...")
-    cache_dir = REPO_ROOT / "data" / "processed_kul"
+    if Path("/kaggle/input/datasets/lowk1ee/kul-preprocessed-cache/data/processed_kul").exists():
+        cache_dir = Path("/kaggle/input/datasets/lowk1ee/kul-preprocessed-cache/data/processed_kul")
+    elif Path("/kaggle/input/kul-preprocessed-cache/data/processed_kul").exists():
+        cache_dir = Path("/kaggle/input/kul-preprocessed-cache/data/processed_kul")
+    else:
+        cache_dir = REPO_ROOT / "data" / "processed_kul"
+        
     if not cache_dir.exists():
         print(f"Error: KUL cache not found at {cache_dir}")
         return
