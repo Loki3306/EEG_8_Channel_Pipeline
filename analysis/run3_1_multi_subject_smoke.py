@@ -151,10 +151,10 @@ def phase3_cross_subject_analysis(out_dir, subjects, channel_data, freq_data, te
     
     # Analyze Temporal Consistency (Correlation between aligned occlusion curves)
     temp_df = pd.DataFrame(temporal_data)
-    # Ensure aligned windows by filtering to common Start_Times
-    common_windows = set.intersection(*[set(temp_df[temp_df["Subject"] == s]["Start_Time"]) for s in subjects])
-    temp_df_aligned = temp_df[temp_df["Start_Time"].isin(common_windows)]
-    temp_pivot = temp_df_aligned.pivot(index="Start_Time", columns="Subject", values="Accuracy")
+    # Ensure aligned windows by filtering to common Time Start (s)
+    common_windows = set.intersection(*[set(temp_df[temp_df["Subject"] == s]["Time Start (s)"]) for s in subjects])
+    temp_df_aligned = temp_df[temp_df["Time Start (s)"].isin(common_windows)]
+    temp_pivot = temp_df_aligned.pivot(index="Time Start (s)", columns="Subject", values="Mean Margin Drop")
     temp_corr = temp_pivot.corr().values
     mask = ~np.eye(temp_corr.shape[0], dtype=bool)
     mean_temp_corr = temp_corr[mask].mean() if temp_corr.shape[0] > 1 else 1.0
