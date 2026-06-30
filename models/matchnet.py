@@ -28,6 +28,12 @@ class AudioEncoder(nn.Module):
     def forward(self, x):
         return self.net(x)
 
+def _compute_mean_cosine_similarity(z_1, z_2):
+    """Normalized cosine similarity averaged over the temporal dimension (dim=2)."""
+    # F.cosine_similarity(dim=1) yields [B, T], which we average over time
+    sim = F.cosine_similarity(z_1, z_2, dim=1)
+    return sim.mean(dim=1)
+
 class ContrastiveMatchNet(nn.Module):
     """
     A Siamese network that explicitly learns a matching function between EEG and Audio.
@@ -73,24 +79,44 @@ class ContrastiveMatchNet(nn.Module):
         audio_a: [B, 28, T]
         audio_b: [B, 28, T]
         
-        Returns latent representations.
+        Returns latent representations (retaining simple 3-tensor signature for backward compatibility).
         """
         z_eeg = self.encode_eeg(eeg)
         z_a = self.encode_audio(audio_a)
         z_b = self.encode_audio(audio_b)
-        
         return z_eeg, z_a, z_b
+
+    def compute_similarities(self, z_eeg, z_a, z_b):
+        """Shared similarity computation path."""
+        sim_a = _compute_mean_cosine_similarity(z_eeg, z_a)
+        sim_b = _compute_mean_cosine_similarity(z_eeg, z_b)
+        return sim_a, sim_b
+
+    def get_confidence_from_latents(self, z_eeg, z_a, z_b, temperature=1.0):
+        """
+        Computes a confidence score based on the decision margin.
+        This score is a probability proxy scaled via temperature, but is uncalibrated.
+        """
+        sim_a, sim_b = self.compute_similarities(z_eeg, z_a, z_b)
+        margin = sim_a - sim_b
+        confidence = torch.sigmoid(margin / temperature)
+        return confidence
+
+    def get_confidence(self, eeg, audio_a, audio_b, temperature=1.0):
+        """
+        Computes a confidence score based on the difference in cosine similarity 
+        between z_eeg and the two audio candidates.
+        """
+        z_eeg, z_a, z_b = self(eeg, audio_a, audio_b)
+        return self.get_confidence_from_latents(z_eeg, z_a, z_b, temperature=temperature)
 
 def contrastive_loss(z_eeg, z_a, z_b, margin=0.1):
     """
     Computes a max-margin contrastive loss based on cosine similarity.
     We assume z_a is the attended audio, and z_b is the unattended audio.
     """
-    sim_a = F.cosine_similarity(z_eeg, z_a, dim=1)
-    sim_b = F.cosine_similarity(z_eeg, z_b, dim=1)
-    
-    sim_a_mean = sim_a.mean(dim=1)
-    sim_b_mean = sim_b.mean(dim=1)
+    sim_a_mean = _compute_mean_cosine_similarity(z_eeg, z_a)
+    sim_b_mean = _compute_mean_cosine_similarity(z_eeg, z_b)
     
     loss = F.relu(margin - (sim_a_mean - sim_b_mean)).mean()
     

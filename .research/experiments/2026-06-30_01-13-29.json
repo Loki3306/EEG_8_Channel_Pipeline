@@ -1,0 +1,32 @@
+{
+  "summary": "Implemented confidence-aware MatchNet support for the KUL pipeline while preserving the existing model interface. The implementation passed review after correcting the confidence semantics to an uncalibrated probability proxy and maintaining compatibility with the validated InfoNCE training methodology.",
+  "datasets": [
+    "KUL"
+  ],
+  "models": [
+    "MatchNet",
+    "ContrastiveMatchNet"
+  ],
+  "keywords": [
+    "confidence estimation",
+    "uncalibrated confidence",
+    "backward compatibility",
+    "MatchNet",
+    "KUL",
+    "InfoNCE",
+    "cosine similarity",
+    "similarity margin",
+    "temporal pooling"
+  ],
+  "lessons": [
+    "Preserve model forward() interfaces when extending research models to avoid downstream runtime regressions.",
+    "Do not describe heuristic sigmoid-transformed similarity margins as calibrated confidence without an explicit calibration procedure.",
+    "Document temporal pooling as an explicit modeling assumption because it discards temporal information.",
+    "Factor shared similarity computations into a single implementation to keep training and inference behavior consistent.",
+    "Validate any confidence-based decision thresholds on held-out LOSO subjects using calibration metrics before interpreting them as uncertainty estimates.",
+    "Maintain pairwise InfoNCE similarity matrix construction when adding auxiliary confidence functionality to avoid altering the validated contrastive objective."
+  ],
+  "experiment_id": "2026-06-30_01-13-29",
+  "task": "Implement confidence-aware MatchNet for KUL.",
+  "status": "PASS"
+}
