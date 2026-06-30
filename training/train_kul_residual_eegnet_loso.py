@@ -261,7 +261,7 @@ def main():
         cache_dir = REPO_ROOT / "data" / "processed_kul"
         
     loader = KULCachedLoader(cache_dir=cache_dir)
-    all_subject_data = loader.load_all_subjects()
+    all_subject_data = loader.load_all()
     
     windows_to_test = [60, 30, 10]
     out_dir = REPO_ROOT / "results" / "kul_residual_eegnet_loso"
