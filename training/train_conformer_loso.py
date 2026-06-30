@@ -387,17 +387,16 @@ def main():
             print(f"Test Trial Acc: {test_metrics['trial_accuracy']*100:.1f}%")
             print(f"Test Median Margin: {test_metrics['median_margin']:.4f}")
             
-        all_seeds_results[str(seed)] = loso_results
-        
+            # --- INCREMENTAL SAVE TO PREVENT DATA LOSS ---
+            all_seeds_results[str(seed)] = loso_results
+            summary_file = out_dir / "conformer_loso_multiseed_summary.json"
+            with open(summary_file, 'w') as f:
+                json.dump(all_seeds_results, f, indent=4)
+            
     print("\n====================================================")
     print("ALL FOLDS COMPLETED FOR ALL SEEDS")
     print("====================================================")
-    
-    summary_file = out_dir / "conformer_loso_multiseed_summary.json"
-    with open(summary_file, 'w') as f:
-        json.dump(all_seeds_results, f, indent=4)
-        
-    print(f"Saved Multi-Seed LOSO summary to {summary_file}")
+    print(f"Final Multi-Seed LOSO summary successfully written to {summary_file}")
 
 if __name__ == "__main__":
     main()
