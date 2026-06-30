@@ -25,12 +25,12 @@ def quantitative_psd_validation(freqs, psd_baseline, psd_masked, band_low, band_
     out_idx = ~band_idx
     
     # Power in band
-    base_power_in = np.trapz(psd_baseline[band_idx], freqs[band_idx])
-    mask_power_in = np.trapz(psd_masked[band_idx], freqs[band_idx])
+    base_power_in = np.trapezoid(psd_baseline[band_idx], freqs[band_idx])
+    mask_power_in = np.trapezoid(psd_masked[band_idx], freqs[band_idx])
     
     # Power out of band
-    base_power_out = np.trapz(psd_baseline[out_idx], freqs[out_idx])
-    mask_power_out = np.trapz(psd_masked[out_idx], freqs[out_idx])
+    base_power_out = np.trapezoid(psd_baseline[out_idx], freqs[out_idx])
+    mask_power_out = np.trapezoid(psd_masked[out_idx], freqs[out_idx])
     
     # Quantitative attenuation check
     attenuation_ratio = mask_power_in / (base_power_in + 1e-12)
@@ -67,8 +67,8 @@ def audit_frequency_pipeline(test_trials, out_dir, subj):
     idx_low = (freqs >= 1.0) & (freqs <= 8.0)
     idx_high = (freqs >= 13.0) & (freqs <= 30.0)
     
-    power_low = np.trapz(psd_baseline_mean[idx_low], freqs[idx_low])
-    power_high = np.trapz(psd_baseline_mean[idx_high], freqs[idx_high])
+    power_low = np.trapezoid(psd_baseline_mean[idx_low], freqs[idx_low])
+    power_high = np.trapezoid(psd_baseline_mean[idx_high], freqs[idx_high])
     
     if power_high > 0.05 * power_low:
         print(f"  [Warning] Cache spectral characteristics verification failed for {subj}. High-freq power is {power_high/power_low:.2%} of low-freq.")
