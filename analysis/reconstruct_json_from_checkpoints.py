@@ -31,11 +31,15 @@ def main():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Using device: {device}")
     
-    results_dir = REPO_ROOT / "conformer_loso_results"
+    results_dir = REPO_ROOT / "results" / "conformer_loso"
+    if not results_dir.exists():
+        # Fallback for local testing if folder was renamed
+        results_dir = REPO_ROOT / "conformer_loso_results"
+        
     checkpoints_dir = results_dir / "checkpoints"
     
     if not checkpoints_dir.exists():
-        print("Checkpoints directory not found!")
+        print(f"Checkpoints directory not found at {checkpoints_dir}!")
         return
         
     seeds = [1, 7, 21, 42, 123]
