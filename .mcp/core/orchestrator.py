@@ -21,10 +21,15 @@ def start_task_impl(task: str, repo_root: Path) -> dict:
     is_research = any(x in t_lower for x in ["research", "paper", "concept"])
     is_analysis = any(x in t_lower for x in ["analyze", "metric", "result"])
     is_refactor = any(x in t_lower for x in ["refactor", "cleanup", "rewrite"])
+    is_ml_eng = any(x in t_lower for x in [
+        "architecture", "model", "training", "loss", "dataset", "pytorch", 
+        "eeg", "neural network", "representation learning", "matchnet", 
+        "ridge", "distillation", "encoder", "decoder", "kul", "dtu", "aad"
+    ])
     
     if is_bug_fix:
         task_type = "debugging"
-    elif is_research:
+    elif is_research or is_ml_eng:
         task_type = "research"
     elif is_analysis:
         task_type = "analysis"
@@ -42,12 +47,12 @@ def start_task_impl(task: str, repo_root: Path) -> dict:
     
     # 5. External Research Decision (Part 7: Context Selection)
     ext_research = ""
-    if is_research or requires_external_research(task):
+    if is_research or is_ml_eng or requires_external_research(task):
         ext_research = perform_external_research(task)
         
     # 6. ChatGPT Decision (Part 7: Context Selection)
     # Only use Browser ChatGPT when deep reasoning or architectural planning is required
-    requires_chatgpt = is_research or is_refactor or "architect" in t_lower or "matchnet" in t_lower
+    requires_chatgpt = is_research or is_ml_eng or is_refactor or "architect" in t_lower
     
     if requires_chatgpt:
         plan = generate_plan(task, ctx, mem)
@@ -68,6 +73,35 @@ def start_task_impl(task: str, repo_root: Path) -> dict:
         "start_time": time.time()
     }
     
+    planning_context_str = f"""Planning Context
+    
+Task Type: {task_type.upper()}
+
+Repository:
+{ctx.get("repository_summary", "None available")}
+
+Relevant Files:
+{ctx.get("related_files", [])}
+
+Previous Experiments:
+{mem.get("experiments", "None available")}
+
+Previous Decisions:
+None
+
+Research Findings (Browser Research):
+{ext_research if ext_research else "None required"}
+
+Implementation Plan (Browser ChatGPT Critique):
+{plan}
+
+Implementation Constraints:
+Do not invent new architectures unless explicitly instructed. Treat this plan as authoritative.
+
+Validation Plan:
+Repository CI -> Autonomous Review -> Verification
+"""
+
     plan_details = {
         "status": "READY",
         "phase": "PLANNING",
@@ -75,12 +109,7 @@ def start_task_impl(task: str, repo_root: Path) -> dict:
         "project": repo_root.name,
         "task_type": task_type,
         "summary": f"Orchestrating task: {task}",
-        "repository_context": ctx.get("repository_summary")[:500] + "..." if ctx.get("repository_summary") else "",
-        "previous_experiments": mem.get("experiments"),
-        "related_files": ctx.get("related_files"),
-        "implementation_plan": plan,
-        "risks": ["Subject leakage in LOSO splits" if plugin.name() == "EEG" else "General deployment risks"],
-        "estimated_files_to_modify": ["models/matchnet.py", "scratch/flawed_eeg.py"] if plugin.name() == "EEG" else []
+        "planning_context": planning_context_str
     }
     
     return {
@@ -144,6 +173,18 @@ def finish_task_impl(repo_root: Path) -> str:
         files = _ACTIVE_TASK.get("context", {}).get("related_files", [])
         
     task_desc = _ACTIVE_TASK.get("task", "Verify changes")
+    
+    # Run Repository CI
+    from .ci import run_repository_ci
+    ci_results = run_repository_ci(repo_root, files)
+    if not ci_results["success"]:
+        return json.dumps({
+            "verdict": "FAIL", 
+            "ci_failures": ci_results["errors"],
+            "phase": "REPOSITORY_CI",
+            "message": "Repository CI failed. You must fix these errors and retry finish_task() before Autonomous Review will execute."
+        }, indent=2)
+        
     review_output = server.autonomous_review(files, task_desc)
     
     if "PASS" in review_output:
