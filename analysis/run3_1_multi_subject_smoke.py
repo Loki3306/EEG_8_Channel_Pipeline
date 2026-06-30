@@ -231,10 +231,13 @@ def main():
         
     summary_path = REPO_ROOT / "conformer_loso_results" / "conformer_loso_multiseed_summary.json"
     kaggle_summary = Path("/kaggle/input/datasets/lowkieee/eeg-aad-conformer-seed1-checkpoints/conformer_loso_multiseed_summary.json")
-    if not kaggle_summary.exists():
-        kaggle_summary = Path("/kaggle/input/eeg-aad-conformer-seed1-checkpoints/conformer_loso_multiseed_summary.json")
-    if kaggle_summary.exists():
+    kaggle_summary2 = Path("/kaggle/input/datasets/lowkieee/conformer-loso-multiseed-summary/conformer_loso_multiseed_summary (1).json")
+    if kaggle_summary2.exists():
+        summary_path = kaggle_summary2
+    elif kaggle_summary.exists():
         summary_path = kaggle_summary
+    elif Path("/kaggle/input/eeg-aad-conformer-seed1-checkpoints/conformer_loso_multiseed_summary.json").exists():
+        summary_path = Path("/kaggle/input/eeg-aad-conformer-seed1-checkpoints/conformer_loso_multiseed_summary.json")
 
     if not cache_dir.exists() or not checkpoint_dir.exists() or not summary_path.exists():
         raise FileNotFoundError(f"Error: Missing required data. Cache: {cache_dir.exists()}, Ckpt: {checkpoint_dir.exists()}, Summary: {summary_path.exists()}")
