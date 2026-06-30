@@ -32,7 +32,13 @@ def run_temporal_occlusion(model, test_trials, device, window_seconds=10.0, step
             wav_b_full = wav_b_full[:,:,:min_len]
             
             # Chunk the trial into non-overlapping 10s windows
-            for start in range(0, min_len - win_samples + 1, win_samples):
+            starts = list(range(0, min_len - win_samples + 1, win_samples))
+            if not starts:
+                continue
+            if starts[-1] + win_samples < min_len:
+                starts.append(min_len - win_samples) # Cover the tail
+            
+            for start in starts:
                 eeg_chunk = eeg_full[:, :, start:start+win_samples]
                 wa_chunk = wav_a_full[:, :, start:start+win_samples].squeeze(1).squeeze(0).cpu().numpy()
                 wb_chunk = wav_b_full[:, :, start:start+win_samples].squeeze(1).squeeze(0).cpu().numpy()

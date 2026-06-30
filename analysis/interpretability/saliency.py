@@ -17,9 +17,8 @@ def run_saliency_analysis(model, test_trials, device, window_seconds=10.0, fs=64
     """
     win_samples = int(window_seconds * fs)
     
-    # We will accumulate the absolute Input x Gradient saliency
-    # Shape will be [Channels, Time] for the average 10s window
-    total_saliency = torch.zeros(8, win_samples, device=device)
+    # We will allocate total_saliency dynamically when we see the first trial
+    total_saliency = None
     num_windows = 0
     
     model.eval()
@@ -40,7 +39,13 @@ def run_saliency_analysis(model, test_trials, device, window_seconds=10.0, fs=64
             wav_a_full = wav_a_full[:,:,:min_len]
             wav_b_full = wav_b_full[:,:,:min_len]
             
-            for start in range(0, min_len - win_samples + 1, win_samples):
+            starts = list(range(0, min_len - win_samples + 1, win_samples))
+            if not starts:
+                continue
+            if starts[-1] + win_samples < min_len:
+                starts.append(min_len - win_samples)
+            
+            for start in starts:
                 eeg_chunk = eeg_full[:, :, start:start+win_samples].clone()
                 eeg_chunk.requires_grad_(True)
                 
@@ -63,10 +68,13 @@ def run_saliency_analysis(model, test_trials, device, window_seconds=10.0, fs=64
                 grad = eeg_chunk.grad.detach() # [1, Channels, Time]
                 input_x_grad = (eeg_chunk.detach() * grad).abs().squeeze(0) # [Channels, Time]
                 
+                if total_saliency is None:
+                    total_saliency = torch.zeros(eeg_chunk.shape[1], win_samples, device=device)
                 total_saliency += input_x_grad
                 num_windows += 1
 
     # Average Saliency
+    if total_saliency is None: return {"Saliency_Map": np.zeros((1, win_samples)), "Channel_Saliency": np.zeros(1), "Temporal_Saliency": np.zeros(win_samples)}
     avg_saliency = total_saliency / max(1, num_windows)
     avg_saliency_np = avg_saliency.cpu().numpy()
     

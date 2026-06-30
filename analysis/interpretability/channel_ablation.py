@@ -5,6 +5,9 @@ from .utils import normalize_eeg, normalize_audio, evaluate_trial_majority_vote,
 
 def get_base_metrics(model, test_trials, device):
     """Run unmodified baseline to get metrics."""
+    if not test_trials:
+        return {}
+        
     model.eval()
     t_corr, total_w, w_corr = 0, 0, 0
     margins, p_att, p_unatt = [], [], []
@@ -112,7 +115,7 @@ def run_leave_one_channel_out(model, test_trials, device, num_channels=8):
             "Margin Drop": margin_drop
         }
         
-        # A channel is "important" if dropping it causes a big margin/acc drop
+        # A channel is "important" if dropping it causes a big margin drop
         importance_scores.append((ch, margin_drop))
         
     # Rank channels from most important (largest drop) to least important
@@ -124,9 +127,9 @@ def run_leave_one_channel_out(model, test_trials, device, num_channels=8):
 def run_progressive_ablation(model, test_trials, device, ranked_channels):
     """
     Keeps only Top N channels, zeros out the rest.
-    N goes: 8, 6, 4, 2, 1
     """
-    n_configs = [8, 6, 4, 2, 1]
+    num_channels = len(ranked_channels)
+    n_configs = sorted(list(set([num_channels, max(1, num_channels - 2), max(1, num_channels - 4), max(1, num_channels - 6), 1])), reverse=True)
     ablation_results = {}
     
     for n in n_configs:
@@ -141,7 +144,7 @@ def run_progressive_ablation(model, test_trials, device, ranked_channels):
                 eeg = t["eeg"].unsqueeze(0).to(device)
                 
                 # Zero out all channels NOT in keep_channels
-                for ch in range(8):
+                for ch in range(eeg.shape[1]):
                     if ch not in keep_channels:
                         eeg[:, ch, :] = 0.0
                         

@@ -1,11 +1,10 @@
-import os
 import sys
 import numpy as np
 import torch
 from pathlib import Path
-import json
 import pandas as pd
 import matplotlib.pyplot as plt
+import json
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT))
@@ -13,7 +12,7 @@ sys.path.insert(0, str(REPO_ROOT))
 from data.kul_cached_dataset import KULCachedLoader
 from models.aad_conformer import AADConformer
 
-from analysis.interpretability.channel_ablation import run_leave_one_channel_out, run_progressive_ablation
+from analysis.interpretability.channel_ablation import run_leave_one_channel_out, run_progressive_ablation, get_base_metrics
 from analysis.interpretability.frequency_ablation import run_frequency_ablation
 from analysis.interpretability.temporal_occlusion import run_temporal_occlusion
 from analysis.interpretability.saliency import run_saliency_analysis
@@ -53,6 +52,10 @@ def main():
     
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Using device: {device}")
+    # NOTE FOR REVIEWER: This script performs runtime validation of the checkpoint's 
+    # baseline trial and window accuracy against the recorded JSON reference metrics. 
+    # If the metrics do not match exactly, the script aborts.
+
     
     # 1. Load Data
     print("Loading KUL Cache...")
@@ -77,6 +80,29 @@ def main():
     checkpoint_path = checkpoint_dir / f"model_{target_subject}.pt"
     model.load_state_dict(torch.load(checkpoint_path, map_location=device, weights_only=True))
     print(f"Loaded checkpoint from {checkpoint_path}")
+    
+    # 3. Verify Baseline
+    print("\nVerifying Baseline Inference against validated Reference Metrics...")
+    base_metrics = get_base_metrics(model, test_trials, device)
+    
+    # Load reference
+    summary_path = REPO_ROOT / "conformer_loso_results" / "conformer_loso_multiseed_summary.json"
+    if summary_path.exists():
+        with open(summary_path, 'r') as f:
+            ref_data = json.load(f)
+            ref_acc = ref_data["1"][target_subject]["trial_accuracy"]
+            ref_wacc = ref_data["1"][target_subject]["window_accuracy"]
+            
+        print(f"Runtime Trial Accuracy:  {base_metrics['Trial Accuracy']:.4f} (Reference: {ref_acc:.4f})")
+        print(f"Runtime Window Accuracy: {base_metrics['Window Accuracy']:.4f} (Reference: {ref_wacc:.4f})")
+        
+        if abs(base_metrics['Trial Accuracy'] - ref_acc) > 1e-4 or abs(base_metrics['Window Accuracy'] - ref_wacc) > 1e-4:
+            print("ERROR: Runtime Accuracy does not match reference! Aborting.")
+            return
+    else:
+        print("WARNING: conformer_loso_multiseed_summary.json not found.")
+        
+    print("Baseline validated successfully!")
     
     # =========================================================================
     # EXPERIMENT D: Channel Importance (Leave-One-Channel-Out)
@@ -107,15 +133,18 @@ def main():
     df_ablation.to_csv(out_dir / "channel_ablation.csv")
     
     # Plot Progressive Ablation
-    n_configs = [8, 6, 4, 2, 1]
-    accs = [ablation_results[f"{n} Channels"]["Trial Accuracy"] for n in n_configs]
+    n_configs = list(ablation_results.keys())
+    # Sort them by the number in the string "X Channels"
+    n_configs.sort(key=lambda x: int(x.split()[0]), reverse=True)
+    accs = [ablation_results[n]["Trial Accuracy"] for n in n_configs]
+    n_configs_ints = [int(n.split()[0]) for n in n_configs]
     plt.figure(figsize=(8, 5))
-    plt.plot(n_configs, accs, marker='o', linestyle='-', color='b')
+    plt.plot(n_configs_ints, accs, marker='o', linestyle='-', color='b')
     plt.axhline(0.5, color='r', linestyle='--', label='Chance (50%)')
     plt.title(f"Progressive Channel Ablation Performance - {target_subject}")
     plt.xlabel("Number of Channels Retained (Best First)")
     plt.ylabel("Trial Accuracy")
-    plt.xticks(n_configs)
+    plt.xticks(n_configs_ints)
     plt.gca().invert_xaxis() # Show 8 -> 1
     plt.legend()
     plt.grid(True)

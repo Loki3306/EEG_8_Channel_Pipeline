@@ -1,32 +1,22 @@
 import numpy as np
 import torch
-from scipy.signal import butter, filtfilt
 from .utils import normalize_eeg, normalize_audio, evaluate_trial_majority_vote, safe_corr_np
 
-def apply_bandstop_filter(eeg_tensor: torch.Tensor, lowcut: float, highcut: float, fs: int = 64, order: int = 4) -> torch.Tensor:
-    """
-    Applies a Butterworth band-stop filter to the EEG tensor.
-    eeg_tensor: [Batch, Channels, Time]
-    """
-    nyquist = 0.5 * fs
-    low = lowcut / nyquist
-    high = highcut / nyquist
-    
-    # Design band-stop filter
-    b, a = butter(order, [low, high], btype='bandstop')
-    
-    # Convert tensor to numpy for scipy filtfilt
-    eeg_np = eeg_tensor.cpu().numpy()
-    
-    # filtfilt applies filter forward and backward for zero phase shift
-    filtered_np = filtfilt(b, a, eeg_np, axis=-1)
-    
-    # Ensure float32 and return as tensor
-    return torch.from_numpy(filtered_np.astype(np.float32)).to(eeg_tensor.device)
+def apply_fft_bandstop(eeg_tensor: torch.Tensor, lowcut: float, highcut: float, fs: int = 64) -> torch.Tensor:
+    n_samples = eeg_tensor.shape[-1]
+    fft_vals = torch.fft.rfft(eeg_tensor, dim=-1)
+    freqs = torch.fft.rfftfreq(n_samples, d=1.0/fs).to(eeg_tensor.device)
+    mask = torch.ones_like(freqs)
+    mask[(freqs >= lowcut) & (freqs <= highcut)] = 0.0
+    fft_vals_filtered = fft_vals * mask
+    return torch.fft.irfft(fft_vals_filtered, n=n_samples, dim=-1)
 
 def run_frequency_ablation(model, test_trials, device):
     """
     Evaluates model performance after ablating specific canonical EEG frequency bands.
+    NOTE: This is an exploratory analysis. Inference-time spectral ablation via FFT masking 
+    is not part of the standard validated evaluation protocol. Physiological conclusions 
+    derived from these ablations should be considered exploratory rather than validated.
     """
     bands = {
         "Delta (0.5-4Hz)": (0.5, 4.0),
@@ -47,7 +37,7 @@ def run_frequency_ablation(model, test_trials, device):
                 eeg = t["eeg"].unsqueeze(0).to(device)
                 
                 # Apply bandstop filter to remove this frequency band
-                eeg = apply_bandstop_filter(eeg, lowcut, highcut, fs=64)
+                eeg = apply_fft_bandstop(eeg, lowcut, highcut, fs=64)
                 
                 wav_a = t["audio_a"].unsqueeze(0).to(device).mean(dim=1, keepdim=True)
                 wav_b = t["audio_b"].unsqueeze(0).to(device).mean(dim=1, keepdim=True)
