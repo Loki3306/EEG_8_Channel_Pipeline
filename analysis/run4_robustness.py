@@ -2,9 +2,10 @@ import os
 import sys
 import numpy as np
 import torch
-import json
 import warnings
 from pathlib import Path
+
+import matplotlib.pyplot as plt
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT))
@@ -15,6 +16,11 @@ from analysis.interpretability.utils import safe_corr_np, normalize_eeg, normali
 from analysis.interpretability.channel_ablation import run_leave_one_channel_out
 
 warnings.filterwarnings("ignore")
+
+def confidence_interval(data, confidence=0.95):
+    """Computes the 95% CI (1.96 * std / sqrt(N))."""
+    if len(data) == 0: return 0.0
+    return 1.96 * np.std(data, ddof=1) / np.sqrt(len(data)) if len(data) > 1 else 0.0
 
 def sliding_window_evaluation(model, eeg, wav_a, wav_b, win_samples, hop_samples):
     """Custom evaluator returning detailed margin statistics for each window."""
@@ -99,12 +105,12 @@ def exp4_1_decision_windows(model, test_trials, device):
         results[f"{w_sec}s"] = {
             "Trial Acc": t_corr / len(test_trials),
             "Window Acc": w_corr / max(1, total_w),
-            "Mean Margin": np.mean(all_margins),
-            "Median Margin": np.median(all_margins),
-            "Margin Std": np.std(all_margins),
-            "Positive Margin %": np.mean(np.array(all_margins) > 0) * 100,
-            "Mean P(att)": np.mean(all_p_att),
-            "Mean P(unatt)": np.mean(all_p_unatt)
+            "Mean Margin": np.mean(all_margins) if len(all_margins) > 0 else 0,
+            "Median Margin": np.median(all_margins) if len(all_margins) > 0 else 0,
+            "Margin Std": np.std(all_margins) if len(all_margins) > 0 else 0,
+            "Positive Margin %": np.mean(np.array(all_margins) > 0) * 100 if len(all_margins) > 0 else 0,
+            "Mean P(att)": np.mean(all_p_att) if len(all_p_att) > 0 else 0,
+            "Mean P(unatt)": np.mean(all_p_unatt) if len(all_p_unatt) > 0 else 0
         }
     return results
 
@@ -112,12 +118,9 @@ def inject_awgn(tensor, snr_db):
     if snr_db is None: # Clean
         return tensor
     
-    # Calculate signal power (variance) per channel
     signal_power = torch.var(tensor, dim=-1, keepdim=True)
-    # Calculate required noise power
     snr_linear = 10 ** (snr_db / 10.0)
     noise_power = signal_power / snr_linear
-    # Generate noise
     noise = torch.randn_like(tensor) * torch.sqrt(noise_power)
     return tensor + noise
 
@@ -142,7 +145,6 @@ def exp4_2_eeg_noise(model, test_trials, device):
                 wav_a = t["audio_a"].unsqueeze(0).to(device).mean(dim=1, keepdim=True)
                 wav_b = t["audio_b"].unsqueeze(0).to(device).mean(dim=1, keepdim=True)
                 
-                # Inject noise BEFORE normalization
                 eeg_noisy = inject_awgn(eeg_clean, snr)
                 
                 eeg = normalize_eeg(eeg_noisy)
@@ -162,7 +164,7 @@ def exp4_2_eeg_noise(model, test_trials, device):
         results[label] = {
             "Trial Acc": t_corr / len(test_trials),
             "Window Acc": w_corr / max(1, total_w),
-            "Mean Margin": np.mean(all_margins)
+            "Mean Margin": np.mean(all_margins) if len(all_margins) > 0 else 0
         }
     return results
 
@@ -212,11 +214,11 @@ def exp4_3_channel_count(model, test_trials, device, ranked_channels):
         results[f"{n} Chs"] = {
             "Trial Acc": t_corr / len(test_trials),
             "Window Acc": w_corr / max(1, total_w),
-            "Mean Margin": np.mean(all_margins)
+            "Mean Margin": np.mean(all_margins) if len(all_margins) > 0 else 0
         }
     return results
 
-def exp4_4_confidence_calibration(model, test_trials, device):
+def get_calib_data(model, test_trials, device):
     fs = 64
     win_samples = 10 * fs
     hop_samples = fs
@@ -242,10 +244,128 @@ def exp4_4_confidence_calibration(model, test_trials, device):
             all_margins.extend(m)
             all_correct.extend([margin > 0 for margin in m])
             
+    return all_margins, all_correct
+
+def aggregate_results(subj_results, metric_keys):
+    """
+    subj_results: dict mapping subj_id -> dict mapping condition -> dict mapping metric -> val
+    Returns aggregated dictionary: condition -> metric -> {Mean, Median, Std, CI95}
+    """
+    subjects = list(subj_results.keys())
+    if len(subjects) == 0: return {}
+    
+    conditions = list(subj_results[subjects[0]].keys())
+    
+    agg = {}
+    for cond in conditions:
+        agg[cond] = {}
+        for m in metric_keys:
+            vals = [subj_results[s][cond][m] for s in subjects if cond in subj_results[s] and m in subj_results[s][cond]]
+            agg[cond][m] = {
+                "Mean": np.mean(vals),
+                "Median": np.median(vals),
+                "Std": np.std(vals, ddof=1) if len(vals) > 1 else 0.0,
+                "CI95": confidence_interval(vals)
+            }
+    return agg
+
+def print_agg_table(agg_dict, metric_key, title):
+    print(f"\n{title}")
+    cols = ["Condition", "Mean", "Median", "Std", "95% CI"]
+    print("| " + " | ".join(cols) + " |")
+    print("| " + " | ".join(["---"] * len(cols)) + " |")
+    for cond, metrics in agg_dict.items():
+        if metric_key not in metrics: continue
+        d = metrics[metric_key]
+        row = [cond, f"{d['Mean']:.4f}", f"{d['Median']:.4f}", f"{d['Std']:.4f}", f"±{d['CI95']:.4f}"]
+        print("| " + " | ".join(row) + " |")
+
+def plot_exp4_1(agg_data, out_dir):
+    windows = [1, 2, 5, 10, 20, 30, 60]
+    keys = [f"{w}s" for w in windows]
+    
+    acc_mean = [agg_data[k]["Window Acc"]["Mean"] for k in keys]
+    acc_ci = [agg_data[k]["Window Acc"]["CI95"] for k in keys]
+    
+    margin_mean = [agg_data[k]["Mean Margin"]["Mean"] for k in keys]
+    margin_ci = [agg_data[k]["Mean Margin"]["CI95"] for k in keys]
+    
+    pos_margin_mean = [agg_data[k]["Positive Margin %"]["Mean"] for k in keys]
+    pos_margin_ci = [agg_data[k]["Positive Margin %"]["CI95"] for k in keys]
+    
+    fig, axes = plt.subplots(1, 3, figsize=(18, 5))
+    
+    # Accuracy
+    axes[0].plot(windows, acc_mean, 'bo-', label='Window Accuracy')
+    axes[0].fill_between(windows, np.array(acc_mean)-np.array(acc_ci), np.array(acc_mean)+np.array(acc_ci), color='b', alpha=0.2)
+    axes[0].set_xlabel("Decision Window (s)")
+    axes[0].set_ylabel("Accuracy")
+    axes[0].set_title("Window Length vs. Accuracy")
+    axes[0].grid(True)
+    
+    # Margin
+    axes[1].plot(windows, margin_mean, 'go-', label='Mean Margin')
+    axes[1].fill_between(windows, np.array(margin_mean)-np.array(margin_ci), np.array(margin_mean)+np.array(margin_ci), color='g', alpha=0.2)
+    axes[1].set_xlabel("Decision Window (s)")
+    axes[1].set_ylabel("Margin")
+    axes[1].set_title("Window Length vs. Mean Margin")
+    axes[1].grid(True)
+    
+    # Positive Margin %
+    axes[2].plot(windows, pos_margin_mean, 'ro-', label='Positive Margin %')
+    axes[2].fill_between(windows, np.array(pos_margin_mean)-np.array(pos_margin_ci), np.array(pos_margin_mean)+np.array(pos_margin_ci), color='r', alpha=0.2)
+    axes[2].set_xlabel("Decision Window (s)")
+    axes[2].set_ylabel("Positive Margin (%)")
+    axes[2].set_title("Window Length vs. Positive Margin %")
+    axes[2].grid(True)
+    
+    plt.tight_layout()
+    plt.savefig(out_dir / "exp4_1_windows.png", dpi=300)
+    plt.close()
+
+def plot_exp4_2(agg_data, out_dir):
+    snrs = ["Clean", "20dB", "15dB", "10dB", "5dB", "0dB"]
+    x_labels = ["Clean", "20", "15", "10", "5", "0"]
+    
+    acc_mean = [agg_data[k]["Window Acc"]["Mean"] for k in snrs]
+    acc_ci = [agg_data[k]["Window Acc"]["CI95"] for k in snrs]
+    
+    plt.figure(figsize=(8, 6))
+    plt.plot(x_labels, acc_mean, 'bo-')
+    plt.fill_between(x_labels, np.array(acc_mean)-np.array(acc_ci), np.array(acc_mean)+np.array(acc_ci), color='b', alpha=0.2)
+    plt.xlabel("SNR (dB)")
+    plt.ylabel("Window Accuracy")
+    plt.title("EEG Noise Robustness (SNR vs. Accuracy)")
+    plt.grid(True)
+    plt.tight_layout()
+    plt.savefig(out_dir / "exp4_2_noise.png", dpi=300)
+    plt.close()
+
+def plot_exp4_3(agg_data, out_dir):
+    channels = [8, 7, 6, 5, 4, 3, 2, 1]
+    keys = [f"{c} Chs" for c in channels]
+    
+    acc_mean = [agg_data[k]["Trial Acc"]["Mean"] for k in keys]
+    acc_ci = [agg_data[k]["Trial Acc"]["CI95"] for k in keys]
+    
+    plt.figure(figsize=(8, 6))
+    plt.plot(channels, acc_mean, 'bo-')
+    plt.fill_between(channels, np.array(acc_mean)-np.array(acc_ci), np.array(acc_mean)+np.array(acc_ci), color='b', alpha=0.2)
+    plt.gca().invert_xaxis()
+    plt.xlabel("Number of Channels Retained")
+    plt.ylabel("Trial Accuracy")
+    plt.title("Channel Count Robustness")
+    plt.grid(True)
+    plt.tight_layout()
+    plt.savefig(out_dir / "exp4_3_channels.png", dpi=300)
+    plt.close()
+
+def compute_and_plot_calibration(all_margins, all_correct, out_dir):
     all_margins = np.array(all_margins)
     all_correct = np.array(all_correct, dtype=float)
     
     conf_probs = (all_margins + 2.0) / 4.0
+    conf_probs = np.clip(conf_probs, 0.0, 0.9999)
     
     bins = np.linspace(0, 1, 11)
     bin_indices = np.digitize(conf_probs, bins) - 1
@@ -253,6 +373,9 @@ def exp4_4_confidence_calibration(model, test_trials, device):
     calibration_curve = []
     ece = 0.0
     total_samples = len(conf_probs)
+    
+    bin_centers = []
+    emp_accs = []
     
     if total_samples > 0:
         for i in range(10):
@@ -268,27 +391,28 @@ def exp4_4_confidence_calibration(model, test_trials, device):
                     "Bin": i,
                     "Count": n_bin,
                     "Mean Margin": mean_margin,
-                    "Empirical Acc": bin_acc
+                    "Empirical Acc": bin_acc,
+                    "Mean Conf": bin_conf
                 })
-            
+                bin_centers.append(bin_conf)
+                emp_accs.append(bin_acc)
+                
+    plt.figure(figsize=(8, 8))
+    plt.plot([0, 1], [0, 1], "k--", label="Perfect Calibration")
+    plt.plot(bin_centers, emp_accs, "bo-", label="Empirical Calibration")
+    plt.xlabel("Mean Confidence (Normalized Margin)")
+    plt.ylabel("Empirical Accuracy")
+    plt.title(f"Reliability Diagram (Global ECE = {ece:.4f})")
+    plt.legend()
+    plt.grid(True)
+    plt.tight_layout()
+    plt.savefig(out_dir / "exp4_4_calibration.png", dpi=300)
+    plt.close()
+    
     return calibration_curve, ece
 
-def print_markdown_table(data_dict, cols):
-    print("| " + " | ".join(cols) + " |")
-    print("| " + " | ".join(["---"] * len(cols)) + " |")
-    for key, vals in data_dict.items():
-        row = [key]
-        for c in cols[1:]:
-            val = vals.get(c, "")
-            if isinstance(val, float):
-                row.append(f"{val:.4f}")
-            else:
-                row.append(str(val))
-        print("| " + " | ".join(row) + " |")
-    print()
-
 def main():
-    print("--- Phase 4: Robustness & Real-World Generalization Validation ---")
+    print("--- Phase 4: Full Robustness Validation Benchmark (16 Subjects) ---")
     
     cache_dir = REPO_ROOT / "data" / "processed_kul"
     if Path("/kaggle/input/datasets/lowk1ee/kul-preprocessed-cache/data/processed_kul").exists():
@@ -301,18 +425,24 @@ def main():
     if kaggle_ckpt.exists():
         checkpoint_dir = kaggle_ckpt
         
+    out_dir = REPO_ROOT / "results" / "run4_robustness_final"
+    os.makedirs(out_dir, exist_ok=True)
+        
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Using device: {device}")
     
     loader = KULCachedLoader(cache_dir)
     loader.load_all()
     
-    subjects_to_test = ['S11', 'S16', 'S13'] # Strong, Average, Weak
+    subjects_to_test = list(loader.subjects_data.keys())
+    print(f"Evaluating {len(subjects_to_test)} subjects: {subjects_to_test}")
     
     all_res_4_1 = {}
     all_res_4_2 = {}
     all_res_4_3 = {}
-    all_res_4_4 = {}
+    
+    global_margins = []
+    global_correct = []
     
     for subj in subjects_to_test:
         print(f"\n=== Processing Subject {subj} ===")
@@ -325,8 +455,7 @@ def main():
         model.load_state_dict(torch.load(ckpt_path, map_location=device))
         model.eval()
         
-        exs = loader.subjects_data[subj]
-        test_trials = exs[-3:] if len(exs) > 3 else exs # Last 3 trials for testing per protocol
+        test_trials = loader.subjects_data[subj] # Full trial set
         
         print("  - Running Exp 4.1: Decision Window Robustness...")
         res_4_1 = exp4_1_decision_windows(model, test_trials, device)
@@ -337,11 +466,8 @@ def main():
         all_res_4_2[subj] = res_4_2
         
         print("  - Running Exp 4.3: Channel Count Robustness...")
-        # Get ranked channels (indices) directly
         loco_results, ranked_channels = run_leave_one_channel_out(model, test_trials, device)
         
-        # ranked_channels might contain string names if channel_ablation.py was fully updated to return names
-        # We need indices for exp4_3. Let's ensure we use indices.
         CHANNEL_NAMES = ['T7', 'C2', 'FT8', 'P7', 'CPz', 'Fp1', 'TP8', 'C3']
         ranked_indices = []
         for ch_val in ranked_channels:
@@ -349,69 +475,63 @@ def main():
                 ranked_indices.append(CHANNEL_NAMES.index(ch_val))
             elif isinstance(ch_val, int):
                 ranked_indices.append(ch_val)
-        
+                
         res_4_3 = exp4_3_channel_count(model, test_trials, device, ranked_indices)
         all_res_4_3[subj] = res_4_3
         
-        print("  - Running Exp 4.4: Confidence Calibration...")
-        calib_curve, ece = exp4_4_confidence_calibration(model, test_trials, device)
-        all_res_4_4[subj] = {"Curve": calib_curve, "ECE": ece}
+        print("  - Running Exp 4.4: Accumulating Confidence Calibration Data...")
+        subj_margins, subj_correct = get_calib_data(model, test_trials, device)
+        global_margins.extend(subj_margins)
+        global_correct.extend(subj_correct)
         
     print("\n\n" + "="*80)
-    print("PHASE 4 CONSOLIDATED SCIENTIFIC REPORT")
+    print("PHASE 4 CONSOLIDATED SCIENTIFIC REPORT (16 SUBJECTS)")
     print("="*80 + "\n")
     
+    # Aggregate 4.1
+    agg_4_1 = aggregate_results(all_res_4_1, ["Trial Acc", "Window Acc", "Mean Margin", "Positive Margin %"])
     print("### Experiment 4.1: Decision Window Robustness")
-    print("Measures how temporal context affects accuracy.\n")
-    for subj, res in all_res_4_1.items():
-        print(f"**Subject {subj}**")
-        cols = ["Window", "Trial Acc", "Window Acc", "Mean Margin", "Positive Margin %"]
-        print_markdown_table(res, cols)
-        
+    print_agg_table(agg_4_1, "Window Acc", "Aggregated Window Accuracy")
+    print_agg_table(agg_4_1, "Mean Margin", "Aggregated Mean Margin")
+    plot_exp4_1(agg_4_1, out_dir)
+    print(f"-> Saved Exp 4.1 plot to {out_dir}/exp4_1_windows.png")
+    
+    # Aggregate 4.2
+    agg_4_2 = aggregate_results(all_res_4_2, ["Trial Acc", "Window Acc", "Mean Margin"])
     print("\n### Experiment 4.2: EEG Noise Robustness")
-    print("Measures tolerance to Additive White Gaussian Noise (AWGN).\n")
-    for subj, res in all_res_4_2.items():
-        print(f"**Subject {subj}**")
-        cols = ["SNR", "Trial Acc", "Window Acc", "Mean Margin"]
-        print_markdown_table(res, cols)
-        
+    print_agg_table(agg_4_2, "Window Acc", "Aggregated Window Accuracy vs SNR")
+    plot_exp4_2(agg_4_2, out_dir)
+    print(f"-> Saved Exp 4.2 plot to {out_dir}/exp4_2_noise.png")
+    
+    # Aggregate 4.3
+    agg_4_3 = aggregate_results(all_res_4_3, ["Trial Acc", "Window Acc", "Mean Margin"])
     print("\n### Experiment 4.3: Channel Count Robustness")
-    print("Graceful degradation via permutation feature importance (Top 8 to 1).\n")
-    for subj, res in all_res_4_3.items():
-        print(f"**Subject {subj}**")
-        cols = ["Channels", "Trial Acc", "Window Acc", "Mean Margin"]
-        print_markdown_table(res, cols)
-        
-    print("\n### Experiment 4.4: Confidence Calibration")
-    print("Measures if higher prediction margin correlates with higher accuracy.\n")
-    for subj, res in all_res_4_4.items():
-        print(f"**Subject {subj} - ECE: {res['ECE']:.4f}**")
-        print("| Bin | Count | Mean Margin | Empirical Acc |")
-        print("|---|---|---|---|")
-        for row in res['Curve']:
-            print(f"| {row['Bin']} | {row['Count']} | {row['Mean Margin']:.4f} | {row['Empirical Acc']:.4f} |")
-        print()
-        
+    print_agg_table(agg_4_3, "Trial Acc", "Aggregated Trial Accuracy vs Channel Count")
+    plot_exp4_3(agg_4_3, out_dir)
+    print(f"-> Saved Exp 4.3 plot to {out_dir}/exp4_3_channels.png")
+    
+    # Aggregate 4.4
+    print("\n### Experiment 4.4: Confidence Calibration (Population Level)")
+    calib_curve, global_ece = compute_and_plot_calibration(global_margins, global_correct, out_dir)
+    print(f"**Global Expected Calibration Error (ECE): {global_ece:.4f}**")
+    print("| Bin | Count | Mean Margin | Empirical Acc |")
+    print("|---|---|---|---|")
+    for row in calib_curve:
+        print(f"| {row['Bin']} | {row['Count']} | {row['Mean Margin']:.4f} | {row['Empirical Acc']:.4f} |")
+    print(f"-> Saved Exp 4.4 plot to {out_dir}/exp4_4_calibration.png")
+    
     print("\n### Cross-Experiment Scientific Conclusions")
     print("""
 1. **How quickly can attention be decoded?**
-   (See Exp 4.1 tables). Look for the inflection point where 'Window Acc' collapses.
-
+   (See Exp 4.1). Review the point where the Window Accuracy curve sharply degrades.
 2. **How robust is the model to EEG noise?**
-   (See Exp 4.2 tables). Compare 'Clean' performance to SNR thresholds to identify the breakpoint.
-
-3. **How many channels are actually necessary?**
-   (See Exp 4.3 tables). The point where 'Trial Acc' drops below 60% indicates the minimum viable hardware bound.
-
-4. **Is prediction confidence meaningful?**
-   (See Exp 4.4 tables). If 'Empirical Acc' monotonically increases with 'Mean Margin', the model is well-calibrated and highly reliable for real-world deployment.
-
-5. **Under what conditions does the model fail?**
-   Based on the data above, you can precisely define the failure thresholds (e.g., < 2s windows, < 10dB SNR, < 3 channels).
-
-6. **Which experiment represents the largest practical limitation?**
-   The steepest performance cliff across the 4 experiments determines the true hardware/environmental constraint for a viable hearing-aid.
+   (See Exp 4.2). Identifies the SNR limit at which the attention signal is completely masked.
+3. **What is the minimum usable channel count?**
+   (See Exp 4.3). Check when Trial Accuracy drops below acceptable operating thresholds (e.g. 60-65%).
+4. **Is the confidence estimate reliable?**
+   (See Exp 4.4). A monotonically increasing Reliability Diagram implies high confidence is trustworthy.
 """)
+    print("\n[Phase 4 Benchmark Complete]")
 
 if __name__ == "__main__":
     main()
