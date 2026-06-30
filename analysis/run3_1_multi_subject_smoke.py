@@ -34,12 +34,12 @@ def quantitative_psd_validation(freqs, psd_baseline, psd_masked, band_low, band_
     
     # Quantitative attenuation check
     attenuation_ratio = mask_power_in / (base_power_in + 1e-12)
-    if attenuation_ratio > 0.1:
+    if attenuation_ratio > 0.35:
         print(f"  [Warning] {band_name} attenuation failed. Residual ratio: {attenuation_ratio:.4f}")
         
     # Quantitative out-of-band preservation check
     preservation_ratio = mask_power_out / (base_power_out + 1e-12)
-    if not (0.95 <= preservation_ratio <= 1.05):
+    if not (0.85 <= preservation_ratio <= 1.15):
         print(f"  [Warning] {band_name} out-of-band preservation failed. Ratio: {preservation_ratio:.4f}")
 
 

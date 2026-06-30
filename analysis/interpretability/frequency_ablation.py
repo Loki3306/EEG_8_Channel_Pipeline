@@ -2,14 +2,20 @@ import numpy as np
 import torch
 from .utils import normalize_eeg, normalize_audio, evaluate_trial_majority_vote, safe_corr_np
 
+from scipy.signal import butter, filtfilt
+
 def apply_fft_bandstop(eeg_tensor: torch.Tensor, lowcut: float, highcut: float, fs: int = 64) -> torch.Tensor:
-    n_samples = eeg_tensor.shape[-1]
-    fft_vals = torch.fft.rfft(eeg_tensor, dim=-1)
-    freqs = torch.fft.rfftfreq(n_samples, d=1.0/fs).to(eeg_tensor.device)
-    mask = torch.ones_like(freqs)
-    mask[(freqs >= lowcut) & (freqs <= highcut)] = 0.0
-    fft_vals_filtered = fft_vals * mask
-    return torch.fft.irfft(fft_vals_filtered, n=n_samples, dim=-1)
+    # Use 4th-order Butterworth bandstop (effectively 8th order via filtfilt) 
+    # to avoid the Gibbs ringing of a brick-wall FFT filter
+    eeg_np = eeg_tensor.cpu().numpy()
+    nyq = 0.5 * fs
+    low = max(0.01, lowcut / nyq) # ensure strict > 0
+    high = min(0.99, highcut / nyq)
+    
+    b, a = butter(4, [low, high], btype='bandstop')
+    filtered = filtfilt(b, a, eeg_np, axis=-1)
+    
+    return torch.tensor(filtered, dtype=eeg_tensor.dtype, device=eeg_tensor.device)
 
 def run_frequency_ablation(model, test_trials, device):
     """
