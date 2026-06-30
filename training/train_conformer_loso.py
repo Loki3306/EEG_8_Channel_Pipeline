@@ -138,12 +138,20 @@ def main():
         print(f"Starting LOSO Fold: Test Subject = {test_subject}")
         print(f"{'='*60}")
         
-        train_trials = []
         test_trials = all_subject_data[test_subject]
         
-        for sub, trials in all_subject_data.items():
-            if sub != test_subject:
-                train_trials.extend(trials)
+        # Pick one subject from the remaining as the validation subject
+        remaining_subjects = [s for s in subjects if s != test_subject]
+        test_idx = subjects.index(test_subject)
+        # Deterministically rotate the validation subject
+        val_subject = remaining_subjects[test_idx % len(remaining_subjects)]
+        val_trials = all_subject_data[val_subject]
+        print(f"Validation Subject: {val_subject} | Training Subjects: {len(remaining_subjects)-1}")
+        
+        train_trials = []
+        for sub in remaining_subjects:
+            if sub != val_subject:
+                train_trials.extend(all_subject_data[sub])
                 
         train_tensors = prepare_data(train_trials, window_sec=2, hop_sec=1, fs=64)
         if train_tensors is None:
@@ -168,11 +176,11 @@ def main():
         optimizer = optim.AdamW(model.parameters(), lr=1e-3, weight_decay=1e-4)
         
         epochs = 15
-        best_margin = -float('inf')
+        best_val_margin = -float('inf')
         patience = 4
         patience_counter = 0
         
-        best_metrics = {}
+        best_model_state = None
         
         for epoch in range(1, epochs + 1):
             model.train()
@@ -194,15 +202,14 @@ def main():
                 
             train_loss /= len(dataset)
             
+            # --- EVALUATE ON VALIDATION SET ---
             model.eval()
             val_loss = 0.0
             total_val_samples = 0
             mean_corr_att, mean_corr_unatt = 0.0, 0.0
-            mv_trial_correct, mv_windows_correct, mv_windows_total = 0, 0, 0
-            trial_margins = []
             
             with torch.no_grad():
-                for t_idx, t in enumerate(test_trials):
+                for t_idx, t in enumerate(val_trials):
                     eeg = t["eeg"].unsqueeze(0).to(device)       
                     audio_a = t["audio_a"].unsqueeze(0).to(device) 
                     audio_b = t["audio_b"].unsqueeze(0).to(device)
@@ -237,50 +244,105 @@ def main():
                     c_unatt = safe_corr_np(pred_np, wav_b_np)
                     mean_corr_att += c_att
                     mean_corr_unatt += c_unatt
-                    trial_margin = c_att - c_unatt
-                    trial_margins.append(trial_margin)
-                    
-                    trial_ok, n_win, c_win = evaluate_trial_majority_vote(pred_np, wav_a_np, wav_b_np, window_seconds=10, hop_seconds=1.0, fs=64)
-                    if trial_ok: mv_trial_correct += 1
-                    mv_windows_total += n_win
-                    mv_windows_correct += c_win
                     
             val_loss /= total_val_samples
             mean_corr_att /= total_val_samples
             mean_corr_unatt /= total_val_samples
+            epoch_val_margin = mean_corr_att - mean_corr_unatt
             
-            trial_acc = mv_trial_correct / total_val_samples if total_val_samples > 0 else 0
-            win_acc = mv_windows_correct / mv_windows_total if mv_windows_total > 0 else 0
-            epoch_margin = mean_corr_att - mean_corr_unatt
+            print(f"Fold {test_subject} - Epoch {epoch}/{epochs} | Train Loss: {train_loss:.4f} | Val Loss: {val_loss:.4f} | Val Margin: {epoch_val_margin:.4f}")
             
-            print(f"Fold {test_subject} - Epoch {epoch}/{epochs} | Train Loss: {train_loss:.4f} | Val Loss: {val_loss:.4f} | Margin: {epoch_margin:.4f} | Trial Acc: {trial_acc*100:.1f}%")
-            
-            if epoch_margin > best_margin:
-                best_margin = epoch_margin
-                best_metrics = {
-                    "trial_accuracy": float(trial_acc),
-                    "window_accuracy": float(win_acc),
-                    "mean_pearson_att": float(mean_corr_att),
-                    "mean_pearson_unatt": float(mean_corr_unatt),
-                    "mean_margin": float(np.mean(trial_margins)),
-                    "median_margin": float(np.median(trial_margins)),
-                    "margin_std": float(np.std(trial_margins)),
-                    "positive_margin_fraction": float(np.sum(np.array(trial_margins) > 0) / len(trial_margins)),
-                    "negative_margin_fraction": float(np.sum(np.array(trial_margins) < 0) / len(trial_margins)),
-                    "fold_trial_margins": [float(m) for m in trial_margins]
-                }
+            if epoch_val_margin > best_val_margin:
+                best_val_margin = epoch_val_margin
+                import copy
+                best_model_state = copy.deepcopy(model.state_dict())
                 patience_counter = 0
             else:
                 patience_counter += 1
                 
             if patience_counter >= patience:
-                print("Early stopping triggered.")
+                print("Early stopping triggered on validation set.")
                 break
                 
-        loso_results[test_subject] = best_metrics
+        # --- EVALUATE ON HELD-OUT TEST SET (ONCE) ---
+        print(f"--- Evaluating Test Subject: {test_subject} ---")
+        model.load_state_dict(best_model_state)
+        model.eval()
+        
+        test_loss = 0.0
+        total_test_samples = 0
+        test_corr_att, test_corr_unatt = 0.0, 0.0
+        mv_trial_correct, mv_windows_correct, mv_windows_total = 0, 0, 0
+        trial_margins = []
+        
+        with torch.no_grad():
+            for t_idx, t in enumerate(test_trials):
+                eeg = t["eeg"].unsqueeze(0).to(device)       
+                audio_a = t["audio_a"].unsqueeze(0).to(device) 
+                audio_b = t["audio_b"].unsqueeze(0).to(device)
+                
+                audio_a = audio_a.mean(dim=1, keepdim=True)
+                audio_b = audio_b.mean(dim=1, keepdim=True)
+                
+                eeg_mean = eeg.mean(dim=2, keepdim=True)
+                eeg_std = eeg.std(dim=2, keepdim=True) + 1e-8
+                eeg_norm = (eeg - eeg_mean) / eeg_std
+                
+                audio_a_mean = audio_a.mean(dim=2, keepdim=True)
+                audio_a_std = audio_a.std(dim=2, keepdim=True) + 1e-8
+                audio_a_norm = (audio_a - audio_a_mean) / audio_a_std
+                
+                audio_b_mean = audio_b.mean(dim=2, keepdim=True)
+                audio_b_std = audio_b.std(dim=2, keepdim=True) + 1e-8
+                audio_b_norm = (audio_b - audio_b_mean) / audio_b_std
+                
+                pred = model(eeg_norm)
+                
+                target = audio_a_norm.squeeze(1)
+                loss_test = custom_loss(pred, target, mse_weight=0.5, corr_weight=0.5).item()
+                test_loss += loss_test
+                total_test_samples += 1
+                
+                pred_np = pred.squeeze(0).cpu().numpy()
+                wav_a_np = audio_a_norm.squeeze(1).squeeze(0).cpu().numpy()
+                wav_b_np = audio_b_norm.squeeze(1).squeeze(0).cpu().numpy()
+                
+                c_att = safe_corr_np(pred_np, wav_a_np)
+                c_unatt = safe_corr_np(pred_np, wav_b_np)
+                test_corr_att += c_att
+                test_corr_unatt += c_unatt
+                trial_margin = c_att - c_unatt
+                trial_margins.append(trial_margin)
+                
+                trial_ok, n_win, c_win = evaluate_trial_majority_vote(pred_np, wav_a_np, wav_b_np, window_seconds=10, hop_seconds=1.0, fs=64)
+                if trial_ok: mv_trial_correct += 1
+                mv_windows_total += n_win
+                mv_windows_correct += c_win
+                
+        test_loss /= total_test_samples
+        test_corr_att /= total_test_samples
+        test_corr_unatt /= total_test_samples
+        
+        trial_acc = mv_trial_correct / total_test_samples if total_test_samples > 0 else 0
+        win_acc = mv_windows_correct / mv_windows_total if mv_windows_total > 0 else 0
+        
+        test_metrics = {
+            "trial_accuracy": float(trial_acc),
+            "window_accuracy": float(win_acc),
+            "mean_pearson_att": float(test_corr_att),
+            "mean_pearson_unatt": float(test_corr_unatt),
+            "mean_margin": float(np.mean(trial_margins)),
+            "median_margin": float(np.median(trial_margins)),
+            "margin_std": float(np.std(trial_margins)),
+            "positive_margin_fraction": float(np.sum(np.array(trial_margins) > 0) / len(trial_margins)),
+            "negative_margin_fraction": float(np.sum(np.array(trial_margins) < 0) / len(trial_margins)),
+            "fold_trial_margins": [float(m) for m in trial_margins]
+        }
+                
+        loso_results[test_subject] = test_metrics
         print(f"--- Fold {test_subject} Completed ---")
-        print(f"Best Trial Acc: {best_metrics['trial_accuracy']*100:.1f}%")
-        print(f"Best Median Margin: {best_metrics['median_margin']:.4f}")
+        print(f"Test Trial Acc: {test_metrics['trial_accuracy']*100:.1f}%")
+        print(f"Test Median Margin: {test_metrics['median_margin']:.4f}")
         
     print("\n====================================================")
     print("ALL FOLDS COMPLETED")
