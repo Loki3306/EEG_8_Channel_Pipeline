@@ -254,7 +254,7 @@ def main():
                 torch.save(model.state_dict(), ckpt_path)
                 
         print(f"Fold completed. Best Val Margin: {best_val_margin:.4f}")
-        loso_results[test_subject] = best_val_margin
+        loso_results[test_subject] = float(best_val_margin)
         
     print("\n--- Phase 7 Multi-Task Training Summary ---")
     mean_margin = np.mean(list(loso_results.values()))
