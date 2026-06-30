@@ -29,7 +29,7 @@ def run_static_analysis(repo_root, files):
     except FileNotFoundError:
         # Fallback to mypy if pyright is missing
         try:
-            res2 = subprocess.run(["mypy", *files], cwd=repo_root, capture_output=True, text=True)
+            res2 = subprocess.run([sys.executable, "-m", "mypy", *files], cwd=repo_root, capture_output=True, text=True)
             if res2.returncode != 0:
                 errors.append(f"[MyPy Validation Failed]\n{res2.stdout}")
         except FileNotFoundError:
