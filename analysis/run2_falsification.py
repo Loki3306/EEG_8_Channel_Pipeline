@@ -49,7 +49,13 @@ def evaluate_trial_majority_vote(predicted: np.ndarray, wav_a: np.ndarray, wav_b
 
 def main():
     print("Loading KUL Cache...")
-    cache_dir = REPO_ROOT / "data" / "processed_kul"
+    if Path("/kaggle/input/datasets/lowk1ee/kul-preprocessed-cache/data/processed_kul").exists():
+        cache_dir = Path("/kaggle/input/datasets/lowk1ee/kul-preprocessed-cache/data/processed_kul")
+    elif Path("/kaggle/input/kul-preprocessed-cache/data/processed_kul").exists():
+        cache_dir = Path("/kaggle/input/kul-preprocessed-cache/data/processed_kul")
+    else:
+        cache_dir = REPO_ROOT / "data" / "processed_kul"
+        
     if not cache_dir.exists():
         print(f"KUL Cache not found at {cache_dir}.")
         return
@@ -60,7 +66,13 @@ def main():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Using device: {device}")
     
-    checkpoint_dir = REPO_ROOT / "conformer_loso_results" / "checkpoints" / "seed_1"
+    if Path("/kaggle/input/eeg-aad-conformer-seed1-checkpoints/conformer_loso_results/checkpoints/seed_1").exists():
+        checkpoint_dir = Path("/kaggle/input/eeg-aad-conformer-seed1-checkpoints/conformer_loso_results/checkpoints/seed_1")
+    elif Path("/kaggle/working/EEG_Training_New/conformer_loso_results/checkpoints/seed_1").exists():
+        checkpoint_dir = Path("/kaggle/working/EEG_Training_New/conformer_loso_results/checkpoints/seed_1")
+    else:
+        checkpoint_dir = REPO_ROOT / "conformer_loso_results" / "checkpoints" / "seed_1"
+        
     if not checkpoint_dir.exists():
         print(f"Checkpoints not found at {checkpoint_dir}")
         return
