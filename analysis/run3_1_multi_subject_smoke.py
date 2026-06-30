@@ -105,12 +105,10 @@ def audit_frequency_pipeline(test_trials, out_dir, subj):
     plt.xlim(0, 32)
     plt.legend()
     plt.grid(True)
-    plt.tight_layout()
-    plt.savefig(out_dir / f"psd_comparison_{subj}.png")
-    plt.close()
+    print(f"PSD Comparison plot and Frequency audit skipped to avoid file clutter.")
     
     df_psd = pd.DataFrame(psd_results)
-    df_psd.to_csv(out_dir / f"frequency_pipeline_audit_{subj}.csv", index=False)
+    # File saving removed per user request
 
 
 def get_subjects_from_benchmark(benchmark_data):
@@ -209,10 +207,10 @@ This report aggregates the interpretability analysis across a Strong ({subjects[
 ## Orchestration Pipeline Compliance
 Orchestration pipeline execution (Developer -> Static -> Anti -> GPT -> Anti Re-review) is managed externally by the orchestrator MCP tool and is explicitly not verified within this script.
 """
-    with open(out_dir / "run3.1_deliverables_report.md", "w") as f:
-        f.write(report_content)
-        
-    print(f"Generated deliverables report at {out_dir / 'run3.1_deliverables_report.md'}")
+    print("\n" + "="*50)
+    print(report_content)
+    print("="*50 + "\n")
+    print("File saving removed per user request.")
 
 
 def main():
@@ -334,21 +332,15 @@ def main():
         # Gradient Saliency intentionally allows grad
         print("  - Running Saliency Mapping...")
         saliency_res = run_saliency_analysis(model, test_trials, device)
-        np.save(out_dir / f"saliency_map_{subj}.npy", saliency_res["Saliency_Map"])
         all_saliencies.append({"Subject": subj, "Channel Saliency": saliency_res["Channel_Saliency"].tolist()})
         
-    pd.DataFrame(all_channel_ablations).T.to_csv(out_dir / "subject_channel_ablation.csv")
-    pd.DataFrame(all_frequency_ablations).T.to_csv(out_dir / "subject_frequency_ablation.csv")
-    pd.DataFrame(all_temporal_occlusions).to_csv(out_dir / "subject_temporal_occlusion.csv", index=False)
-    
-    with open(out_dir / "subject_saliency_summary.json", 'w') as f:
-        json.dump(all_saliencies, f, indent=4)
+    # File saving removed per user request
         
     # Run Phase 3
     phase3_cross_subject_analysis(out_dir, subjects, all_channel_ablations, all_frequency_ablations, all_temporal_occlusions, all_saliencies)
         
-    print("\nRun 3.1 Complete!")
-    print(f"Results saved to {out_dir}")
+        
+    print("\nRun 3.1 Complete! Output printed above.")
 
 if __name__ == "__main__":
     main()
