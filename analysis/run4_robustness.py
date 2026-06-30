@@ -304,7 +304,8 @@ def main():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Using device: {device}")
     
-    loader = KULCachedLoader(cache_dir, max_subjects=16)
+    loader = KULCachedLoader(cache_dir)
+    loader.load_all()
     
     subjects_to_test = ['S11', 'S16', 'S13'] # Strong, Average, Weak
     
