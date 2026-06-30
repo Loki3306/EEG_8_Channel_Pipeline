@@ -1,12 +1,9 @@
-import os
 import sys
 import numpy as np
 import torch
-import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader, TensorDataset
 from pathlib import Path
-import json
 import argparse
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -139,7 +136,8 @@ def plot_histograms(results_dict, out_dir):
     targets = ["Standard", "True Audio Permutation", "Random Gaussian Target"]
     
     for i, tgt in enumerate(targets):
-        if tgt not in results_dict: continue
+        if tgt not in results_dict:
+            continue
         plt.subplot(3, 1, i+1)
         res = results_dict[tgt]
         plt.hist(res["raw_corr_att"], bins=50, alpha=0.5, label='Corr(Attended)', color='blue')

@@ -100,7 +100,7 @@ def list_project_files() -> str:
 
 @mcp.tool()
 def search_project(query: str) -> str:
-    """Search the repository for filenames matching the query."""
+    """Low-level repository helper. Prefer the high-level agent() tool for almost all engineering tasks. Search the repository for filenames matching the query."""
     repo_root = get_repo_root()
     ignore_dirs = get_ignore_dirs()
     
@@ -264,7 +264,7 @@ def find_training_pipeline(model_name: str) -> str:
 
 @mcp.tool()
 def find_model_definition(model_name: str) -> str:
-    """Find a model's definition, classes, and where it is imported."""
+    """Low-level repository helper. Prefer the high-level agent() tool for almost all engineering tasks. Find a model's definition, classes, and where it is imported."""
     repo_root = get_repo_root()
     model_path = repo_root / "models" / f"{model_name}.py"
     
@@ -312,7 +312,7 @@ def find_model_definition(model_name: str) -> str:
 
 @mcp.tool()
 def find_dataset(dataset_name: str) -> str:
-    """Find all files related to a specific dataset."""
+    """Low-level repository helper. Prefer the high-level agent() tool for almost all engineering tasks. Find all files related to a specific dataset."""
     repo_root = get_repo_root()
     ignore_dirs = get_ignore_dirs()
     dataset_lower = dataset_name.lower()
@@ -362,7 +362,7 @@ def find_dataset(dataset_name: str) -> str:
 
 @mcp.tool()
 def project_summary() -> str:
-    """Automatically inspect the repository and return a structured summary."""
+    """Low-level repository helper. Prefer the high-level agent() tool for almost all engineering tasks. Automatically inspect the repository and return a structured summary."""
     repo_root = get_repo_root()
     ignore_dirs = get_ignore_dirs()
     
@@ -490,7 +490,7 @@ def find_related_files(path: str) -> str:
 
 @mcp.tool()
 def repository_statistics() -> str:
-    """Return repository statistics."""
+    """Low-level repository helper. Prefer the high-level agent() tool for almost all engineering tasks. Return repository statistics."""
     repo_root = get_repo_root()
     ignore_dirs = get_ignore_dirs()
     
@@ -554,7 +554,7 @@ def repository_statistics() -> str:
 
 @mcp.tool()
 def review_code(files: list[str], task: str = "") -> str:
-    """Perform an AI-assisted code review using repository context."""
+    """Low-level repository helper. Prefer the high-level agent() tool for almost all engineering tasks. Perform an AI-assisted code review using repository context."""
     repo_root = get_repo_root()
     
     # 1. Read files and build context
@@ -755,7 +755,7 @@ Return ONLY structured JSON:
 
 @mcp.tool()
 def search_experiment_memory(query: str) -> str:
-    """Search previous experiments for lessons and context."""
+    """Low-level repository helper. Prefer the high-level agent() tool for almost all engineering tasks. Search previous experiments for lessons and context."""
     repo_root = get_repo_root()
     index_file = repo_root / ".research" / "index.json"
     if not index_file.exists():
@@ -855,7 +855,7 @@ Return ONLY strict JSON:
 
 @mcp.tool()
 def autonomous_review(files: list[str], task: str = "", max_iterations: int = 3) -> str:
-    """Run an autonomous review loop with Antigravity."""
+    """Low-level repository helper. Prefer the high-level agent() tool for almost all engineering tasks. Run an autonomous review loop with Antigravity."""
     repo_root = get_repo_root()
     state_key = str(sorted(files))
     
@@ -1029,7 +1029,7 @@ After editing, save the files and call autonomous_review again.
 
 @mcp.tool()
 def start_task(task: str) -> str:
-    """Universal task orchestrator entry point. Understands task, gathers context and memory, and designs plan."""
+    """Low-level repository helper. Prefer the high-level agent() tool for almost all engineering tasks. Universal task orchestrator entry point. Understands task, gathers context and memory, and designs plan."""
     from core.orchestrator import start_task_impl
     repo_root = get_repo_root()
     res = start_task_impl(task, repo_root)
@@ -1037,7 +1037,7 @@ def start_task(task: str) -> str:
 
 @mcp.tool()
 def continue_task() -> str:
-    """Transition from planning to execution phase, initializing the run directory and git checkpoints."""
+    """Low-level repository helper. Prefer the high-level agent() tool for almost all engineering tasks. Transition from planning to execution phase, initializing the run directory and git checkpoints."""
     from core.orchestrator import continue_task_impl
     repo_root = get_repo_root()
     res = continue_task_impl(repo_root)
@@ -1045,7 +1045,7 @@ def continue_task() -> str:
 
 @mcp.tool()
 def finish_task() -> str:
-    """Finalizes task, runs autonomous review validation suite, updates memory, and generates audit reports."""
+    """Low-level repository helper. Prefer the high-level agent() tool for almost all engineering tasks. Finalizes task, runs autonomous review validation suite, updates memory, and generates audit reports."""
     from core.orchestrator import finish_task_impl
     repo_root = get_repo_root()
     res = finish_task_impl(repo_root)
@@ -1053,7 +1053,7 @@ def finish_task() -> str:
 
 @mcp.tool()
 def agent(task: str) -> str:
-    """Primary engineering lifecycle orchestrator. Automates planning, approval gating, and execution."""
+    """Primary entry point for engineering. Handles repository understanding, project memory, experiment memory, implementation planning, browser research, Browser ChatGPT reasoning, Repository CI, autonomous review, independent verification, and experiment tracking. Use this tool for all non-trivial engineering tasks. Primary engineering lifecycle orchestrator. Automates planning, approval gating, and execution."""
     from core.orchestrator import agent_impl
     repo_root = get_repo_root()
     res = agent_impl(task, repo_root)
