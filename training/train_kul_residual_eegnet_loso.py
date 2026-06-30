@@ -253,7 +253,14 @@ def run_residual_loso_window(window_sec, all_subject_data):
 
 def main():
     print("Loading KUL dataset...")
-    loader = KULCachedLoader(cache_dir=REPO_ROOT / "data" / "kul_cache")
+    if Path("/kaggle/input/datasets/lowk1ee/kul-preprocessed-cache/data/processed_kul").exists():
+        cache_dir = Path("/kaggle/input/datasets/lowk1ee/kul-preprocessed-cache/data/processed_kul")
+    elif Path("/kaggle/input/kul-preprocessed-cache/data/processed_kul").exists():
+        cache_dir = Path("/kaggle/input/kul-preprocessed-cache/data/processed_kul")
+    else:
+        cache_dir = REPO_ROOT / "data" / "processed_kul"
+        
+    loader = KULCachedLoader(cache_dir=cache_dir)
     all_subject_data = loader.load_all_subjects()
     
     windows_to_test = [60, 30, 10]
