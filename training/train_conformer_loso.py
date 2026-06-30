@@ -258,16 +258,16 @@ def main():
             if epoch_margin > best_margin:
                 best_margin = epoch_margin
                 best_metrics = {
-                    "trial_accuracy": trial_acc,
-                    "window_accuracy": win_acc,
-                    "mean_pearson_att": mean_corr_att,
-                    "mean_pearson_unatt": mean_corr_unatt,
+                    "trial_accuracy": float(trial_acc),
+                    "window_accuracy": float(win_acc),
+                    "mean_pearson_att": float(mean_corr_att),
+                    "mean_pearson_unatt": float(mean_corr_unatt),
                     "mean_margin": float(np.mean(trial_margins)),
                     "median_margin": float(np.median(trial_margins)),
                     "margin_std": float(np.std(trial_margins)),
                     "positive_margin_fraction": float(np.sum(np.array(trial_margins) > 0) / len(trial_margins)),
                     "negative_margin_fraction": float(np.sum(np.array(trial_margins) < 0) / len(trial_margins)),
-                    "fold_trial_margins": trial_margins
+                    "fold_trial_margins": [float(m) for m in trial_margins]
                 }
                 patience_counter = 0
             else:
