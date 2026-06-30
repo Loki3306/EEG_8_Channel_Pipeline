@@ -223,13 +223,21 @@ def main():
         cache_dir = Path("/kaggle/input/datasets/lowk1ee/kul-preprocessed-cache/data/processed_kul")
     
     checkpoint_dir = REPO_ROOT / "conformer_loso_results" / "checkpoints" / "seed_1"
-    if Path("/kaggle/input/datasets/lowkieee/eeg-aad-conformer-seed1-checkpoints/checkpoints/seed_1").exists():
-        checkpoint_dir = Path("/kaggle/input/datasets/lowkieee/eeg-aad-conformer-seed1-checkpoints/checkpoints/seed_1")
+    kaggle_ckpt = Path("/kaggle/input/datasets/lowkieee/eeg-aad-conformer-seed1-checkpoints/checkpoints/seed_1")
+    if not kaggle_ckpt.exists():
+        kaggle_ckpt = Path("/kaggle/input/eeg-aad-conformer-seed1-checkpoints/checkpoints/seed_1")
+    if kaggle_ckpt.exists():
+        checkpoint_dir = kaggle_ckpt
         
     summary_path = REPO_ROOT / "conformer_loso_results" / "conformer_loso_multiseed_summary.json"
+    kaggle_summary = Path("/kaggle/input/datasets/lowkieee/eeg-aad-conformer-seed1-checkpoints/conformer_loso_multiseed_summary.json")
+    if not kaggle_summary.exists():
+        kaggle_summary = Path("/kaggle/input/eeg-aad-conformer-seed1-checkpoints/conformer_loso_multiseed_summary.json")
+    if kaggle_summary.exists():
+        summary_path = kaggle_summary
 
     if not cache_dir.exists() or not checkpoint_dir.exists() or not summary_path.exists():
-        raise FileNotFoundError("Error: Missing required data/checkpoints/summary.")
+        raise FileNotFoundError(f"Error: Missing required data. Cache: {cache_dir.exists()}, Ckpt: {checkpoint_dir.exists()}, Summary: {summary_path.exists()}")
 
     out_dir = REPO_ROOT / "results" / "run3.1_multi_subject"
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -241,8 +249,16 @@ def main():
     loader = KULCachedLoader(cache_dir)
     all_subject_data = loader.load_all()
     
-    with open(summary_path, 'r') as f:
-        benchmark_json = json.load(f)
+    print(f"Loading summary from {summary_path}...")
+    try:
+        with open(summary_path, 'r') as f:
+            benchmark_json = json.load(f)
+    except json.decoder.JSONDecodeError as e:
+        print(f"WARNING: Failed to parse {summary_path}: {e}")
+        print("Attempting to use the local repository version instead...")
+        local_summary = REPO_ROOT / "conformer_loso_results" / "conformer_loso_multiseed_summary.json"
+        with open(local_summary, 'r') as f:
+            benchmark_json = json.load(f)
         if "1" not in benchmark_json:
             raise KeyError("Seed '1' not found in benchmark summary.")
         benchmark_data = benchmark_json["1"]
