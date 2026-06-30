@@ -120,8 +120,17 @@ class AADConformer(nn.Module):
         
         # Final Regression Head
         self.head = nn.Conv1d(embed_dim, 1, kernel_size=1)
+        
+        # Auxiliary Learned Confidence Head
+        self.confidence_head = nn.Sequential(
+            nn.Linear(embed_dim, 32),
+            nn.ReLU(),
+            nn.Dropout(dropout),
+            nn.Linear(32, 1),
+            nn.Sigmoid()
+        )
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def forward(self, x: torch.Tensor, return_confidence: bool = False, return_features: bool = False):
         # Expected x: [Batch, Channels, Time]
         if x.ndim != 3:
             raise ValueError(f"Expected 3D input, got shape {tuple(x.shape)}")
@@ -171,7 +180,20 @@ class AADConformer(nn.Module):
         x = self.upsample_act(x)
         
         # Regression Head
-        x = self.head(x)
+        out = self.head(x)
+        out = out.squeeze(1)
         
+        if return_confidence:
+            # Global Average Pooling over Time dimension for the confidence head
+            z_pool = x.mean(dim=-1) # [Batch, embed_dim]
+            conf = self.confidence_head(z_pool)
+            if return_features:
+                return out, conf, z_pool
+            return out, conf
+            
+        if return_features:
+            z_pool = x.mean(dim=-1)
+            return out, z_pool
+            
         # Squeeze to [Batch, Time] for AAD loss compatibility
-        return x.squeeze(1)
+        return out
