@@ -262,9 +262,10 @@ def main():
         local_summary = REPO_ROOT / "conformer_loso_results" / "conformer_loso_multiseed_summary.json"
         with open(local_summary, 'r') as f:
             benchmark_json = json.load(f)
-        if "1" not in benchmark_json:
-            raise KeyError("Seed '1' not found in benchmark summary.")
-        benchmark_data = benchmark_json["1"]
+            
+    if "1" not in benchmark_json:
+        raise KeyError("Seed '1' not found in benchmark summary.")
+    benchmark_data = benchmark_json["1"]
         
     subjects = get_subjects_from_benchmark(benchmark_data)
     print(f"\nAutomatically selected subjects for Phase 2: {subjects} (Strong, Average, Weak)")
