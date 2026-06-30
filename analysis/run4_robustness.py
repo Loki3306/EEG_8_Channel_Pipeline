@@ -325,7 +325,7 @@ def main():
         model.load_state_dict(torch.load(ckpt_path, map_location=device))
         model.eval()
         
-        exs = loader.get_subject_data(subj)
+        exs = loader.subjects_data[subj]
         test_trials = exs[-3:] if len(exs) > 3 else exs # Last 3 trials for testing per protocol
         
         print("  - Running Exp 4.1: Decision Window Robustness...")
