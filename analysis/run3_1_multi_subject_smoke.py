@@ -22,7 +22,11 @@ from analysis.interpretability.saliency import run_saliency_analysis
 def quantitative_psd_validation(freqs, psd_baseline, psd_masked, band_low, band_high, band_name):
     # Find indices for the target band
     band_idx = (freqs >= band_low) & (freqs <= band_high)
-    out_idx = ~band_idx
+    
+    # Exclude the filter transition band (roll-off) from the out-of-band preservation check
+    # to avoid mathematically expected preservation warnings.
+    transition_width = max(2.0, (band_high - band_low) * 0.5)
+    out_idx = (freqs < (band_low - transition_width)) | (freqs > (band_high + transition_width))
     
     # Power in band
     base_power_in = np.trapezoid(psd_baseline[band_idx], freqs[band_idx])
@@ -315,7 +319,9 @@ def main():
         print("  - Running Progressive Channel Ablation...")
         loco_results, ranked_channels = run_leave_one_channel_out(model, test_trials, device)
         ablation_results = run_progressive_ablation(model, test_trials, device, ranked_channels)
-        for k, v in ablation_results.items():
+        
+        # Log LOCO results (actual channel names) to allow proper cross-subject ranking
+        for k, v in loco_results.items():
             all_channel_ablations.setdefault(subj, {})[k] = v["Trial Accuracy"]
             
         print("  - Running Frequency Band Ablation...")

@@ -51,8 +51,10 @@ def get_base_metrics(model, test_trials, device):
         "Mean Pearson(unatt)": np.mean(p_unatt)
     }
 
+CHANNEL_NAMES = ['T7', 'C2', 'FT8', 'P7', 'CPz', 'Fp1', 'TP8', 'C3']
+
 def run_leave_one_channel_out(model, test_trials, device, num_channels=8):
-    """Zeroes out one channel at a time to measure importance (accuracy drop)."""
+    """Shuffles the time axis of one channel at a time to measure importance (accuracy drop)."""
     base_metrics = get_base_metrics(model, test_trials, device)
     
     loco_results = {}
@@ -65,10 +67,11 @@ def run_leave_one_channel_out(model, test_trials, device, num_channels=8):
         
         with torch.no_grad():
             for t in test_trials:
-                eeg = t["eeg"].unsqueeze(0).to(device)
+                eeg = t["eeg"].unsqueeze(0).to(device).clone()
                 
-                # Zeros the specific channel
-                eeg[:, ch, :] = 0.0
+                # Permutation Feature Importance: shuffle the time dimension
+                idx = torch.randperm(eeg.shape[-1], device=device)
+                eeg[:, ch, :] = eeg[:, ch, idx]
                 
                 wav_a = t["audio_a"].unsqueeze(0).to(device).mean(dim=1, keepdim=True)
                 wav_b = t["audio_b"].unsqueeze(0).to(device).mean(dim=1, keepdim=True)
@@ -104,7 +107,9 @@ def run_leave_one_channel_out(model, test_trials, device, num_channels=8):
         acc_drop = base_metrics["Trial Accuracy"] - t_acc
         margin_drop = base_metrics["Mean Margin"] - np.mean(margins)
         
-        loco_results[f"Ch{ch}"] = {
+        channel_name = CHANNEL_NAMES[ch] if ch < len(CHANNEL_NAMES) else f"Ch{ch}"
+        
+        loco_results[channel_name] = {
             "Trial Accuracy": t_acc,
             "Window Accuracy": w_acc,
             "Mean Margin": np.mean(margins),
@@ -126,7 +131,7 @@ def run_leave_one_channel_out(model, test_trials, device, num_channels=8):
 
 def run_progressive_ablation(model, test_trials, device, ranked_channels):
     """
-    Keeps only Top N channels, zeros out the rest.
+    Keeps only Top N channels, ablates (shuffles) the rest.
     """
     num_channels = len(ranked_channels)
     n_configs = sorted(list(set([num_channels, max(1, num_channels - 2), max(1, num_channels - 4), max(1, num_channels - 6), 1])), reverse=True)
@@ -141,12 +146,13 @@ def run_progressive_ablation(model, test_trials, device, ranked_channels):
         
         with torch.no_grad():
             for t in test_trials:
-                eeg = t["eeg"].unsqueeze(0).to(device)
+                eeg = t["eeg"].unsqueeze(0).to(device).clone()
                 
-                # Zero out all channels NOT in keep_channels
+                # Ablate (shuffle) all channels NOT in keep_channels
                 for ch in range(eeg.shape[1]):
                     if ch not in keep_channels:
-                        eeg[:, ch, :] = 0.0
+                        idx = torch.randperm(eeg.shape[-1], device=device)
+                        eeg[:, ch, :] = eeg[:, ch, idx]
                         
                 wav_a = t["audio_a"].unsqueeze(0).to(device).mean(dim=1, keepdim=True)
                 wav_b = t["audio_b"].unsqueeze(0).to(device).mean(dim=1, keepdim=True)
