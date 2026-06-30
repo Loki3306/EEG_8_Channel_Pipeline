@@ -66,7 +66,9 @@ def main():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Using device: {device}")
     
-    if Path("/kaggle/input/eeg-aad-conformer-seed1-checkpoints/conformer_loso_results/checkpoints/seed_1").exists():
+    if Path("/kaggle/input/datasets/lowkieee/eeg-aad-conformer-seed1-checkpoints/checkpoints/seed_1").exists():
+        checkpoint_dir = Path("/kaggle/input/datasets/lowkieee/eeg-aad-conformer-seed1-checkpoints/checkpoints/seed_1")
+    elif Path("/kaggle/input/eeg-aad-conformer-seed1-checkpoints/conformer_loso_results/checkpoints/seed_1").exists():
         checkpoint_dir = Path("/kaggle/input/eeg-aad-conformer-seed1-checkpoints/conformer_loso_results/checkpoints/seed_1")
     elif Path("/kaggle/working/EEG_Training_New/conformer_loso_results/checkpoints/seed_1").exists():
         checkpoint_dir = Path("/kaggle/working/EEG_Training_New/conformer_loso_results/checkpoints/seed_1")
