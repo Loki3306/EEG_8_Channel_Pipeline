@@ -15,7 +15,7 @@ def apply_fft_bandstop(eeg_tensor: torch.Tensor, lowcut: float, highcut: float, 
     b, a = butter(4, [low, high], btype='bandstop')
     filtered = filtfilt(b, a, eeg_np, axis=-1)
     
-    return torch.tensor(filtered, dtype=eeg_tensor.dtype, device=eeg_tensor.device)
+    return torch.tensor(filtered.copy(), dtype=eeg_tensor.dtype, device=eeg_tensor.device)
 
 def run_frequency_ablation(model, test_trials, device):
     """
