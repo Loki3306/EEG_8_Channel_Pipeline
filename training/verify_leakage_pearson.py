@@ -149,7 +149,7 @@ def evaluate_perturbation(model, eval_trials, all_trials_by_sub, test_sub, devic
                     if sub != test_sub:
                         choices.extend(trials)
                 t_rand = np.random.choice(choices)
-                assert test_sub not in t_rand["global_idx"], "Leakage! Same subject paired."
+                assert not t_rand["global_idx"].startswith(f"{test_sub}_"), "Leakage! Same subject paired."
                 a_eval = t_rand["a"]
                 b_eval = t_rand["b"]
                 
