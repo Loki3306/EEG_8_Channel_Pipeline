@@ -1,0 +1,188 @@
+import numpy as np
+import torch
+from pathlib import Path
+from .utils import normalize_eeg, normalize_audio, evaluate_trial_majority_vote, safe_corr_np
+
+def get_base_metrics(model, test_trials, device):
+    """Run unmodified baseline to get metrics."""
+    model.eval()
+    t_corr, total_w, w_corr = 0, 0, 0
+    margins, p_att, p_unatt = [], [], []
+    
+    with torch.no_grad():
+        for t in test_trials:
+            eeg = t["eeg"].unsqueeze(0).to(device)
+            wav_a = t["audio_a"].unsqueeze(0).to(device).mean(dim=1, keepdim=True)
+            wav_b = t["audio_b"].unsqueeze(0).to(device).mean(dim=1, keepdim=True)
+            
+            eeg = normalize_eeg(eeg)
+            wav_a = normalize_audio(wav_a)
+            wav_b = normalize_audio(wav_b)
+            
+            min_len = min(eeg.shape[2], wav_a.shape[2], wav_b.shape[2])
+            eeg, wav_a, wav_b = eeg[:,:,:min_len], wav_a[:,:,:min_len], wav_b[:,:,:min_len]
+            
+            pred = model(eeg).squeeze(0).cpu().numpy()
+            wa = wav_a.squeeze(1).squeeze(0).cpu().numpy()
+            wb = wav_b.squeeze(1).squeeze(0).cpu().numpy()
+            
+            ca = safe_corr_np(pred, wa)
+            cb = safe_corr_np(pred, wb)
+            margin = ca - cb
+            
+            tok, nwin, cwin = evaluate_trial_majority_vote(pred, wa, wb)
+            if tok: t_corr += 1
+            total_w += nwin
+            w_corr += cwin
+            
+            margins.append(float(margin))
+            p_att.append(float(ca))
+            p_unatt.append(float(cb))
+            
+    return {
+        "Trial Accuracy": t_corr / len(test_trials),
+        "Window Accuracy": w_corr / max(1, total_w),
+        "Mean Margin": np.mean(margins),
+        "Median Margin": np.median(margins),
+        "Mean Pearson(att)": np.mean(p_att),
+        "Mean Pearson(unatt)": np.mean(p_unatt)
+    }
+
+def run_leave_one_channel_out(model, test_trials, device, num_channels=8):
+    """Zeroes out one channel at a time to measure importance (accuracy drop)."""
+    base_metrics = get_base_metrics(model, test_trials, device)
+    
+    loco_results = {}
+    importance_scores = []
+    
+    for ch in range(num_channels):
+        model.eval()
+        t_corr, total_w, w_corr = 0, 0, 0
+        margins, p_att, p_unatt = [], [], []
+        
+        with torch.no_grad():
+            for t in test_trials:
+                eeg = t["eeg"].unsqueeze(0).to(device)
+                
+                # Zeros the specific channel
+                eeg[:, ch, :] = 0.0
+                
+                wav_a = t["audio_a"].unsqueeze(0).to(device).mean(dim=1, keepdim=True)
+                wav_b = t["audio_b"].unsqueeze(0).to(device).mean(dim=1, keepdim=True)
+                
+                eeg = normalize_eeg(eeg)
+                wav_a = normalize_audio(wav_a)
+                wav_b = normalize_audio(wav_b)
+                
+                min_len = min(eeg.shape[2], wav_a.shape[2], wav_b.shape[2])
+                eeg, wav_a, wav_b = eeg[:,:,:min_len], wav_a[:,:,:min_len], wav_b[:,:,:min_len]
+                
+                pred = model(eeg).squeeze(0).cpu().numpy()
+                wa = wav_a.squeeze(1).squeeze(0).cpu().numpy()
+                wb = wav_b.squeeze(1).squeeze(0).cpu().numpy()
+                
+                ca = safe_corr_np(pred, wa)
+                cb = safe_corr_np(pred, wb)
+                margin = ca - cb
+                
+                tok, nwin, cwin = evaluate_trial_majority_vote(pred, wa, wb)
+                if tok: t_corr += 1
+                total_w += nwin
+                w_corr += cwin
+                
+                margins.append(float(margin))
+                p_att.append(float(ca))
+                p_unatt.append(float(cb))
+                
+        t_acc = t_corr / len(test_trials)
+        w_acc = w_corr / max(1, total_w)
+        
+        # Importance is the drop in Trial Accuracy and Margin
+        acc_drop = base_metrics["Trial Accuracy"] - t_acc
+        margin_drop = base_metrics["Mean Margin"] - np.mean(margins)
+        
+        loco_results[f"Ch{ch}"] = {
+            "Trial Accuracy": t_acc,
+            "Window Accuracy": w_acc,
+            "Mean Margin": np.mean(margins),
+            "Median Margin": np.median(margins),
+            "Mean Pearson(att)": np.mean(p_att),
+            "Mean Pearson(unatt)": np.mean(p_unatt),
+            "Acc Drop": acc_drop,
+            "Margin Drop": margin_drop
+        }
+        
+        # A channel is "important" if dropping it causes a big margin/acc drop
+        importance_scores.append((ch, margin_drop))
+        
+    # Rank channels from most important (largest drop) to least important
+    importance_scores.sort(key=lambda x: x[1], reverse=True)
+    ranked_channels = [x[0] for x in importance_scores]
+    
+    return loco_results, ranked_channels
+
+def run_progressive_ablation(model, test_trials, device, ranked_channels):
+    """
+    Keeps only Top N channels, zeros out the rest.
+    N goes: 8, 6, 4, 2, 1
+    """
+    n_configs = [8, 6, 4, 2, 1]
+    ablation_results = {}
+    
+    for n in n_configs:
+        keep_channels = ranked_channels[:n]
+        
+        model.eval()
+        t_corr, total_w, w_corr = 0, 0, 0
+        margins, p_att, p_unatt = [], [], []
+        
+        with torch.no_grad():
+            for t in test_trials:
+                eeg = t["eeg"].unsqueeze(0).to(device)
+                
+                # Zero out all channels NOT in keep_channels
+                for ch in range(8):
+                    if ch not in keep_channels:
+                        eeg[:, ch, :] = 0.0
+                        
+                wav_a = t["audio_a"].unsqueeze(0).to(device).mean(dim=1, keepdim=True)
+                wav_b = t["audio_b"].unsqueeze(0).to(device).mean(dim=1, keepdim=True)
+                
+                eeg = normalize_eeg(eeg)
+                wav_a = normalize_audio(wav_a)
+                wav_b = normalize_audio(wav_b)
+                
+                min_len = min(eeg.shape[2], wav_a.shape[2], wav_b.shape[2])
+                eeg, wav_a, wav_b = eeg[:,:,:min_len], wav_a[:,:,:min_len], wav_b[:,:,:min_len]
+                
+                pred = model(eeg).squeeze(0).cpu().numpy()
+                wa = wav_a.squeeze(1).squeeze(0).cpu().numpy()
+                wb = wav_b.squeeze(1).squeeze(0).cpu().numpy()
+                
+                ca = safe_corr_np(pred, wa)
+                cb = safe_corr_np(pred, wb)
+                margin = ca - cb
+                
+                tok, nwin, cwin = evaluate_trial_majority_vote(pred, wa, wb)
+                if tok: t_corr += 1
+                total_w += nwin
+                w_corr += cwin
+                
+                margins.append(float(margin))
+                p_att.append(float(ca))
+                p_unatt.append(float(cb))
+                
+        t_acc = t_corr / len(test_trials)
+        w_acc = w_corr / max(1, total_w)
+        
+        ablation_results[f"{n} Channels"] = {
+            "Channels Kept": keep_channels,
+            "Trial Accuracy": t_acc,
+            "Window Accuracy": w_acc,
+            "Mean Margin": np.mean(margins),
+            "Median Margin": np.median(margins),
+            "Mean Pearson(att)": np.mean(p_att),
+            "Mean Pearson(unatt)": np.mean(p_unatt)
+        }
+        
+    return ablation_results
