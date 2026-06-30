@@ -121,16 +121,34 @@ class AADConformer(nn.Module):
         # Final Regression Head
         self.head = nn.Conv1d(embed_dim, 1, kernel_size=1)
         
-        # Auxiliary Learned Confidence Head
+        # Auxiliary Learned Confidence Head (Late Fusion)
+        # Inputs: z_pool (embed_dim) + corr_a (1) + corr_b (1) + margin (1) + embedding_norm (1) = embed_dim + 4
         self.confidence_head = nn.Sequential(
-            nn.Linear(embed_dim, 32),
+            nn.Linear(embed_dim + 4, 32),
             nn.ReLU(),
             nn.Dropout(dropout),
             nn.Linear(32, 1),
             nn.Sigmoid()
         )
 
-    def forward(self, x: torch.Tensor, return_confidence: bool = False, return_features: bool = False):
+    def predict_confidence(self, z_pool: torch.Tensor, corr_a: torch.Tensor, corr_b: torch.Tensor, margin: torch.Tensor):
+        """
+        Predicts confidence based on the EEG latent representation and post-hoc Pearson metrics.
+        """
+        # Calculate latent norm
+        z_norm = torch.norm(z_pool, dim=-1, keepdim=True)
+        
+        # Ensure metrics are [Batch, 1]
+        ca = corr_a.unsqueeze(-1) if corr_a.ndim == 1 else corr_a
+        cb = corr_b.unsqueeze(-1) if corr_b.ndim == 1 else corr_b
+        m = margin.unsqueeze(-1) if margin.ndim == 1 else margin
+        
+        # Concatenate features
+        features = torch.cat([z_pool, ca, cb, m, z_norm], dim=-1)
+        
+        return self.confidence_head(features).squeeze(-1)
+
+    def forward(self, x: torch.Tensor, return_features: bool = False):
         # Expected x: [Batch, Channels, Time]
         if x.ndim != 3:
             raise ValueError(f"Expected 3D input, got shape {tuple(x.shape)}")
@@ -183,14 +201,6 @@ class AADConformer(nn.Module):
         out = self.head(x)
         out = out.squeeze(1)
         
-        if return_confidence:
-            # Global Average Pooling over Time dimension for the confidence head
-            z_pool = x.mean(dim=-1) # [Batch, embed_dim]
-            conf = self.confidence_head(z_pool)
-            if return_features:
-                return out, conf, z_pool
-            return out, conf
-            
         if return_features:
             z_pool = x.mean(dim=-1)
             return out, z_pool

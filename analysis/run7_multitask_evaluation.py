@@ -27,18 +27,24 @@ def sliding_window_evaluation(model, eeg, wav_a, wav_b, win_samples, hop_samples
         stop = start + win_samples
         eeg_win = eeg[:, :, start:stop]
         
-        # We query the model's learned confidence directly
-        pred, conf = model(eeg_win, return_confidence=True)
+        # We query the model's learned confidence directly using late fusion
+        pred, z_pool = model(eeg_win, return_features=True)
         pred = pred.squeeze(0).cpu().numpy()
-        conf = conf.squeeze(0).cpu().item()
         
         wa = wav_a[:, :, start:stop].squeeze(1).squeeze(0).cpu().numpy()
         wb = wav_b[:, :, start:stop].squeeze(1).squeeze(0).cpu().numpy()
         
         ca = safe_corr_np(pred, wa)
         cb = safe_corr_np(pred, wb)
-        
         margin = ca - cb
+        
+        # Convert numpy scalars to tensors for the confidence head
+        ca_t = torch.tensor([ca], dtype=torch.float32, device=eeg.device)
+        cb_t = torch.tensor([cb], dtype=torch.float32, device=eeg.device)
+        margin_t = torch.tensor([margin], dtype=torch.float32, device=eeg.device)
+        
+        conf = model.predict_confidence(z_pool, ca_t, cb_t, margin_t)
+        conf = conf.squeeze().item()
         margins.append(margin)
         correct_list.append(margin > 0)
         confidences.append(conf)

@@ -29,25 +29,29 @@ def safe_corr_torch(x, y, eps=1e-8):
     corr = cov / (torch.sqrt(x_var * y_var) + eps)
     return corr
 
-def custom_multitask_loss(pred, Ya_batch, Yb_batch, conf_pred, lambda_conf=0.1, mse_weight=0.5, corr_weight=0.5):
+def custom_multitask_loss(pred, Ya_batch, Yb_batch, conf_pred, is_corrupted=None, lambda_conf=0.1, mse_weight=0.5, corr_weight=0.5):
     # Regression Loss (Primary)
     mse = nn.functional.mse_loss(pred, Ya_batch)
     corr_a = safe_corr_torch(pred, Ya_batch)
     reg_corr_loss = 1.0 - corr_a.mean()
+    
+    # If the batch is mixed with corrupted samples, we don't want the regression loss to be penalized by them
+    # But for simplicity, we just compute it over the whole batch. The model's regression weights are largely frozen anyway.
     reg_loss = mse_weight * mse + corr_weight * reg_corr_loss
     
     # Confidence Target Generation
     corr_b = safe_corr_torch(pred, Yb_batch)
     margin = corr_a - corr_b
+    
     # Target is 1 if margin > 0 (correct), else 0
     correct = (margin > 0).float()
     
-    # Confidence Loss (Auxiliary)
-    # Using BCEWithLogitsLoss would be better if we output logits, but we output sigmoid.
-    # We use BCELoss. We squeeze conf_pred to match the shape of `correct` [Batch]
-    conf_pred = conf_pred.squeeze()
+    # OUTLIER EXPOSURE: If a sample is corrupted, its confidence target is strictly forced to 0
+    if is_corrupted is not None:
+        correct = correct * (1.0 - is_corrupted.float())
     
-    # Clip predictions to avoid log(0) in BCE
+    # Confidence Loss (Auxiliary)
+    conf_pred = conf_pred.squeeze()
     conf_pred = torch.clamp(conf_pred, 1e-7, 1.0 - 1e-7)
     conf_loss = nn.functional.binary_cross_entropy(conf_pred, correct)
     
@@ -112,16 +116,20 @@ def evaluate_fold(model, val_loader, device):
     with torch.no_grad():
         for eeg, ya, yb in val_loader:
             eeg, ya, yb = eeg.to(device), ya.to(device), yb.to(device)
-            pred, conf_pred = model(eeg, return_confidence=True)
+            pred, z_pool = model(eeg, return_features=True)
+            
+            corr_a = safe_corr_torch(pred, ya)
+            corr_b = safe_corr_torch(pred, yb)
+            margin = corr_a - corr_b
+            
+            conf_pred = model.predict_confidence(z_pool, corr_a, corr_b, margin)
             
             loss, reg, conf = custom_multitask_loss(pred, ya, yb, conf_pred)
             val_loss += loss.item()
             val_reg_loss += reg.item()
             val_conf_loss += conf.item()
             
-            corr_a = safe_corr_torch(pred, ya)
-            corr_b = safe_corr_torch(pred, yb)
-            margins.extend((corr_a - corr_b).cpu().numpy())
+            margins.extend(margin.cpu().numpy())
             
     val_loss /= len(val_loader)
     val_reg_loss /= len(val_loader)
@@ -230,8 +238,30 @@ def main():
                 eeg, ya, yb = eeg.to(device), ya.to(device), yb.to(device)
                 optimizer.zero_grad()
                 
-                pred, conf_pred = model(eeg, return_confidence=True)
-                loss, reg, conf = custom_multitask_loss(pred, ya, yb, conf_pred)
+                # OUTLIER EXPOSURE DATA AUGMENTATION
+                # We corrupt 25% of the batch to teach the confidence head to reject bad EEG
+                B = eeg.size(0)
+                is_corrupted = torch.zeros(B, device=device, dtype=torch.bool)
+                num_corrupt = int(B * 0.25)
+                
+                if num_corrupt > 0:
+                    corrupt_idx = torch.randperm(B)[:num_corrupt]
+                    is_corrupted[corrupt_idx] = True
+                    
+                    # 50% Random Noise, 50% Zeros
+                    half = num_corrupt // 2
+                    eeg[corrupt_idx[:half]] = torch.randn_like(eeg[corrupt_idx[:half]])
+                    eeg[corrupt_idx[half:]] = torch.zeros_like(eeg[corrupt_idx[half:]])
+                
+                pred, z_pool = model(eeg, return_features=True)
+                
+                corr_a = safe_corr_torch(pred, ya)
+                corr_b = safe_corr_torch(pred, yb)
+                margin = corr_a - corr_b
+                
+                conf_pred = model.predict_confidence(z_pool, corr_a, corr_b, margin)
+                
+                loss, reg, conf = custom_multitask_loss(pred, ya, yb, conf_pred, is_corrupted=is_corrupted)
                 
                 loss.backward()
                 optimizer.step()
