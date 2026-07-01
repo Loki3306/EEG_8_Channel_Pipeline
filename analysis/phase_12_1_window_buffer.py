@@ -124,7 +124,10 @@ def run_phase_12_1_validation():
     model = AADConformer(in_channels=8).to(device)
     model.eval()
     
-    ckpt_path = REPO_ROOT / "conformer_loso_results" / "checkpoints" / "seed_1" / "model_S1.pt"
+    ckpt_path = REPO_ROOT / "results" / "run7_multitask_conformer_loso" / "checkpoints" / "seed_1" / "model_S1.pt"
+    if not ckpt_path.exists():
+        ckpt_path = Path("/kaggle/working/EEG_8_Channel_Pipeline/results/run7_multitask_conformer_loso/checkpoints/seed_1/model_S1.pt")
+
     if ckpt_path.exists():
         model.load_state_dict(torch.load(ckpt_path, map_location=device))
         print("Loaded frozen Conformer checkpoint.")
