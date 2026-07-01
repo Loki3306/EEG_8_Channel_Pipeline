@@ -16,7 +16,13 @@ def run_policy_simulation(preds_csv, out_dir):
     df = pd.read_csv(preds_csv)
     
     # Sort just in case to maintain causal order
-    df = df.sort_values(by=['subject', 'trial', 'window_idx'])
+    df = df.sort_values(by=['subject', 'trial', 'window'])
+    
+    # Map predictions to the TRULY ATTENDED stream to maintain consistent trial logic
+    if 'correct' in df.columns and 'prob_platt' in df.columns:
+        p_target = np.where(df['correct'] == 1, df['prob_platt'], 1 - df['prob_platt'])
+        df['prob_platt'] = p_target
+        df['ground_truth'] = 1
     
     transition_log = []
     trial_metrics = []
@@ -37,9 +43,9 @@ def run_policy_simulation(preds_csv, out_dir):
             print("-" * 80)
             
         for _, row in group.iterrows():
-            prob = row['calibrated_prob']
-            margin = row['margin']
-            win = int(row['window_idx'])
+            prob = row['prob_platt'] if 'prob_platt' in row else row.get('calibrated_prob', 0.5)
+            margin = row.get('margin', 0.0)
+            win = int(row['window'])
             
             # Step the policy engine
             result = engine.update(prob, margin)
