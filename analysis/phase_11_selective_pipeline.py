@@ -42,12 +42,15 @@ def run_selective_pipeline(subject="S1", model_path=None, threshold=0.70):
         eeg, wav_a, wav_b, labels = [], [], [], []
         for trial in subject_trials:
             eeg.append(trial["eeg"])
-            wav_a.append(trial["wavA"])
-            wav_b.append(trial["wavB"])
-            labels.append(trial["label"])
+            wav_a.append(trial["audio_a"])
+            wav_b.append(trial["audio_b"])
+            # KUL cache always sets audio_a to the attended audio, so label is 0
+            labels.append(0)
             
         print(f"Data loaded: Trials {len(labels)}")
     except Exception as e:
+        import traceback
+        traceback.print_exc()
         print(f"Failed to load data: {e}")
         return
         
