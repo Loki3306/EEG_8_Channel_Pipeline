@@ -135,7 +135,11 @@ def run_phase_12_1_validation(ckpt_path_arg=None):
         if not ckpt_path.exists():
             ckpt_path = Path("/kaggle/working/EEG_8_Channel_Pipeline/results/run7_multitask_conformer_loso/checkpoints/seed_1/model_S1.pt")
             
-        # 3. Hardcoded Kaggle input path (if uploaded as a dataset)
+        # 3. Hardcoded user-provided dataset path
+        if not ckpt_path.exists():
+            ckpt_path = Path("/kaggle/input/datasets/lokeshgile/confidence-heads/kaggle/working/EEG_8_Channel_Pipeline/results/run7_multitask_conformer_loso/checkpoints/seed_1/model_S1.pt")
+            
+        # 4. Fallback search
         if not ckpt_path.exists():
             # Sometimes Kaggle datasets are mounted under /kaggle/input/eeg-8-channel-pipeline or similar
             possible = list(Path("/kaggle/input").rglob("model_S1.pt"))
