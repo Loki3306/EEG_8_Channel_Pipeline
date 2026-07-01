@@ -80,7 +80,13 @@ class SelectivePredictor:
             dict: Trial-level prediction, confidence, and acceptance.
         """
         if not window_results:
-            return {"prediction": None, "confidence": 0.0, "accepted": False}
+            return {
+                "prediction": None, 
+                "confidence": 0.0, 
+                "accepted": False,
+                "accepted_windows_count": 0,
+                "total_windows_count": 0
+            }
             
         accepted_windows = [w for w in window_results if w["accepted"]]
         
@@ -90,7 +96,9 @@ class SelectivePredictor:
                 "prediction": -1, 
                 "confidence": 0.0, 
                 "accepted": False,
-                "reason": "All windows rejected"
+                "reason": "All windows rejected",
+                "accepted_windows_count": 0,
+                "total_windows_count": len(window_results)
             }
             
         if aggregation == "majority":
