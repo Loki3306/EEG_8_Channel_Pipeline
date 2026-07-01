@@ -327,10 +327,11 @@ def main():
                     sim_a = independent_similarity(pred_np, ya_np)
                     sim_b = independent_similarity(pred_np, yb_np)
                     
-                    pred_th = pred
-                    ya_th = torch.FloatTensor(ya_chunks[j]).unsqueeze(0).to(device)
-                    yb_th = torch.FloatTensor(yb_chunks[j]).unsqueeze(0).to(device)
-                    conf = model.infer_confidence(bx, pred_th, ya_th, yb_th).item()
+                    ca = torch.tensor([sim_a], dtype=torch.float32, device=device)
+                    cb = torch.tensor([sim_b], dtype=torch.float32, device=device)
+                    m_val = torch.tensor([sim_a - sim_b], dtype=torch.float32, device=device)
+                    
+                    conf = model.predict_confidence(z, ca, cb, m_val).item()
                     
                     margin = sim_a - sim_b
                     is_correct = 1 if sim_a > sim_b else 0
