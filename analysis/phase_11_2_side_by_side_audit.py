@@ -20,7 +20,8 @@ def print_stats(name, tensor):
         return
         
     t = tensor.float()
-    print(f"{name:.<30} Shape: {list(t.shape):<20} Mean: {t.mean().item():>8.4f}  Std: {t.std().item():>8.4f}  Min: {t.min().item():>8.4f}  Max: {t.max().item():>8.4f}")
+    shape_str = str(list(t.shape))
+    print(f"{name:.<30} Shape: {shape_str:<20} Mean: {t.mean().item():>8.4f}  Std: {t.std().item():>8.4f}  Min: {t.min().item():>8.4f}  Max: {t.max().item():>8.4f}")
 
 def run_side_by_side_audit(subject="S1", ckpt_path=None):
     print("=" * 100)
