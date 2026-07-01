@@ -83,6 +83,10 @@ def extract_base_dataset(model, data, device):
             wav_a = normalize_audio(wav_a)
             wav_b = normalize_audio(wav_b)
             
+            # Match lengths
+            min_len = min(eeg.shape[-1], wav_a.shape[-1], wav_b.shape[-1])
+            eeg, wav_a, wav_b = eeg[:,:,:min_len], wav_a[:,:,:min_len], wav_b[:,:,:min_len]
+            
             for start in range(0, eeg.shape[-1] - win_samples + 1, hop_samples):
                 stop = start + win_samples
                 
@@ -90,14 +94,26 @@ def extract_base_dataset(model, data, device):
                 wa = wav_a[:, :, start:stop]
                 wb = wav_b[:, :, start:stop]
                 
-                _, z_pool = model(e, return_features=True)
-                corr_a, corr_b = model.predict_similarity(z_pool, wa, wb)
+                pred, z_pool = model(e, return_features=True)
                 
-                prediction = 1 if corr_a.item() > corr_b.item() else 0
-                margin = corr_a.item() - corr_b.item()
+                # Compute correlations
+                from analysis.interpretability.utils import safe_corr_np
+                p_np = pred.squeeze(0).cpu().numpy()
+                wa_np = wa.squeeze(1).squeeze(0).cpu().numpy()
+                wb_np = wb.squeeze(1).squeeze(0).cpu().numpy()
+                
+                ca = safe_corr_np(p_np, wa_np)
+                cb = safe_corr_np(p_np, wb_np)
+                margin = ca - cb
+                
+                prediction = 1 if margin > 0 else 0
                 correct = int(prediction == 1)
                 
-                conf = model.predict_confidence(z_pool, wa, wb)
+                ca_t = torch.tensor([ca], dtype=torch.float32, device=device)
+                cb_t = torch.tensor([cb], dtype=torch.float32, device=device)
+                margin_t = torch.tensor([margin], dtype=torch.float32, device=device)
+                
+                conf = model.predict_confidence(z_pool, ca_t, cb_t, margin_t)
                 
                 eeg_context = z_pool.mean(dim=-1).cpu().numpy()[0]
                 
@@ -106,8 +122,8 @@ def extract_base_dataset(model, data, device):
                     "window": start // hop_samples,
                     "confidence": conf.item(),
                     "margin": margin,
-                    "corr_a": corr_a.item(),
-                    "corr_b": corr_b.item(),
+                    "corr_a": ca,
+                    "corr_b": cb,
                     "z_pool_norm": torch.norm(z_pool).item(),
                     "prediction": prediction,
                     "correct": correct,
@@ -184,8 +200,15 @@ def audit_layer_inspections(model, data, device):
     wav_b = normalize_audio(trial["audio_b"].unsqueeze(0).to(device).mean(dim=1, keepdim=True))[:, :, :win_samples]
     
     with torch.no_grad():
-        _, z_pool = model(eeg, return_features=True)
-        conf = model.predict_confidence(z_pool, wav_a, wav_b)
+        pred, z_pool = model(eeg, return_features=True)
+        from analysis.interpretability.utils import safe_corr_np
+        ca = safe_corr_np(pred.squeeze(0).cpu().numpy(), wav_a.squeeze(1).squeeze(0).cpu().numpy())
+        cb = safe_corr_np(pred.squeeze(0).cpu().numpy(), wav_b.squeeze(1).squeeze(0).cpu().numpy())
+        margin = ca - cb
+        ca_t = torch.tensor([ca], dtype=torch.float32, device=device)
+        cb_t = torch.tensor([cb], dtype=torch.float32, device=device)
+        margin_t = torch.tensor([margin], dtype=torch.float32, device=device)
+        conf = model.predict_confidence(z_pool, ca_t, cb_t, margin_t)
         
     stats = []
     for name, act_list in activations.items():
@@ -221,19 +244,28 @@ def audit_input_sensitivity(model, data, device):
     wav_a.requires_grad_(True)
     wav_b.requires_grad_(True)
     
-    _, z_pool = model(eeg, return_features=True)
-    conf = model.predict_confidence(z_pool, wav_a, wav_b)
+    pred, z_pool = model(eeg, return_features=True)
+    
+    from analysis.interpretability.utils import safe_corr_np
+    ca = safe_corr_np(pred.squeeze(0).detach().cpu().numpy(), wav_a.squeeze(1).squeeze(0).detach().cpu().numpy())
+    cb = safe_corr_np(pred.squeeze(0).detach().cpu().numpy(), wav_b.squeeze(1).squeeze(0).detach().cpu().numpy())
+    margin = ca - cb
+    ca_t = torch.tensor([ca], dtype=torch.float32, device=device, requires_grad=True)
+    cb_t = torch.tensor([cb], dtype=torch.float32, device=device, requires_grad=True)
+    margin_t = torch.tensor([margin], dtype=torch.float32, device=device, requires_grad=True)
+    
+    conf = model.predict_confidence(z_pool, ca_t, cb_t, margin_t)
     
     # Compute gradients w.r.t inputs
     conf.backward()
     
-    eeg_sens = torch.norm(eeg.grad).item()
-    wa_sens = torch.norm(wav_a.grad).item()
-    wb_sens = torch.norm(wav_b.grad).item()
+    eeg_sens = torch.norm(eeg.grad).item() if eeg.grad is not None else 0.0
+    wa_sens = torch.norm(ca_t.grad).item() if ca_t.grad is not None else 0.0
+    wb_sens = torch.norm(cb_t.grad).item() if cb_t.grad is not None else 0.0
     
     print(f"EEG Input Sensitivity (Gradient Norm): {eeg_sens:.6f}")
-    print(f"Audio A Input Sensitivity (Gradient Norm): {wa_sens:.6f}")
-    print(f"Audio B Input Sensitivity (Gradient Norm): {wb_sens:.6f}")
+    print(f"Corr A Input Sensitivity (Gradient Norm): {wa_sens:.6f}")
+    print(f"Corr B Input Sensitivity (Gradient Norm): {wb_sens:.6f}")
 
 def audit_feature_ablation(model, df, device):
     print("\nSTAGE 4: FEATURE ABLATION THROUGH THE CONFIDENCE HEAD")
