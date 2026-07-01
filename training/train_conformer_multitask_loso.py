@@ -144,6 +144,8 @@ def main():
     cache_dir = REPO_ROOT / "data" / "processed_kul"
     if Path("/kaggle/input/datasets/lowk1ee/kul-preprocessed-cache/data/processed_kul").exists():
         cache_dir = Path("/kaggle/input/datasets/lowk1ee/kul-preprocessed-cache/data/processed_kul")
+    elif Path("/kaggle/input/datasets/lokeshgile/kul-processed/data/processed_kul").exists():
+        cache_dir = Path("/kaggle/input/datasets/lokeshgile/kul-processed/data/processed_kul")
         
     try:
         loader = KULCachedLoader(cache_dir)
