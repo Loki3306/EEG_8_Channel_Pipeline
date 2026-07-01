@@ -128,12 +128,16 @@ def run_phase_12_1_validation(ckpt_path_arg=None):
     if ckpt_path_arg and Path(ckpt_path_arg).exists():
         ckpt_path = Path(ckpt_path_arg)
     else:
+        # 1. Local path
         ckpt_path = REPO_ROOT / "results" / "run7_multitask_conformer_loso" / "checkpoints" / "seed_1" / "model_S1.pt"
+        
+        # 2. Hardcoded Kaggle working path (if trained in the same session)
         if not ckpt_path.exists():
             ckpt_path = Path("/kaggle/working/EEG_8_Channel_Pipeline/results/run7_multitask_conformer_loso/checkpoints/seed_1/model_S1.pt")
-        # Try kaggle input just in case
+            
+        # 3. Hardcoded Kaggle input path (if uploaded as a dataset)
         if not ckpt_path.exists():
-            # common kaggle input path guesses
+            # Sometimes Kaggle datasets are mounted under /kaggle/input/eeg-8-channel-pipeline or similar
             possible = list(Path("/kaggle/input").rglob("model_S1.pt"))
             if possible:
                 ckpt_path = possible[0]
@@ -142,8 +146,10 @@ def run_phase_12_1_validation(ckpt_path_arg=None):
         model.load_state_dict(torch.load(ckpt_path, map_location=device))
         print(f"Loaded frozen Conformer checkpoint from {ckpt_path}")
     else:
-        print("WARNING: Checkpoint not found, using untrained weights.")
-        print("Please provide the correct path using --ckpt_path")
+        print("WARNING: Checkpoint not found! It looked for:")
+        print(" - /kaggle/working/EEG_8_Channel_Pipeline/results/run7_multitask_conformer_loso/checkpoints/seed_1/model_S1.pt")
+        print(" - Any 'model_S1.pt' inside /kaggle/input/")
+        print("Using untrained weights.")
         
     buffer = SequentialWindowBuffer()
     fs = 64
