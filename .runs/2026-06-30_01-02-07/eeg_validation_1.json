@@ -1,0 +1,11 @@
+{
+  "passed": false,
+  "issues": [
+    ".mcp/server.py: Potential LOSO leakage - using random train_test_split instead of Leave-One-Subject-Out.",
+    ".mcp/server.py: Temporal dimension collapsed before InfoNCE, assuming temporal alignment."
+  ],
+  "warnings": [
+    ".mcp/server.py: Both DTU and KUL referenced, ensure no dataset loader confusion."
+  ],
+  "memory": ""
+}

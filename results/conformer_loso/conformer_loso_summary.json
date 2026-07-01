@@ -1,0 +1,66 @@
+{
+    "S1": {
+        "trial_accuracy": 0.6,
+        "median_margin": 0.0132
+    },
+    "S10": {
+        "trial_accuracy": 0.7,
+        "median_margin": 0.0249
+    },
+    "S11": {
+        "trial_accuracy": 0.9,
+        "median_margin": 0.0386
+    },
+    "S12": {
+        "trial_accuracy": 0.6,
+        "median_margin": 0.0097
+    },
+    "S13": {
+        "trial_accuracy": 0.7,
+        "median_margin": 0.0083
+    },
+    "S14": {
+        "trial_accuracy": 0.7,
+        "median_margin": 0.0221
+    },
+    "S15": {
+        "trial_accuracy": 0.85,
+        "median_margin": 0.0202
+    },
+    "S16": {
+        "trial_accuracy": 0.75,
+        "median_margin": 0.0244
+    },
+    "S2": {
+        "trial_accuracy": 0.9,
+        "median_margin": 0.0085
+    },
+    "S3": {
+        "trial_accuracy": 0.8,
+        "median_margin": 0.0264
+    },
+    "S4": {
+        "trial_accuracy": 0.7,
+        "median_margin": 0.0198
+    },
+    "S5": {
+        "trial_accuracy": 0.85,
+        "median_margin": 0.0376
+    },
+    "S6": {
+        "trial_accuracy": 0.8,
+        "median_margin": 0.0156
+    },
+    "S7": {
+        "trial_accuracy": 0.75,
+        "median_margin": 0.0219
+    },
+    "S8": {
+        "trial_accuracy": 0.85,
+        "median_margin": 0.0103
+    },
+    "S9": {
+        "trial_accuracy": 0.75,
+        "median_margin": 0.0104
+    }
+}

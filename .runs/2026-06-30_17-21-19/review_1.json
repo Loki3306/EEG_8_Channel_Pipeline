@@ -1,0 +1,21 @@
+{
+  "verdict": "FAIL",
+  "confidence": 96,
+  "blocking_issues": [
+    "analysis/run3_interpretability_smoke.py still asserts in comments that the loaded checkpoints are KUL-trained and therefore no cross-dataset domain shift exists, but the implementation performs no runtime verification of checkpoint provenance. This scientific claim remains unsupported by executable evidence.",
+    "analysis/interpretability/frequency_ablation.py continues to state that FFT-band masking is a validated physiological occlusion within the validated training feature space. The implementation demonstrates FFT masking but does not establish that inference-time spectral ablation is part of the validated evaluation protocol, so the interpretability claim exceeds what the implementation verifies."
+  ],
+  "warnings": [
+    "analysis/interpretability/saliency.py contains a duplicated allocation check (if total_saliency is None) immediately after the first allocation. It is harmless but redundant and suggests an editing artifact.",
+    "get_base_metrics() and related routines divide by len(test_trials) without guarding against an empty subject. The current smoke test uses S11 so this is unlikely in practice, but the helper itself is not robust.",
+    "analysis/run3_interpretability_smoke.py now validates both trial and window accuracy, which resolves the previous metric-validation issue.",
+    "The progressive ablation plotting logic is now synchronized with dynamically generated result keys, resolving the previous KeyError regression."
+  ],
+  "suggested_fixes": [
+    "Replace unsupported methodological assertions about checkpoint provenance with executable verification or remove the claims.",
+    "Present frequency-band ablation as an exploratory perturbation unless independent validation establishes it as a validated physiological interpretability method.",
+    "Remove the duplicated if total_saliency is None block in the saliency implementation.",
+    "Add defensive handling for empty test subject inputs in shared evaluation utilities."
+  ],
+  "summary": "The prior implementation regression between dynamic progressive ablation and plotting has been resolved, the frequency-ablation implementation now matches its documented algorithm, and baseline verification has improved by checking both trial and window accuracy. However, the review cannot be accepted because unsupported scientific assertions about checkpoint provenance and validated physiological interpretation remain embedded in the implementation."
+}

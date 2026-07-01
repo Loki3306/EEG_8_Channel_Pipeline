@@ -1,0 +1,42 @@
+{
+  "summary": "Attempted to implement a multi-subject interpretability smoke test for the KUL LOSO AAD-Conformer with quantitative FFT-based frequency validation, baseline verification, and cross-subject reporting. The run failed because cross-subject interpretability conclusions relied on unsupported heuristics, temporal and saliency consistency analyses did not answer the stated research question, and the required confidence-based orchestration pipeline was not implemented or verified.",
+  "datasets": [
+    "KUL"
+  ],
+  "models": [
+    "AADConformer",
+    "LOSO Conformer"
+  ],
+  "keywords": [
+    "interpretability",
+    "multi-subject smoke test",
+    "frequency pipeline",
+    "FFT band-stop",
+    "PSD",
+    "Welch PSD",
+    "channel ablation",
+    "frequency ablation",
+    "temporal occlusion",
+    "gradient saliency",
+    "cross-subject analysis",
+    "LOSO",
+    "baseline verification",
+    "research methodology",
+    "orchestration pipeline"
+  ],
+  "lessons": [
+    "Derive scientific conclusions only from executable analyses rather than heuristic thresholds or qualitative labels.",
+    "Compare subject-level interpretability outputs directly when assessing cross-subject consistency instead of measuring within-subject variability.",
+    "Evaluate temporal consistency using similarity of temporal occlusion profiles across subjects rather than dispersion of occlusion scores within each subject.",
+    "Evaluate saliency consistency using saliency values or channel rankings rather than vector dimensionality.",
+    "Treat frequency-ablation importance rankings as exploratory unless validated by an established methodology.",
+    "Clearly distinguish exploratory heuristics from validated scientific conclusions in generated reports.",
+    "Verification of cached signal spectral characteristics is not equivalent to verification of the upstream preprocessing pipeline.",
+    "Implement, execute, and record required orchestration pipelines before claiming workflow compliance.",
+    "Avoid recommending progression to subsequent experimental phases while blocking methodological validation issues remain unresolved.",
+    "Ensure every required deliverable is supported by executable evidence rather than inferred narrative."
+  ],
+  "experiment_id": "2026-06-30_18-19-03",
+  "task": "Run 3.1 \u2014 Frequency Pipeline Verification + Multi-Subject Interpretability Smoke Test. \n\nPhase 1: Audit frequency ablation pipeline, verify mathematical correctness of frequency filtering. Generate frequency_pipeline_audit.csv and plots.\nPhase 2: Select 3 subjects (Strong, Average, Weak) from benchmark. Run Progressive Channel Ablation, Frequency Ablation, Temporal Occlusion, Gradient Saliency on them. Generate CSVs and plots.\nPhase 3: Cross-Subject Analysis. Answer if important channels/freqs/saliency remain consistent.\nDeliverables: Executive Summary, Verification Results, Files Modified, Multi-Subject Results, Cross-Subject Interpretation, Remaining Risks, Recommendation.\nEnsure the orchestrator follows the full confidence-based review pipeline (Developer -> Static -> Anti -> GPT -> Anti Re-review).",
+  "status": "FAIL"
+}

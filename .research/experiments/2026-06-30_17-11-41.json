@@ -1,0 +1,38 @@
+{
+  "summary": "Performed a final verification of the Run 3 interpretability smoke-test implementation for the KUL LOSO Conformer pipeline. The review failed because methodological claims were not supported by executable verification, documentation diverged from implementation, and a regression was introduced between dynamic channel ablation output and downstream plotting.",
+  "datasets": [
+    "KUL"
+  ],
+  "models": [
+    "AADConformer",
+    "LOSO Conformer"
+  ],
+  "keywords": [
+    "interpretability",
+    "smoke test",
+    "channel ablation",
+    "progressive ablation",
+    "frequency ablation",
+    "saliency",
+    "temporal occlusion",
+    "LOSO",
+    "KUL",
+    "baseline verification",
+    "checkpoint validation",
+    "research methodology",
+    "runtime verification"
+  ],
+  "lessons": [
+    "Keep downstream analysis and visualization synchronized with dynamically generated experiment outputs to avoid implementation regressions.",
+    "Ensure documentation accurately reflects the implemented algorithm; implementation-documentation mismatches invalidate scientific claims.",
+    "Do not rely on comments to establish dataset or checkpoint provenance; methodology claims require executable verification.",
+    "Do not present exploratory perturbation analyses as validated physiological interpretations unless they are justified by the validated evaluation protocol.",
+    "Validate all reported baseline metrics used as acceptance criteria before proceeding with downstream interpretability analyses.",
+    "Treat unsupported methodological assertions as research risks even when the implementation executes successfully.",
+    "Verify checkpoint compatibility with the evaluation dataset before drawing interpretability conclusions.",
+    "Resolve implementation inconsistencies before accepting interpretability results, even if earlier runtime issues have been fixed."
+  ],
+  "experiment_id": "2026-06-30_17-11-41",
+  "task": "Run 3 Smoke Test Interpretability suite implementation - Final Check",
+  "status": "FAIL"
+}

@@ -1,0 +1,22 @@
+{
+  "verdict": "FAIL",
+  "confidence": 98,
+  "blocking_issues": [
+    "The implementation does not implement Phase 3 (Cross-Subject Analysis). It aggregates per-subject outputs but never analyzes whether important channels, frequency bands, temporal regions, or saliency patterns remain consistent across the strong, average, and weak subjects, nor does it answer the stated research question.",
+    "The required deliverables are incomplete. The script generates intermediate CSV/NPY artifacts but does not produce the requested Executive Summary, Verification Results, Files Modified, Multi-Subject Results, Cross-Subject Interpretation, Remaining Risks, or Recommendation.",
+    "The requested confidence-based orchestration pipeline (Developer -> Static -> Anti -> GPT -> Anti Re-review) is not implemented or invoked anywhere in the reviewed code, despite being an explicit task requirement."
+  ],
+  "warnings": [
+    "The frequency audit correctly limits its claims to cached signal spectral characteristics and quantitative FFT band-stop verification, avoiding the previous methodological overclaims.",
+    "The checkpoint inspection is appropriately described as a structural sanity check rather than provenance verification.",
+    "The quantitative PSD validation uses heuristic thresholds that are suitable for a smoke test but are not specification-derived.",
+    "The PSD audit evaluates only the first trial from each selected subject, which is appropriate for a smoke test but not a comprehensive subject-level characterization.",
+    "The script assumes helper functions generate all required plots; this cannot be verified from the provided file alone."
+  ],
+  "suggested_fixes": [
+    "Implement the missing cross-subject aggregation and interpretation required by Phase 3.",
+    "Generate the required final deliverables summarizing verification results, multi-subject findings, remaining risks, and recommendations.",
+    "Integrate or invoke the required confidence-based review orchestration pipeline if it is part of the project requirements rather than assuming it exists externally."
+  ],
+  "summary": "The implementation is technically sound for the frequency audit and per-subject interpretability analyses, and it preserves the methodological corrections from previous iterations. However, it does not satisfy the full task specification because the required cross-subject analysis, final reporting deliverables, and confidence-based orchestration pipeline are absent. As a result, the task is incomplete despite the correctness of the implemented components."
+}

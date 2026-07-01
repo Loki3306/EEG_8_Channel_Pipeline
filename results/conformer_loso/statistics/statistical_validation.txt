@@ -1,0 +1,13 @@
+=== STATISTICAL VALIDATION REPORT ===
+N Subjects: 16
+Conformer Mean: 77.12% ± 9.99%
+Ridge Mean: 55.10% ± 5.82%
+Absolute Improvement: 22.02%
+
+--- Hypothesis Testing ---
+Paired t-test: t = 6.6568, p = 7.6514e-06
+Wilcoxon signed-rank: W = 1.0, p = 6.1035e-05
+
+--- Effect Size & Confidence Intervals ---
+Cohen's d: 1.6642
+95% CI of Difference: [14.97%, 29.07%]

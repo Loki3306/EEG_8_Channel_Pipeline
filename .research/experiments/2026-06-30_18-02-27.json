@@ -1,0 +1,37 @@
+{
+  "summary": "Implemented a strengthened multi-subject interpretability smoke test for the KUL LOSO AAD-Conformer by adding quantitative PSD-based frequency validation, stricter baseline verification, and a structural checkpoint sanity check. The review failed because the implementation still overclaimed executable verification of the preprocessing pipeline and checkpoint compatibility beyond what was actually validated.",
+  "datasets": [
+    "KUL"
+  ],
+  "models": [
+    "AADConformer",
+    "LOSO Conformer"
+  ],
+  "keywords": [
+    "interpretability",
+    "frequency pipeline",
+    "PSD",
+    "Welch PSD",
+    "FFT band-stop",
+    "quantitative validation",
+    "multi-subject smoke test",
+    "LOSO",
+    "baseline verification",
+    "checkpoint validation",
+    "preprocessing verification",
+    "research methodology"
+  ],
+  "lessons": [
+    "Restrict methodological claims to behaviors that are directly demonstrated by executable code.",
+    "Differentiate validation of cached signal properties from validation of the preprocessing implementation that produced those signals.",
+    "Quantitative perturbation checks provide stronger evidence than qualitative visualizations but do not by themselves verify upstream preprocessing.",
+    "Treat structural checkpoint inspections as sanity checks unless dataset identity, preprocessing version, architecture metadata, and provenance are explicitly validated.",
+    "Do not describe checkpoint compatibility or provenance as verified when only parameter structure or successful loading has been checked.",
+    "Use baseline metric agreement as behavioral consistency validation rather than evidence of checkpoint provenance.",
+    "Clearly distinguish smoke-test characterization from comprehensive scientific validation in documentation and reporting.",
+    "Heuristic validation thresholds should not be presented as specification-derived acceptance criteria unless they are justified by the preprocessing design."
+  ],
+  "experiment_id": "2026-06-30_18-02-27",
+  "task": "Run 3.1 Frequency Pipeline Verification and Multi-Subject Smoke Test",
+  "status": "FAIL"
+}

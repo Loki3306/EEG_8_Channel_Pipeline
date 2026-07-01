@@ -1,0 +1,38 @@
+{
+  "summary": "Completed the final verification of the Run 3 interpretability smoke-test suite for the KUL LOSO Conformer pipeline. The implementation passed review after aligning methodological claims with executable behavior, preserving exploratory labeling for FFT-based ablations, and resolving the previous documentation and channel-ablation issues without introducing new blocking defects.",
+  "datasets": [
+    "KUL"
+  ],
+  "models": [
+    "AADConformer",
+    "LOSO Conformer"
+  ],
+  "keywords": [
+    "interpretability",
+    "smoke test",
+    "channel ablation",
+    "progressive ablation",
+    "frequency ablation",
+    "FFT masking",
+    "saliency",
+    "temporal occlusion",
+    "LOSO",
+    "KUL",
+    "baseline verification",
+    "reference metric validation",
+    "research methodology"
+  ],
+  "lessons": [
+    "Ensure comments and documentation describe only what the implementation actually verifies.",
+    "Treat agreement with recorded reference metrics as behavioral consistency validation rather than checkpoint provenance verification.",
+    "Label inference-time FFT spectral ablations as exploratory analyses and avoid presenting them as validated physiological evidence.",
+    "Keep interpretability analyses within the scope of the validated evaluation protocol when drawing scientific conclusions.",
+    "Maintain synchronization between dynamically generated experiment outputs and downstream visualization logic.",
+    "Use baseline metric validation as an acceptance check before running downstream interpretability analyses.",
+    "Design helper utilities to handle empty inputs consistently if they may be reused beyond the current evaluation workflow.",
+    "Accept interpretability results only after documentation, implementation, and evaluation methodology are mutually consistent."
+  ],
+  "experiment_id": "2026-06-30_17-21-19",
+  "task": "Run 3 Smoke Test Interpretability suite implementation - Final Attempt",
+  "status": "PASS"
+}

@@ -1,0 +1,31 @@
+{
+  "status": "FAILED_AFTER_MAX_ITERATIONS",
+  "iterations": 3,
+  "runtime_seconds": 252,
+  "checkpoint_restored": "Error: Command '['git', 'stash', 'push', '-u', '-m', 'AUTO_CHECKPOINT_2026-06-30_18-19-03']' returned non-zero exit status 1.",
+  "artifacts": "./.runs/2026-06-30_18-19-03/",
+  "last_review": {
+    "verdict": "FAIL",
+    "confidence": 98,
+    "blocking_issues": [
+      "The previous blocking issue regarding unsupported scientific conclusions is only partially resolved. The report now derives some values from data, but the central conclusions are still based on ad hoc heuristics rather than executable evidence. For example, declaring frequency or channel importance to be 'highly consistent' solely because mean standard deviation is below a hard-coded threshold (0.1) is an unsupported methodological assertion. The threshold is neither justified nor validated, yet the report presents the conclusion as scientific fact.",
+      "The temporal consistency analysis is not methodologically valid. It computes the standard deviation of an 'Accuracy' column within each subject and interprets this as evidence of consistent temporal reliance. Temporal occlusion consistency requires comparing the temporal importance profiles across subjects (e.g. similarity/correlation of occlusion curves or agreement of important windows), not dispersion of values within a subject.",
+      "The saliency consistency analysis does not analyze saliency patterns. It only checks whether every saliency vector has the same length, then reports 'consistent shapes'. Equal vector dimensionality is guaranteed by the architecture and provides no evidence whatsoever about interpretability consistency across subjects. The stated research question therefore remains unimplemented.",
+      "The task explicitly requires ensuring the confidence-based review pipeline (Developer -> Static -> Anti -> GPT -> Anti Re-review). The previous false compliance statement has been removed, but there is still no implementation, invocation, verification artifact, or execution record demonstrating that this orchestration pipeline exists or was executed. The requirement remains unmet."
+    ],
+    "warnings": [
+      "The frequency pipeline audit still verifies spectral characteristics of cached signals rather than the preprocessing pipeline itself. The current documentation is more careful, but reviewers should avoid interpreting this as verification of upstream preprocessing.",
+      "The consistency metrics use fixed heuristic thresholds (0.1 and 0.05) without justification or calibration. They should not be interpreted as scientifically meaningful acceptance criteria.",
+      "The frequency importance ranking assumes the lowest post-ablation accuracy corresponds directly to the most important frequency band. This is a reasonable exploratory heuristic but should not be presented as a validated physiological conclusion.",
+      "The report still recommends proceeding to Run 3.2 automatically despite the analysis being based on heuristic consistency measures rather than validated cross-subject statistics."
+    ],
+    "suggested_fixes": [
+      "Replace heuristic consistency labels with analyses that directly compare subject-level interpretability outputs and report only computed statistics without unsupported qualitative claims.",
+      "Evaluate temporal consistency using similarity of temporal occlusion profiles across subjects rather than within-subject variance.",
+      "Evaluate saliency consistency using the actual saliency values (e.g. agreement of channel rankings or similarity between saliency vectors) instead of checking vector lengths.",
+      "Either implement and record the requested orchestration pipeline or explicitly state that orchestration was not verified rather than implying compliance.",
+      "Clearly distinguish exploratory heuristics from validated scientific conclusions throughout the generated report."
+    ],
+    "summary": "The revision improves upon the previous version by removing hard-coded narrative conclusions and incorporating computed summary statistics. However, the central methodological issues remain unresolved because temporal and saliency consistency are not actually analyzed, heuristic thresholds are presented as evidence of consistency, and the required orchestration pipeline is still absent. The implementation is therefore not yet suitable for acceptance."
+  }
+}

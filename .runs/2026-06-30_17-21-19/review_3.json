@@ -1,0 +1,17 @@
+{
+  "verdict": "PASS",
+  "confidence": 95,
+  "blocking_issues": [],
+  "warnings": [
+    "The baseline verification only establishes that the loaded checkpoint reproduces the reference trial/window metrics. It should not be interpreted as cryptographic or metadata-based proof of checkpoint provenance, but the updated comments no longer claim that it does.",
+    "If conformer_loso_multiseed_summary.json is absent, the script continues after emitting a warning. This weakens the baseline validation step but does not invalidate the interpretability implementation itself.",
+    "get_base_metrics() returns an empty dictionary when test_trials is empty, while downstream callers assume populated metrics. The current smoke-test always loads S11, so this is not exercised, but the helper is not fully defensive.",
+    "FFT band masking remains an exploratory perturbation analysis. The implementation now documents this appropriately, but resulting plots should not be interpreted as validated physiological attribution."
+  ],
+  "suggested_fixes": [
+    "Consider failing rather than warning when the reference summary is unavailable if baseline verification is intended to be a required acceptance criterion.",
+    "Document explicitly in generated outputs that baseline agreement verifies behavioral consistency with the recorded reference metrics rather than checkpoint provenance.",
+    "Make get_base_metrics() and its callers consistently handle empty datasets if the helper is reused outside the current smoke-test."
+  ],
+  "summary": "The previous blocking issue has been resolved. The script no longer claims that runtime metric agreement verifies checkpoint provenance; it correctly states that it validates baseline inference against recorded reference metrics. The earlier methodological overstatement has been removed, the exploratory status of FFT ablation remains properly documented, the dynamic channel ablation regression is addressed, and no new blocking logic, leakage, or runtime issues are evident from the supplied implementation."
+}

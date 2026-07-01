@@ -1,0 +1,34 @@
+{
+  "status": "FAILED_AFTER_MAX_ITERATIONS",
+  "iterations": 3,
+  "runtime_seconds": 305,
+  "checkpoint_restored": "AUTO_CHECKPOINT_2026-06-30_17-01-13",
+  "artifacts": "./.runs/2026-06-30_17-01-13/",
+  "last_review": {
+    "verdict": "FAIL",
+    "confidence": 99,
+    "blocking_issues": [
+      "The smoke test still performs a fundamental methodology mismatch by loading the KUL dataset via KULCachedLoader while evaluating LOSO Conformer checkpoints that the task description identifies as the validated DTU model. The interpretability analyses therefore characterize cross-dataset domain shift rather than the validated DTU model.",
+      "Frequency ablation remains scientifically invalid because it applies a new inference-time FFT band-stop operation that is not demonstrated to be part of the validated training preprocessing pipeline. Changing from Butterworth filtering to FFT masking removes one implementation issue but does not resolve the underlying distribution shift.",
+      "The selected frequency bands (Delta/Theta/Alpha/Beta) remain hard-coded assumptions. No evidence is provided that these bands correspond to the preprocessing or feature space used during model training, so attribution conclusions remain unsupported.",
+      "Baseline verification is incomplete. The script only prints the current baseline metrics and warns if accuracy falls below chance. It never verifies reproduction of the previously validated Subject S11 reference metrics before running perturbation analyses, so the interpretability results are not anchored to a validated baseline.",
+      "Both saliency.py and temporal_occlusion.py contain a runtime bug: starts[-1] is accessed without checking whether starts is empty. Any trial shorter than the analysis window will raise an IndexError before analysis begins."
+    ],
+    "warnings": [
+      "The new temporal alignment assertion will terminate execution if the model output length differs from the audio target length, even if the architecture intentionally changes temporal resolution. This is useful as a consistency check but reduces robustness.",
+      "analysis/interpretability/frequency_ablation.py still imports scipy.signal.butter and filtfilt although they are no longer used.",
+      "run_progressive_ablation() still hard-codes evaluation configurations [8,6,4,2,1]. Although channel masking is now dynamic, these configurations assume an eight-channel model.",
+      "run_saliency_analysis() allocates total_saliency as a fixed [8, win_samples] tensor rather than deriving the channel count from the input, limiting portability to models with different channel counts.",
+      "Channel ranking is now consistently documented as margin-based, but Acc Drop is still computed and stored without contributing to ranking, which may confuse downstream interpretation."
+    ],
+    "suggested_fixes": [
+      "Use the same dataset, preprocessing pipeline and subject split that produced the validated LOSO checkpoints before interpreting the model.",
+      "Ensure every perturbation method operates within the validated preprocessing pipeline rather than introducing new inference-only signal transformations.",
+      "Validate that any frequency-band definitions correspond to the preprocessing actually used during model development before interpreting physiological importance.",
+      "Compare the reproduced baseline metrics against the previously validated Subject S11 reference metrics and abort the interpretability suite if they do not match within an acceptable tolerance.",
+      "Guard against an empty starts list before indexing starts[-1] in both saliency.py and temporal_occlusion.py.",
+      "Remove unused SciPy imports and derive channel-dependent allocations and evaluation configurations from the loaded data or model rather than fixed constants."
+    ],
+    "summary": "Several implementation issues were improved, including dynamic channel masking, checkpoint compatibility checks and deterministic execution. However, the primary scientific validity problems remain unresolved, the baseline validation is still incomplete, and a new runtime edge-case bug exists for short trials. The implementation should not be accepted as a validated interpretability smoke test."
+  }
+}

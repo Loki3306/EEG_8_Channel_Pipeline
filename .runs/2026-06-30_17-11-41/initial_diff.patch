@@ -1,0 +1,148 @@
+diff --git a/.research/index.json b/.research/index.json
+index fa3839b..56f34c3 100644
+--- a/.research/index.json
++++ b/.research/index.json
+@@ -135,5 +135,15 @@
+     "experiment_id": "2026-06-30_05-29-24",
+     "task": "Implement confidence-aware MatchNet for KUL.",
+     "status": "PASS"
++  },
++  {
++    "summary": "Failed to parse metadata",
++    "datasets": [],
++    "models": [],
++    "keywords": [],
++    "lessons": [],
++    "experiment_id": "2026-06-30_17-01-13",
++    "task": "Run 3 Smoke Test Interpretability suite implementation - Attempt 2",
++    "status": "FAIL"
+   }
+ ]
+\ No newline at end of file
+diff --git a/analysis/interpretability/saliency.py b/analysis/interpretability/saliency.py
+index 88037fb..9d9a4b0 100644
+--- a/analysis/interpretability/saliency.py
++++ b/analysis/interpretability/saliency.py
+@@ -17,9 +17,8 @@ def run_saliency_analysis(model, test_trials, device, window_seconds=10.0, fs=64
+     """
+     win_samples = int(window_seconds * fs)
+     
+-    # We will accumulate the absolute Input x Gradient saliency
+-    # Shape will be [Channels, Time] for the average 10s window
+-    total_saliency = torch.zeros(8, win_samples, device=device)
++    # We will allocate total_saliency dynamically when we see the first trial
++    total_saliency = None
+     num_windows = 0
+     
+     model.eval()
+@@ -40,7 +39,13 @@ def run_saliency_analysis(model, test_trials, device, window_seconds=10.0, fs=64
+             wav_a_full = wav_a_full[:,:,:min_len]
+             wav_b_full = wav_b_full[:,:,:min_len]
+             
+-            for start in range(0, min_len - win_samples + 1, win_samples):
++            starts = list(range(0, min_len - win_samples + 1, win_samples))
++            if not starts:
++                continue
++            if starts[-1] + win_samples < min_len:
++                starts.append(min_len - win_samples)
++            
++            for start in starts:
+                 eeg_chunk = eeg_full[:, :, start:start+win_samples].clone()
+                 eeg_chunk.requires_grad_(True)
+                 
+@@ -63,6 +68,8 @@ def run_saliency_analysis(model, test_trials, device, window_seconds=10.0, fs=64
+                 grad = eeg_chunk.grad.detach() # [1, Channels, Time]
+                 input_x_grad = (eeg_chunk.detach() * grad).abs().squeeze(0) # [Channels, Time]
+                 
++                if total_saliency is None:
++                    total_saliency = torch.zeros(eeg_chunk.shape[1], win_samples, device=device)
+                 total_saliency += input_x_grad
+                 num_windows += 1
+ 
+diff --git a/analysis/interpretability/temporal_occlusion.py b/analysis/interpretability/temporal_occlusion.py
+index 45400db..9c979a3 100644
+--- a/analysis/interpretability/temporal_occlusion.py
++++ b/analysis/interpretability/temporal_occlusion.py
+@@ -32,7 +32,13 @@ def run_temporal_occlusion(model, test_trials, device, window_seconds=10.0, step
+             wav_b_full = wav_b_full[:,:,:min_len]
+             
+             # Chunk the trial into non-overlapping 10s windows
+-            for start in range(0, min_len - win_samples + 1, win_samples):
++            starts = list(range(0, min_len - win_samples + 1, win_samples))
++            if not starts:
++                continue
++            if starts[-1] + win_samples < min_len:
++                starts.append(min_len - win_samples) # Cover the tail
++            
++            for start in starts:
+                 eeg_chunk = eeg_full[:, :, start:start+win_samples]
+                 wa_chunk = wav_a_full[:, :, start:start+win_samples].squeeze(1).squeeze(0).cpu().numpy()
+                 wb_chunk = wav_b_full[:, :, start:start+win_samples].squeeze(1).squeeze(0).cpu().numpy()
+diff --git a/analysis/run1_calibration.py b/analysis/run1_calibration.py
+index 21cfbf5..4f2d714 100644
+--- a/analysis/run1_calibration.py
++++ b/analysis/run1_calibration.py
+@@ -77,13 +77,16 @@ def main():
+     
+     # Reliability Diagram
+     plt.figure(figsize=(8, 8))
+-    plt.plot([0, 1], [0, 1], linestyle='--', color='gray', label='Perfect Calibration')
+     
+     valid_bins = ~np.isnan(bin_accs)
+     centers = (bins[:-1] + bins[1:]) / 2
++    centers_arr = np.array(centers)
++    bin_accs_arr = np.array(bin_accs)
++    bin_confs_arr = np.array(bin_confs)
+     
+-    plt.bar(centers[valid_bins], bin_accs[valid_bins], width=0.1, alpha=0.7, edgecolor='k', label='Model')
+-    plt.plot(centers[valid_bins], bin_confs[valid_bins], marker='o', color='red', label='Mean Confidence')
++    plt.plot([0, 1], [0, 1], 'k--', label='Perfect Calibration')
++    plt.bar(centers_arr[valid_bins], bin_accs_arr[valid_bins], width=0.1, alpha=0.7, edgecolor='k', label='Model')
++    plt.plot(centers_arr[valid_bins], bin_confs_arr[valid_bins], marker='o', color='red', label='Mean Confidence')
+     
+     plt.xlabel("Scaled Confidence Proxy")
+     plt.ylabel("Empirical Accuracy")
+diff --git a/analysis/run3_interpretability_smoke.py b/analysis/run3_interpretability_smoke.py
+index 99a867a..b10f9af 100644
+--- a/analysis/run3_interpretability_smoke.py
++++ b/analysis/run3_interpretability_smoke.py
+@@ -6,6 +6,7 @@ from pathlib import Path
+ import json
+ import pandas as pd
+ import matplotlib.pyplot as plt
++import json
+ 
+ REPO_ROOT = Path(__file__).resolve().parents[1]
+ sys.path.insert(0, str(REPO_ROOT))
+@@ -78,6 +79,31 @@ def main():
+     model.load_state_dict(torch.load(checkpoint_path, map_location=device, weights_only=True))
+     print(f"Loaded checkpoint from {checkpoint_path}")
+     
++    # 3. Verify Baseline
++    print("\nVerifying Baseline Inference against validated Reference Metrics...")
++    base_metrics = get_base_metrics(model, test_trials, device)
++    
++    # Load reference
++    summary_path = REPO_ROOT / "conformer_loso_results" / "conformer_loso_multiseed_summary.json"
++    if summary_path.exists():
++        with open(summary_path, 'r') as f:
++            ref_data = json.load(f)
++            # Seed 1, Subject S11
++            ref_acc = ref_data["1"][target_subject]["trial_accuracy"]
++            ref_wacc = ref_data["1"][target_subject]["window_accuracy"]
++            
++        print(f"Runtime Trial Accuracy:  {base_metrics['Trial Accuracy']:.4f} (Reference: {ref_acc:.4f})")
++        print(f"Runtime Window Accuracy: {base_metrics['Window Accuracy']:.4f} (Reference: {ref_wacc:.4f})")
++        
++        # Abort if accuracy doesn't match
++        if abs(base_metrics['Trial Accuracy'] - ref_acc) > 1e-4:
++            print("ERROR: Runtime Trial Accuracy does not match the validated reference! Aborting to prevent invalid interpretability analyses.")
++            return
++    else:
++        print("WARNING: conformer_loso_multiseed_summary.json not found. Could not verify reference metrics.")
++        
++    print("Baseline validated successfully!")
++    
+     # =========================================================================
+     # EXPERIMENT D: Channel Importance (Leave-One-Channel-Out)
+     # =========================================================================

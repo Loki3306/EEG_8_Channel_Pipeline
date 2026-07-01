@@ -1,0 +1,30 @@
+diff --git a/.mcp/__pycache__/server.cpython-313.pyc b/.mcp/__pycache__/server.cpython-313.pyc
+index 076b330..32d9992 100644
+Binary files a/.mcp/__pycache__/server.cpython-313.pyc and b/.mcp/__pycache__/server.cpython-313.pyc differ
+diff --git a/.mcp/server.py b/.mcp/server.py
+index 04a1f3e..3add6ba 100644
+--- a/.mcp/server.py
++++ b/.mcp/server.py
+@@ -1025,5 +1025,22 @@ After editing, save the files and call autonomous_review again.
+     
+     return fix_prompt
+ 
++@mcp.tool()
++def start_task(task: str) -> str:
++    """Universal task orchestrator entry point. Understands task, gathers context and memory, and designs plan."""
++    from core.orchestrator import start_task_impl
++    repo_root = get_repo_root()
++    res = start_task_impl(task, repo_root)
++    return json.dumps(res, indent=2)
++
++@mcp.tool()
++def finish_task() -> str:
++    """Finalizes task, runs autonomous review validation suite, updates memory, and generates audit reports."""
++    from core.orchestrator import finish_task_impl
++    repo_root = get_repo_root()
++    res = finish_task_impl(repo_root)
++    return res
++
+ if __name__ == "__main__":
+     mcp.run()
++

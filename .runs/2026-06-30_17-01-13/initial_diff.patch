@@ -1,0 +1,24 @@
+diff --git a/analysis/run1_calibration.py b/analysis/run1_calibration.py
+index 21cfbf5..4f2d714 100644
+--- a/analysis/run1_calibration.py
++++ b/analysis/run1_calibration.py
+@@ -77,13 +77,16 @@ def main():
+     
+     # Reliability Diagram
+     plt.figure(figsize=(8, 8))
+-    plt.plot([0, 1], [0, 1], linestyle='--', color='gray', label='Perfect Calibration')
+     
+     valid_bins = ~np.isnan(bin_accs)
+     centers = (bins[:-1] + bins[1:]) / 2
++    centers_arr = np.array(centers)
++    bin_accs_arr = np.array(bin_accs)
++    bin_confs_arr = np.array(bin_confs)
+     
+-    plt.bar(centers[valid_bins], bin_accs[valid_bins], width=0.1, alpha=0.7, edgecolor='k', label='Model')
+-    plt.plot(centers[valid_bins], bin_confs[valid_bins], marker='o', color='red', label='Mean Confidence')
++    plt.plot([0, 1], [0, 1], 'k--', label='Perfect Calibration')
++    plt.bar(centers_arr[valid_bins], bin_accs_arr[valid_bins], width=0.1, alpha=0.7, edgecolor='k', label='Model')
++    plt.plot(centers_arr[valid_bins], bin_confs_arr[valid_bins], marker='o', color='red', label='Mean Confidence')
+     
+     plt.xlabel("Scaled Confidence Proxy")
+     plt.ylabel("Empirical Accuracy")

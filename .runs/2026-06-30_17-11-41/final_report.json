@@ -1,0 +1,30 @@
+{
+  "status": "FAILED_AFTER_MAX_ITERATIONS",
+  "iterations": 3,
+  "runtime_seconds": 345,
+  "checkpoint_restored": "AUTO_CHECKPOINT_2026-06-30_17-11-41",
+  "artifacts": "./.runs/2026-06-30_17-11-41/",
+  "last_review": {
+    "verdict": "FAIL",
+    "confidence": 98,
+    "blocking_issues": [
+      "analysis/run3_interpretability_smoke.py and analysis/interpretability/channel_ablation.py are inconsistent. run_progressive_ablation() now generates channel configurations dynamically from the number of ranked channels, but the plotting code still assumes fixed keys ['8 Channels','6 Channels','4 Channels','2 Channels','1 Channels']. If the model does not have exactly eight channels, the plotting code will raise a KeyError.",
+      "analysis/interpretability/frequency_ablation.py contains a documentation/implementation mismatch. The docstring states that frequency ablation is performed by zeroing FFT components, but the implementation still performs Butterworth band-stop filtering via scipy.signal.butter() and filtfilt(). The stated methodology is therefore not the implemented methodology.",
+      "The claim that no cross-dataset domain shift exists is not established by the implementation. The script only contains comments asserting that conformer_loso_results contains KUL-trained checkpoints. No runtime verification is performed that the loaded checkpoints actually correspond to the KUL dataset referenced by KULCachedLoader.",
+      "The frequency-band interpretability methodology remains unsupported. Removing canonical EEG bands with an inference-time band-stop filter is not shown to be part of the validated evaluation protocol, so physiological conclusions derived from these ablations cannot be considered validated by the implementation alone."
+    ],
+    "warnings": [
+      "The baseline verification aborts only on Trial Accuracy mismatch while reporting Window Accuracy without validating it. A checkpoint with matching trial accuracy but differing window accuracy would still proceed.",
+      "get_base_metrics() divides by len(test_trials) without guarding against an empty subject, although the current smoke test is expected to contain trials for S11.",
+      "Comments describing the methodology have become stronger than what the executable code verifies, increasing the risk of misleading future reviewers."
+    ],
+    "suggested_fixes": [
+      "Keep the progressive ablation plotting logic synchronized with the actual keys returned by run_progressive_ablation() instead of assuming a fixed channel configuration.",
+      "Make the frequency ablation documentation accurately describe the implemented algorithm, or implement the documented algorithm if that is the intended methodology.",
+      "Replace comments asserting checkpoint provenance with executable validation or metadata checks that verify dataset/checkpoint compatibility before running interpretability analyses.",
+      "Either justify the frequency-ablation methodology against the validated evaluation pipeline or clearly present it as an exploratory analysis rather than a validated physiological interpretation.",
+      "Validate both Trial Accuracy and Window Accuracy against the reference metrics before declaring the baseline verified."
+    ],
+    "summary": "The previous import-related runtime failure is resolved, but multiple scientific and implementation issues remain. The review cannot be accepted because the methodology claims exceed what the implementation verifies, the frequency-ablation documentation contradicts the code, and a regression exists between the dynamic progressive-ablation implementation and the fixed plotting logic."
+  }
+}
