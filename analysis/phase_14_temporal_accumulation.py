@@ -145,14 +145,18 @@ def run_accumulation_analysis(preds_path, out_dir):
     for th in thresholds:
         sprt_df = df.groupby(['subject', 'trial']).apply(compute_sprt, conf_threshold=th, include_groups=False).reset_index()
         
-        # Only evaluate latency for trials that actually hit the threshold
-        hits = sprt_df[sprt_df['hit'] == True]
-        hit_rate = len(hits) / len(sprt_df)
+        # Detailed audit breakdown
+        total_trials = len(sprt_df)
+        accepted_correct = len(sprt_df[(sprt_df['hit'] == True) & (sprt_df['correct'] == True)])
+        accepted_incorrect = len(sprt_df[(sprt_df['hit'] == True) & (sprt_df['correct'] == False)])
+        no_decision = len(sprt_df[sprt_df['hit'] == False])
         
+        hit_rate = (accepted_correct + accepted_incorrect) / total_trials if total_trials > 0 else 0
+        
+        hits = sprt_df[sprt_df['hit'] == True]
         if len(hits) > 0:
-            mean_latency_win = hits['latency_windows'].mean()
-            mean_latency_sec = mean_latency_win * 2
-            accuracy = hits['correct'].mean()
+            mean_latency_sec = hits['latency_windows'].mean() * 2
+            accuracy = accepted_correct / len(hits)
         else:
             mean_latency_sec = np.nan
             accuracy = np.nan
@@ -161,7 +165,11 @@ def run_accumulation_analysis(preds_path, out_dir):
             'Threshold': th,
             'Decision_Rate': hit_rate,
             'Mean_Latency_sec': mean_latency_sec,
-            'Accuracy': accuracy
+            'Accuracy': accuracy,
+            'Accepted_Correct': accepted_correct,
+            'Accepted_Incorrect': accepted_incorrect,
+            'No_Decision': no_decision,
+            'Total_Trials': total_trials
         })
         
     sprt_res_df = pd.DataFrame(sprt_results)
@@ -190,7 +198,10 @@ def run_accumulation_analysis(preds_path, out_dir):
                 
         f.write("\n## 2. SPRT (Sequential Probability Ratio Test)\n")
         f.write("Time required to reach a dynamic confidence threshold.\n\n")
-        f.write(sprt_res_df.to_markdown(index=False))
+        f.write("### Audit Breakdown\n")
+        f.write(sprt_res_df[['Threshold', 'Total_Trials', 'Accepted_Correct', 'Accepted_Incorrect', 'No_Decision']].to_markdown(index=False))
+        f.write("\n\n### Performance Metrics\n")
+        f.write(sprt_res_df[['Threshold', 'Decision_Rate', 'Mean_Latency_sec', 'Accuracy']].to_markdown(index=False))
         f.write("\n")
         
     print(f"\nGenerated report at {report_path}")
