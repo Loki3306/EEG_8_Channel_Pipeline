@@ -8,10 +8,9 @@ import numpy as np
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from models.aad_conformer import AADConformer
-from preprocessing.build_kul_cache import get_cached_dataset
+from data.kul_cached_dataset import KULCachedLoader
 from src.confidence.selective_predictor import SelectivePredictor
 from src.confidence.selective_metrics import calculate_selective_risk
-from data.kul_cached_dataset import KULCachedDataset
 from torch.utils.data import DataLoader, TensorDataset
 
 def run_selective_pipeline(subject="S1", model_path=None, threshold=0.70):
@@ -30,16 +29,24 @@ def run_selective_pipeline(subject="S1", model_path=None, threshold=0.70):
         data_path = "/kaggle/input/datasets/lokeshgile/kul-processed/data/processed_kul"
         if not os.path.exists(data_path):
             data_path = "data/processed_kul" # Fallback local
-        cache_data = get_cached_dataset(data_path, [subject])
-        if not cache_data:
-            print("No data found.")
+            
+        loader = KULCachedLoader(data_path)
+        all_data = loader.load_all()
+        if subject not in all_data:
+            print(f"Subject {subject} not found in data.")
             return
             
-        eeg = cache_data[subject]["eeg"]
-        wav_a = cache_data[subject]["wav_a"]
-        wav_b = cache_data[subject]["wav_b"]
-        labels = cache_data[subject]["labels"]
-        print(f"Data loaded: EEG {eeg.shape}, Audio {wav_a.shape}, Trials {len(labels)}")
+        subject_trials = all_data[subject]
+        
+        # Structure the trials like before
+        eeg, wav_a, wav_b, labels = [], [], [], []
+        for trial in subject_trials:
+            eeg.append(trial["eeg"])
+            wav_a.append(trial["wavA"])
+            wav_b.append(trial["wavB"])
+            labels.append(trial["label"])
+            
+        print(f"Data loaded: Trials {len(labels)}")
     except Exception as e:
         print(f"Failed to load data: {e}")
         return
