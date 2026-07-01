@@ -2,6 +2,7 @@ import os
 import sys
 import numpy as np
 import torch
+import torch.nn.functional as F
 import pandas as pd
 import matplotlib.pyplot as plt
 from pathlib import Path
@@ -27,11 +28,14 @@ def load_checkpoint_and_data(ckpt_path_arg, device):
     if ckpt_path_arg and Path(ckpt_path_arg).exists():
         ckpt_path = Path(ckpt_path_arg)
     else:
-        ckpt_path = REPO_ROOT / "results" / "run7_multitask_conformer_loso" / "checkpoints" / "seed_1" / "model_S1.pt"
-        if not ckpt_path.exists():
-            ckpt_path = Path("/kaggle/working/EEG_8_Channel_Pipeline/results/run7_multitask_conformer_loso/checkpoints/seed_1/model_S1.pt")
-        if not ckpt_path.exists():
-            ckpt_path = Path("/kaggle/input/datasets/lokeshgile/confidence-heads/kaggle/working/EEG_8_Channel_Pipeline/results/run7_multitask_conformer_loso/checkpoints/seed_1/model_S1.pt")
+        multitask_dir = REPO_ROOT / "results" / "run7_multitask_conformer_loso"
+        ckpt_dir = multitask_dir / "checkpoints"
+        
+        if not ckpt_dir.exists():
+            ckpt_dir = Path("/kaggle/working/EEG_8_Channel_Pipeline/results/run7_multitask_conformer_loso/checkpoints")
+        
+        ckpt_path = ckpt_dir / "seed_1" / "model_S1.pt"
+        
         if not ckpt_path.exists():
             possible = list(Path("/kaggle/input").rglob("model_S1.pt"))
             if possible:
@@ -40,7 +44,14 @@ def load_checkpoint_and_data(ckpt_path_arg, device):
     model = AADConformer(in_channels=8).to(device)
     if ckpt_path.exists():
         try:
-            model.load_state_dict(torch.load(ckpt_path, map_location=device))
+            # Filter out state_dict keys with "module." prefix if they exist from DataParallel
+            state_dict = torch.load(ckpt_path, map_location=device)
+            new_state_dict = {}
+            for k, v in state_dict.items():
+                name = k[7:] if k.startswith("module.") else k
+                new_state_dict[name] = v
+                
+            model.load_state_dict(new_state_dict)
             print(f"Loaded frozen Conformer checkpoint from {ckpt_path}")
         except RuntimeError as e:
             if "confidence_head" in str(e):
@@ -109,11 +120,12 @@ def extract_base_dataset(model, data, device):
                 prediction = 1 if margin > 0 else 0
                 correct = int(prediction == 1)
                 
-                ca_t = torch.tensor([ca], dtype=torch.float32, device=device)
-                cb_t = torch.tensor([cb], dtype=torch.float32, device=device)
-                margin_t = torch.tensor([margin], dtype=torch.float32, device=device)
-                
-                conf = model.predict_confidence(z_pool, ca_t, cb_t, margin_t)
+                conf_logits = model.predict_confidence(z_pool)
+                # Convert evidential logits to Dirichlet alpha parameters
+                alphas = F.softplus(conf_logits) + 1.0
+                S = torch.sum(alphas, dim=-1, keepdim=True)
+                # Probability of Class 1 (Correct)
+                conf = (alphas[:, 1] / S[:, 0])
                 
                 eeg_context = z_pool.detach().cpu().numpy()[0]
                 
@@ -208,7 +220,7 @@ def audit_layer_inspections(model, data, device):
         ca_t = torch.tensor([ca], dtype=torch.float32, device=device)
         cb_t = torch.tensor([cb], dtype=torch.float32, device=device)
         margin_t = torch.tensor([margin], dtype=torch.float32, device=device)
-        conf = model.predict_confidence(z_pool, ca_t, cb_t, margin_t)
+        conf_logits = model.predict_confidence(z_pool)
         
     stats = []
     for name, act_list in activations.items():
@@ -254,7 +266,10 @@ def audit_input_sensitivity(model, data, device):
     cb_t = torch.tensor([cb], dtype=torch.float32, device=device, requires_grad=True)
     margin_t = torch.tensor([margin], dtype=torch.float32, device=device, requires_grad=True)
     
-    conf = model.predict_confidence(z_pool, ca_t, cb_t, margin_t)
+    conf_logits = model.predict_confidence(z_pool)
+    alphas = F.softplus(conf_logits) + 1.0
+    S = torch.sum(alphas, dim=-1, keepdim=True)
+    conf = (alphas[:, 1] / S[:, 0]).detach().cpu().numpy()
     
     # Compute gradients w.r.t inputs
     conf.backward()
