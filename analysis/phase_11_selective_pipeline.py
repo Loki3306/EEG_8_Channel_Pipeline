@@ -56,7 +56,7 @@ def run_selective_pipeline(subject="S1", model_path=None, threshold=0.70):
         
     # Load model
     print("Initializing AADConformer...")
-    model = AADConformer(eeg_channels=8, audio_channels=28, num_classes=2).to(device)
+    model = AADConformer(in_channels=8).to(device)
     model.eval()
     
     if model_path and os.path.exists(model_path):
@@ -96,10 +96,25 @@ def run_selective_pipeline(subject="S1", model_path=None, threshold=0.70):
                 c_wb = torch.FloatTensor(t_wb[:, start:end]).unsqueeze(0).to(device)
                 
                 # Forward
-                pred_idx, margin, _ = model.predict_confidence(c_eeg, c_wa, c_wb)
+                pred, z_pool = model(c_eeg, return_features=True)
                 
-                # For this demo we don't extract pearson locally, we just use margin confidence
-                res = predictor.predict_window(margin)
+                # Calculate Pearson
+                pred_c = pred - pred.mean(dim=1, keepdim=True)
+                ya_c = c_wa.squeeze(1) - c_wa.squeeze(1).mean(dim=1, keepdim=True)
+                yb_c = c_wb.squeeze(1) - c_wb.squeeze(1).mean(dim=1, keepdim=True)
+                
+                cov_a = (pred_c * ya_c).sum(dim=1)
+                cov_b = (pred_c * yb_c).sum(dim=1)
+                var_pred = (pred_c ** 2).sum(dim=1)
+                var_a = (ya_c ** 2).sum(dim=1)
+                var_b = (yb_c ** 2).sum(dim=1)
+                
+                sim_a = (cov_a / torch.sqrt(var_pred * var_a + 1e-8)).item()
+                sim_b = (cov_b / torch.sqrt(var_pred * var_b + 1e-8)).item()
+                
+                margin = sim_b - sim_a  # positive means B > A (predict 1), negative means A > B (predict 0)
+                
+                res = predictor.predict_window(margin, pearson_a=sim_a, pearson_b=sim_b, use_pearson=True)
                 res["ground_truth"] = label
                 window_results.append(res)
                 all_window_results.append(res)
