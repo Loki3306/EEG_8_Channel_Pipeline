@@ -319,6 +319,6 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--preds", type=str, default="results/phase13_margin_calibration/calibration_predictions.csv")
     parser.add_argument("--out", type=str, default="results/phase14_streaming")
-    args = parser.add_argument_args()
+    args = parser.parse_args()
     
     run_streaming_validation(args.preds, args.out)
