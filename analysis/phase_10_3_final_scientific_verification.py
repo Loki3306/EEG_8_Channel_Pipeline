@@ -207,7 +207,7 @@ def main():
         dtu_raw.append(x)
         x_chunks, _, _ = chunk_trial(x, YA_dtu[0], YB_dtu[0], 5.0, 5.0)
         for c in x_chunks:
-            bx = torch.FloatTensor(c).unsqueeze(0).to(device)
+            bx = torch.FloatTensor(c.copy()).unsqueeze(0).to(device)
             _, z = model(bx, return_features=True)
             dtu_latents.append(z.cpu().numpy().squeeze())
             for k in dtu_activations.keys():
@@ -220,7 +220,7 @@ def main():
         kul_raw.append(x)
         c_x = x[:, :int(5*FS)]
         if c_x.shape[1] == int(5*FS):
-            bx = torch.FloatTensor(c_x).unsqueeze(0).to(device)
+            bx = torch.FloatTensor(c_x.copy()).unsqueeze(0).to(device)
             _, z = model(bx, return_features=True)
             kul_latents.append(z.cpu().numpy().squeeze())
             for k in kul_activations.keys():
@@ -317,7 +317,7 @@ def main():
             wins_correct = []
             
             for j in range(len(x_chunks)):
-                bx = torch.FloatTensor(x_chunks[j]).unsqueeze(0).to(device)
+                bx = torch.FloatTensor(x_chunks[j].copy()).unsqueeze(0).to(device)
                 with torch.no_grad():
                     pred, z = model(bx, return_features=True)
                     pred_np = pred.cpu().numpy().squeeze()
@@ -327,6 +327,9 @@ def main():
                     sim_a = independent_similarity(pred_np, ya_np)
                     sim_b = independent_similarity(pred_np, yb_np)
                     
+                    pred_th = pred
+                    ya_th = torch.FloatTensor(ya_chunks[j].copy()).unsqueeze(0).to(device)
+                    yb_th = torch.FloatTensor(yb_chunks[j].copy()).unsqueeze(0).to(device)
                     ca = torch.tensor([sim_a], dtype=torch.float32, device=device)
                     cb = torch.tensor([sim_b], dtype=torch.float32, device=device)
                     m_val = torch.tensor([sim_a - sim_b], dtype=torch.float32, device=device)
@@ -417,7 +420,7 @@ def main():
         for t_idx in range(len(X)):
             x_chunks, ya_chunks, yb_chunks = chunk_trial(X[t_idx], YA[t_idx], YB[t_idx], 5.0, 5.0)
             for j in range(len(x_chunks)):
-                bx = torch.FloatTensor(x_chunks[j]).unsqueeze(0).to(device)
+                bx = torch.FloatTensor(x_chunks[j].copy()).unsqueeze(0).to(device)
                 with torch.no_grad():
                     pred = model(bx).cpu().numpy().squeeze()
                     sim_a = independent_similarity(pred, ya_chunks[j].squeeze())
