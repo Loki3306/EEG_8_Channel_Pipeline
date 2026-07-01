@@ -85,13 +85,33 @@ def corrupt_eeg(eeg, wav_a, wav_b, mode, device):
         return torch.roll(eeg, shifts=shift, dims=-1), wav_a, wav_b
     return eeg, wav_a, wav_b
 
+import argparse
+
 def main():
+    parser = argparse.ArgumentParser(description="Phase 8: Scientific Falsification")
+    parser.add_argument("--cache_dir", type=str, default=None, help="Path to KUL cache dir")
+    parser.add_argument("--checkpoint_dir", type=str, default=None, help="Path to Phase 7 checkpoints (seed_1 dir)")
+    args = parser.parse_args()
+
     print("--- Phase 8: Scientific Falsification ---")
-    cache_dir = REPO_ROOT / "data" / "processed_kul"
-    if Path("/kaggle/input/datasets/lowk1ee/kul-preprocessed-cache/data/processed_kul").exists():
-        cache_dir = Path("/kaggle/input/datasets/lowk1ee/kul-preprocessed-cache/data/processed_kul")
+    
+    # 1. Resolve Cache Directory
+    if args.cache_dir:
+        cache_dir = Path(args.cache_dir)
+    else:
+        cache_dir = REPO_ROOT / "data" / "processed_kul"
+        if Path("/kaggle/input/datasets/lowk1ee/kul-preprocessed-cache/data/processed_kul").exists():
+            cache_dir = Path("/kaggle/input/datasets/lowk1ee/kul-preprocessed-cache/data/processed_kul")
+            
+    # 2. Resolve Checkpoint Directory
+    if args.checkpoint_dir:
+        checkpoint_dir = Path(args.checkpoint_dir)
+    else:
+        checkpoint_dir = REPO_ROOT / "results" / "run7_multitask_conformer_loso" / "checkpoints" / "seed_1"
         
-    checkpoint_dir = REPO_ROOT / "results" / "run7_multitask_conformer_loso" / "checkpoints" / "seed_1"
+    print(f"Using cache_dir: {cache_dir}")
+    print(f"Using checkpoint_dir: {checkpoint_dir}")
+    
     out_dir = REPO_ROOT / "results" / "run8_falsification"
     os.makedirs(out_dir, exist_ok=True)
     
