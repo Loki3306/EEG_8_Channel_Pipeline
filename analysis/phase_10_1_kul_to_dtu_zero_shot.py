@@ -206,13 +206,6 @@ def phase2_debug_forward_pass(model, device, X, Y_A, Y_B):
     
     # Forward pass manually step-by-step
     with torch.no_grad():
-        x_emb = model.eeg_encoder.spatial_conv(bx.unsqueeze(1))
-        print(f"Spatial Encoder Output: {x_emb.shape} | Mean: {x_emb.mean().item():.4f} | Std: {x_emb.std().item():.4f}")
-        
-        if torch.isnan(x_emb).any():
-            print("CRITICAL: NaNs in Spatial Encoder. Covariance shift too high!")
-            sys.exit(1)
-            
         # Manually trace step by step for debugging
         x_emb = model.spatial_conv(model.temporal_norm(model.temporal_conv(bx.unsqueeze(1))))
         print(f"Spatial Encoder Output: {x_emb.shape} | Mean: {x_emb.mean().item():.4f} | Std: {x_emb.std().item():.4f}")
