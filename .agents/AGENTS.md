@@ -83,3 +83,9 @@ Every implementation must conclude by printing the following log. If a stage was
 - [ ] Repository CI Passed
 - [ ] Review Passed
 - [ ] Verification Passed
+
+---
+
+## SAFE CODING PRACTICES
+
+When utilizing external classes, objects, or modules, always verify the available attributes and methods before invoking them. Do not assume the existence of functions (e.g., `load_subject()`) without confirming their definition in the source file. This prevents `AttributeError` and runtime failures.

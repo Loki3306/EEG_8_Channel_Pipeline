@@ -56,7 +56,8 @@ def run_verification_audit(subject="S1", ckpt_path=None):
         cache_dir = REPO_ROOT / "data" / "processed_kul"
         
     loader = KULCachedLoader(cache_dir)
-    data = loader.load_subject(subject)
+    all_data = loader.load_all()
+    data = all_data[subject]
     
     print(f"Loaded {len(data)} trials for {subject}.")
     
