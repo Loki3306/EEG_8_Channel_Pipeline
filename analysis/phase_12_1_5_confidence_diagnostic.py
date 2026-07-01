@@ -277,13 +277,17 @@ def audit_feature_ablation(model, df, device):
     results = []
     
     # helper
-    def eval_ablated(eeg_ctx, ca, cb, name):
+    def eval_ablated(z_pool_arr, ca, cb, margin_arr, name):
         with torch.no_grad():
             ca_t = torch.tensor(ca, dtype=torch.float32, device=device).unsqueeze(1)
             cb_t = torch.tensor(cb, dtype=torch.float32, device=device).unsqueeze(1)
-            ctx_t = torch.tensor(eeg_ctx, dtype=torch.float32, device=device)
+            m_t = torch.tensor(margin_arr, dtype=torch.float32, device=device).unsqueeze(1)
+            z_t = torch.tensor(z_pool_arr, dtype=torch.float32, device=device)
+            if z_t.ndim == 1:
+                z_t = z_t.unsqueeze(0)
+            z_norm = torch.norm(z_t, dim=-1, keepdim=True)
             
-            inp = torch.cat([ctx_t, ca_t, cb_t], dim=1)
+            inp = torch.cat([z_t, ca_t, cb_t, m_t, z_norm], dim=-1)
             preds = model.confidence_head(inp).squeeze(-1).cpu().numpy()
             
             auc = roc_auc_score(y_true, preds)
@@ -300,19 +304,19 @@ def audit_feature_ablation(model, df, device):
     ctx_full = np.stack(df['eeg_context'].values)
     ca_full = df['corr_a'].values
     cb_full = df['corr_b'].values
+    margin_full = df['margin'].values
     
     # 1. Everything (Baseline)
-    eval_ablated(ctx_full, ca_full, cb_full, "All Features")
+    eval_ablated(ctx_full, ca_full, cb_full, margin_full, "All Features")
     
-    # 2. Latent Only (correlations zeroed)
-    eval_ablated(ctx_full, np.zeros_like(ca_full), np.zeros_like(cb_full), "Latent Only (Corr=0)")
+    # 2. Latent Only (correlations and margin zeroed)
+    eval_ablated(ctx_full, np.zeros_like(ca_full), np.zeros_like(cb_full), np.zeros_like(margin_full), "Latent Only (Corr=0)")
     
     # 3. Pearson Only (latent zeroed)
-    eval_ablated(np.zeros_like(ctx_full), ca_full, cb_full, "Pearson Only (Latent=0)")
+    eval_ablated(np.zeros_like(ctx_full), ca_full, cb_full, margin_full, "Pearson Only (Latent=0)")
     
-    # 4. Margin Only (corr_a = margin, corr_b = 0)
-    margin = ca_full - cb_full
-    eval_ablated(np.zeros_like(ctx_full), margin, np.zeros_like(cb_full), "Margin Only")
+    # 4. Margin Only (corr_a = 0, corr_b = 0, latent = 0, only margin active)
+    eval_ablated(np.zeros_like(ctx_full), np.zeros_like(ca_full), np.zeros_like(cb_full), margin_full, "Margin Only")
     
     res_df = pd.DataFrame(results)
     res_df.to_csv(OUT_DIR / "feature_ablation.csv", index=False)
@@ -403,20 +407,26 @@ def audit_counterfactual(model, df, device):
     ctx_full = np.stack(df['eeg_context'].values)
     ca_full = df['corr_a'].values
     cb_full = df['corr_b'].values
+    margin_full = df['margin'].values
     
     shifts = [-0.1, -0.05, 0.0, 0.05, 0.1]
     results = []
     
     with torch.no_grad():
         ctx_t = torch.tensor(ctx_full, dtype=torch.float32, device=device)
+        if ctx_t.ndim == 1:
+            ctx_t = ctx_t.unsqueeze(0)
+        z_norm = torch.norm(ctx_t, dim=-1, keepdim=True)
         
         for shift in shifts:
-            # Add shift to corr_a, keep corr_b same (effectively shifts margin by +shift)
             ca_shifted = ca_full + shift
+            margin_shifted = ca_shifted - cb_full
+            
             ca_t = torch.tensor(ca_shifted, dtype=torch.float32, device=device).unsqueeze(1)
             cb_t = torch.tensor(cb_full, dtype=torch.float32, device=device).unsqueeze(1)
+            m_t = torch.tensor(margin_shifted, dtype=torch.float32, device=device).unsqueeze(1)
             
-            inp = torch.cat([ctx_t, ca_t, cb_t], dim=1)
+            inp = torch.cat([ctx_t, ca_t, cb_t, m_t, z_norm], dim=-1)
             preds = model.confidence_head(inp).squeeze(-1).cpu().numpy()
             
             results.append({
