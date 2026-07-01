@@ -115,7 +115,7 @@ def extract_base_dataset(model, data, device):
                 
                 conf = model.predict_confidence(z_pool, ca_t, cb_t, margin_t)
                 
-                eeg_context = z_pool.mean(dim=-1).cpu().numpy()[0]
+                eeg_context = z_pool.detach().cpu().numpy()[0]
                 
                 records.append({
                     "trial": t_idx,
@@ -283,8 +283,6 @@ def audit_feature_ablation(model, df, device):
             cb_t = torch.tensor(cb, dtype=torch.float32, device=device).unsqueeze(1)
             m_t = torch.tensor(margin_arr, dtype=torch.float32, device=device).unsqueeze(1)
             z_t = torch.tensor(z_pool_arr, dtype=torch.float32, device=device)
-            if z_t.ndim == 1:
-                z_t = z_t.unsqueeze(0)
             z_norm = torch.norm(z_t, dim=-1, keepdim=True)
             
             inp = torch.cat([z_t, ca_t, cb_t, m_t, z_norm], dim=-1)
@@ -414,8 +412,6 @@ def audit_counterfactual(model, df, device):
     
     with torch.no_grad():
         ctx_t = torch.tensor(ctx_full, dtype=torch.float32, device=device)
-        if ctx_t.ndim == 1:
-            ctx_t = ctx_t.unsqueeze(0)
         z_norm = torch.norm(ctx_t, dim=-1, keepdim=True)
         
         for shift in shifts:
