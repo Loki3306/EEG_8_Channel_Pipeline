@@ -14,8 +14,12 @@ def compute_ece(correct, conf, bins=10):
     bin_uppers = bin_boundaries[1:]
     
     ece, mce = 0.0, 0.0
-    for bin_lower, bin_upper in zip(bin_lowers, bin_uppers):
-        in_bin = (conf >= bin_lower) & (conf < bin_upper)
+    for i, (bin_lower, bin_upper) in enumerate(zip(bin_lowers, bin_uppers)):
+        if i == bins - 1:
+            in_bin = (conf >= bin_lower) & (conf <= bin_upper)
+        else:
+            in_bin = (conf >= bin_lower) & (conf < bin_upper)
+            
         prop_in_bin = in_bin.mean()
         if prop_in_bin > 0:
             accuracy_in_bin = correct[in_bin].mean()

@@ -16,6 +16,7 @@ from analysis.interpretability.utils import safe_corr_np, normalize_eeg, normali
 warnings.filterwarnings("ignore")
 
 def corrupt_eeg(eeg, wav_a, wav_b, mode, device):
+    torch.manual_seed(42)
     if mode == "clean": return eeg, wav_a, wav_b
     elif mode == "random": return torch.randn_like(eeg), wav_a, wav_b
     elif mode == "zero": return torch.zeros_like(eeg), wav_a, wav_b
