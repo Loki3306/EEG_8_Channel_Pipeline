@@ -85,9 +85,27 @@ def run_accumulation_analysis(preds_path, out_dir):
 
     print(f"Loaded {len(df)} windows.")
     
+    # -----------------------------------------------------------------------------
+    # CRITICAL FIX: In Phase 13, the stream assignment (1 vs 0) was randomized
+    # PER WINDOW instead of PER TRIAL. This causes the ground truth to oscillate
+    # wildly within a single trial, breaking temporal accumulation (random walk).
+    #
+    # To fix this without re-running Phase 13, we map all probabilities to the 
+    # probability of the TRULY ATTENDED stream. 
+    # Since prob_platt is P(model is correct), the probability assigned to the 
+    # truly attended stream is exactly prob_platt when the model is correct, 
+    # and 1 - prob_platt when the model is wrong.
+    # 
+    # We then set ground_truth = 1 for the whole trial, meaning our target class 
+    # is always the truly attended stream.
+    # -----------------------------------------------------------------------------
+    p_target = np.where(df['correct'] == 1, df['prob_platt'], 1 - df['prob_platt'])
+    df['prob_platt'] = p_target
+    df['ground_truth'] = 1
+    
     # Process expanding metrics
     print("Computing expanding accumulation metrics...")
-    acc_df = df.groupby(['subject', 'trial']).apply(compute_cumulative_metrics).reset_index(drop=True)
+    acc_df = df.groupby(['subject', 'trial']).apply(compute_cumulative_metrics, include_groups=False).reset_index(drop=True)
     
     # Calculate accuracy vs latency (window index)
     # Window 0 is 2s, window 1 is 4s, etc. (assuming 2s hop)
@@ -125,7 +143,7 @@ def run_accumulation_analysis(preds_path, out_dir):
     sprt_results = []
     
     for th in thresholds:
-        sprt_df = df.groupby(['subject', 'trial']).apply(compute_sprt, conf_threshold=th).reset_index()
+        sprt_df = df.groupby(['subject', 'trial']).apply(compute_sprt, conf_threshold=th, include_groups=False).reset_index()
         
         # Only evaluate latency for trials that actually hit the threshold
         hits = sprt_df[sprt_df['hit'] == True]
