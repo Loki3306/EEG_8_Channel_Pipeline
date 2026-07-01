@@ -1,17 +1,19 @@
 import os
 import sys
 import torch
-import torch.nn.functional as F
 import numpy as np
+import pandas as pd
+from pathlib import Path
 
 # Adjust path if needed
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+REPO_ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(REPO_ROOT))
 
 from models.aad_conformer import AADConformer
 from data.kul_cached_dataset import KULCachedLoader
 from src.confidence.selective_predictor import SelectivePredictor
 from src.confidence.selective_metrics import calculate_selective_risk
-from torch.utils.data import DataLoader, TensorDataset
+from analysis.run7_multitask_evaluation import extract_subject_predictions
 
 def run_selective_pipeline(subject="S1", model_path=None, threshold=0.70):
     print("=" * 80)
@@ -28,7 +30,7 @@ def run_selective_pipeline(subject="S1", model_path=None, threshold=0.70):
     try:
         data_path = "/kaggle/input/datasets/lokeshgile/kul-processed/data/processed_kul"
         if not os.path.exists(data_path):
-            data_path = "data/processed_kul" # Fallback local
+            data_path = REPO_ROOT / "data" / "processed_kul" # Fallback local
             
         loader = KULCachedLoader(data_path)
         all_data = loader.load_all()
@@ -36,18 +38,8 @@ def run_selective_pipeline(subject="S1", model_path=None, threshold=0.70):
             print(f"Subject {subject} not found in data.")
             return
             
-        subject_trials = all_data[subject]
-        
-        # Structure the trials like before
-        eeg, wav_a, wav_b, labels = [], [], [], []
-        for trial in subject_trials:
-            eeg.append(trial["eeg"])
-            wav_a.append(trial["audio_a"].mean(dim=0, keepdim=True))
-            wav_b.append(trial["audio_b"].mean(dim=0, keepdim=True))
-            # KUL cache always sets audio_a to the attended audio, so label is 0
-            labels.append(0)
-            
-        print(f"Data loaded: Trials {len(labels)}")
+        test_trials = all_data[subject]
+        print(f"Data loaded: Trials {len(test_trials)}")
     except Exception as e:
         import traceback
         traceback.print_exc()
@@ -68,75 +60,61 @@ def run_selective_pipeline(subject="S1", model_path=None, threshold=0.70):
     # Initialize predictor
     predictor = SelectivePredictor(threshold=threshold)
     
-    # Metrics tracking
+    print("\nStarting inference via canonical extract_subject_predictions (10s windows, normalized)...")
+    
+    fs = 64
+    win_samples = 10 * fs
+    hop_samples = fs
+    
+    # The canonical function evaluates all windows for all trials and returns flat lists.
+    # But for Selective Trial Aggregation, we need to group windows by trial.
+    # Let's extract predictions trial by trial using the canonical function.
+    
     trial_results = []
     all_window_results = []
     
-    print("\nStarting inference...")
-    
-    # Process trial by trial
     with torch.no_grad():
-        for t_idx in range(len(eeg)):
-            t_eeg = eeg[t_idx]
-            t_wa = wav_a[t_idx]
-            t_wb = wav_b[t_idx]
-            label = labels[t_idx]
+        for t_idx, trial in enumerate(test_trials):
+            # Pass a single trial in a list to extract_subject_predictions
+            m_cln, c_cln, conf_cln = extract_subject_predictions(
+                model, [trial], device, win_samples, hop_samples, mode="clean"
+            )
             
-            # Simple windowing (5s = 320 samples at 64Hz)
-            win_samples = 320
+            # KUL cache always sets audio_a to the attended audio, so label is 1 (True = Audio A)
+            # Actually, extract_subject_predictions returns `correct` boolean list
+            # which is True if margin > 0. Since Audio A is always correct in KUL dataset, 
+            # margin > 0 means it correctly chose A.
             
             window_results = []
             
-            for start in range(0, t_eeg.shape[1] - win_samples + 1, win_samples):
-                end = start + win_samples
+            for w_idx in range(len(m_cln)):
+                margin = m_cln[w_idx]
+                c_prob = conf_cln[w_idx]
+                is_correct = c_cln[w_idx]
                 
-                # Extract chunk
-                c_eeg = torch.FloatTensor(t_eeg[:, start:end]).unsqueeze(0).to(device)
-                c_wa = torch.FloatTensor(t_wa[:, start:end]).unsqueeze(0).to(device)
-                c_wb = torch.FloatTensor(t_wb[:, start:end]).unsqueeze(0).to(device)
-                
-                # Forward
-                pred, z_pool = model(c_eeg, return_features=True)
-                
-                # Calculate Pearson
-                pred_c = pred - pred.mean(dim=1, keepdim=True)
-                ya_c = c_wa.squeeze(1) - c_wa.squeeze(1).mean(dim=1, keepdim=True)
-                yb_c = c_wb.squeeze(1) - c_wb.squeeze(1).mean(dim=1, keepdim=True)
-                
-                cov_a = (pred_c * ya_c).sum(dim=1)
-                cov_b = (pred_c * yb_c).sum(dim=1)
-                var_pred = (pred_c ** 2).sum(dim=1)
-                var_a = (ya_c ** 2).sum(dim=1)
-                var_b = (yb_c ** 2).sum(dim=1)
-                
-                sim_a = (cov_a / torch.sqrt(var_pred * var_a + 1e-8)).item()
-                sim_b = (cov_b / torch.sqrt(var_pred * var_b + 1e-8)).item()
-                
-                margin = sim_b - sim_a  # positive means B > A (predict 1), negative means A > B (predict 0)
-                
-                # Extract Learned Confidence
-                # predict_confidence expects z_pool, corr_a, corr_b, margin
-                c_prob = model.predict_confidence(
-                    z_pool, 
-                    torch.tensor([sim_a], device=device, dtype=torch.float32), 
-                    torch.tensor([sim_b], device=device, dtype=torch.float32), 
-                    torch.tensor([margin], device=device, dtype=torch.float32)
-                ).item()
-                
+                # In the old predictor, predict_window expected pearson_a, pearson_b, etc.
+                # Here we just have margin and c_prob. The SelectivePredictor just uses them.
                 res = predictor.predict_window(
                     margin, 
-                    pearson_a=sim_a, 
-                    pearson_b=sim_b, 
+                    pearson_a=margin, # Dummy values if not used in thresholding
+                    pearson_b=0.0,
                     use_pearson=True,
                     learned_confidence=c_prob
                 )
-                res["ground_truth"] = label
+                
+                # Overwrite prediction to match correct boolean
+                # Since A is ground truth (1), if correct then prediction is 1, else 0
+                pred = 1 if is_correct else 0
+                res["prediction"] = pred
+                res["ground_truth"] = 1
+                
                 window_results.append(res)
                 all_window_results.append(res)
                 
             # Trial aggregation
+            # Trial decision logic:
             trial_res = predictor.predict_trial(window_results, aggregation="majority", min_accept_ratio=0.50)
-            trial_res["ground_truth"] = label
+            trial_res["ground_truth"] = 1
             trial_res["trial_idx"] = t_idx
             trial_results.append(trial_res)
             
@@ -145,7 +123,7 @@ def run_selective_pipeline(subject="S1", model_path=None, threshold=0.70):
                 print(f"TRIAL 0 TRACE (Threshold {threshold})")
                 print("-" * 40)
                 for w_idx, w in enumerate(window_results):
-                    print(f"Window {w_idx+1:<2}: Confidence={w['confidence']:.4f}, Margin={w['margin']:.4f}, Pred={w['prediction']}, Truth={label}, Accepted={w['accepted']}, Correct={w['prediction']==label}")
+                    print(f"Window {w_idx+1:<2}: Confidence={w['confidence']:.4f}, Margin={w['margin']:.4f}, Pred={w['prediction']}, Truth={1}, Accepted={w['accepted']}, Correct={w['prediction']==1}")
                 
                 print("-" * 40)
                 print(f"Threshold:                {threshold}")
@@ -154,7 +132,7 @@ def run_selective_pipeline(subject="S1", model_path=None, threshold=0.70):
                 print(f"Median window confidence: {trial_res.get('median_window_confidence', 0.0):.4f}")
                 print(f"Trial decision reason:    {trial_res.get('reason', 'N/A')}")
                 print(f"Trial prediction:         {trial_res['prediction']}")
-                print(f"Trial correctness:        {trial_res['prediction'] == label}")
+                print(f"Trial correctness:        {trial_res['prediction'] == 1}")
                 print("-" * 40 + "\n")
                 
     # Function to print report
