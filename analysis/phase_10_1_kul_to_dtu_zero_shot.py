@@ -146,18 +146,21 @@ def load_and_preprocess_subject(path, mapping, envelopes, dtu_indices):
     sub_key = path.stem.replace("_data_preproc", "")
     
     for i, ex in enumerate(examples):
-        # 1. Apply CAR (Crucial for Domain Shift mitigation)
+        # ex.eeg is [Time, Channels]
         eeg_full = ex.eeg
-        eeg_car = eeg_full - eeg_full.mean(axis=0, keepdims=True)
         
-        # 2. Select Channels using dynamically found indices
-        eeg = eeg_car[dtu_indices, :].T
+        # 1. Apply CAR (Common Average Reference across Channels, which is axis=1)
+        eeg_car = eeg_full - eeg_full.mean(axis=1, keepdims=True)
         
-        # 3. Apply 1.0-8.0Hz Bandpass filter (Butterworth order 4)
-        eeg = butter_bandpass_filter(eeg, 1.0, 8.0, FS, order=4, axis=0)
+        # 2. Select Channels using dynamically found indices and transpose to [Channels, Time]
+        eeg = eeg_car[:, dtu_indices].T
         
-        # 4. Normalize
-        x_norm = normalize_array(eeg).T 
+        # 3. Apply 1.0-8.0Hz Bandpass filter (Butterworth order 4) across Time (axis=1)
+        eeg = butter_bandpass_filter(eeg, 1.0, 8.0, FS, order=4, axis=1)
+        
+        # 4. Normalize per-trial, per-channel.
+        # normalize_array acts on axis=0. So we pass eeg.T ([Time, Channels]), then transpose back.
+        x_norm = normalize_array(eeg.T).T 
         
         trial_key = f"trial_{i}"
         if sub_key in mapping and trial_key in mapping[sub_key]:
