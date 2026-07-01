@@ -23,6 +23,7 @@ class WindowPrediction:
     corr_b: float
     accepted: bool
     correct: bool
+    epistemic: float = 0.0
     latent_reference: Optional[Any] = None
 
 class SequentialWindowBuffer:
@@ -85,3 +86,51 @@ class SequentialWindowBuffer:
             return 0.0
         correct_count = sum(1 for w in self._buffer if w.correct)
         return correct_count / len(self._buffer)
+
+class TemporalEvidenceAccumulator:
+    """
+    Maintains an exponentially smoothed running average of Dirichlet evidence parameters.
+    Used for the Hybrid Evidential-Temporal Confidence (HETC) architecture.
+    """
+    def __init__(self, num_classes: int = 2, momentum: float = 0.9):
+        self.num_classes = num_classes
+        self.momentum = momentum
+        self.evidence_state = None
+        
+    def reset(self):
+        self.evidence_state = None
+        
+    def update(self, current_evidence: List[float]) -> List[float]:
+        """
+        Updates the running evidence state with a new observation.
+        Returns the smoothed evidence.
+        """
+        if self.evidence_state is None:
+            self.evidence_state = list(current_evidence)
+        else:
+            for i in range(self.num_classes):
+                self.evidence_state[i] = (self.momentum * self.evidence_state[i]) + ((1.0 - self.momentum) * current_evidence[i])
+        return self.evidence_state
+        
+    def get_probability(self) -> List[float]:
+        """
+        Returns the expected probability distribution p_k = alpha_k / S 
+        where alpha = evidence + 1.
+        """
+        if self.evidence_state is None:
+            return [1.0 / self.num_classes] * self.num_classes
+            
+        alphas = [e + 1.0 for e in self.evidence_state]
+        S = sum(alphas)
+        return [a / S for a in alphas]
+        
+    def get_epistemic_uncertainty(self) -> float:
+        """
+        Returns the epistemic uncertainty u = K / S
+        """
+        if self.evidence_state is None:
+            return 1.0
+            
+        alphas = [e + 1.0 for e in self.evidence_state]
+        S = sum(alphas)
+        return self.num_classes / S

@@ -12,11 +12,12 @@ sys.path.insert(0, str(REPO_ROOT))
 
 from models.aad_conformer import AADConformer
 from data.kul_cached_dataset import KULCachedLoader
-from decision_engine.window_buffer import WindowPrediction, SequentialWindowBuffer
+from decision_engine.window_buffer import WindowPrediction, SequentialWindowBuffer, TemporalEvidenceAccumulator
 from analysis.interpretability.utils import safe_corr_np, normalize_eeg, normalize_audio
+import torch.nn.functional as F
 import argparse
 
-def custom_sliding_window_evaluation(model, eeg, wav_a, wav_b, win_samples, hop_samples):
+def custom_sliding_window_evaluation(model, eeg, wav_a, wav_b, win_samples, hop_samples, accumulator=None):
     """
     Evaluates a single trial using sliding windows, returning full metrics for the sequential buffer.
     """
@@ -45,12 +46,19 @@ def custom_sliding_window_evaluation(model, eeg, wav_a, wav_b, win_samples, hop_
         cb = safe_corr_np(pred, wb)
         margin = ca - cb
         
-        ca_t = torch.tensor([ca], dtype=torch.float32, device=eeg.device)
-        cb_t = torch.tensor([cb], dtype=torch.float32, device=eeg.device)
-        margin_t = torch.tensor([margin], dtype=torch.float32, device=eeg.device)
+        conf_logits = model.predict_confidence(z_pool)
+        evidence = F.softplus(conf_logits.squeeze()).cpu().numpy().tolist()
         
-        conf = model.predict_confidence(z_pool, ca_t, cb_t, margin_t)
-        conf = conf.squeeze().item()
+        if accumulator is not None:
+            accumulator.update(evidence)
+            p = accumulator.get_probability()
+            conf = p[1] # Probability of Class 1 (Correct)
+            epistemic = accumulator.get_epistemic_uncertainty()
+        else:
+            alphas = [e + 1.0 for e in evidence]
+            S = sum(alphas)
+            conf = alphas[1] / S
+            epistemic = 2.0 / S
         
         prediction = 1 if margin > 0 else 0
         correct = (margin > 0)
@@ -62,7 +70,8 @@ def custom_sliding_window_evaluation(model, eeg, wav_a, wav_b, win_samples, hop_
             "margin": margin,
             "corr_a": ca,
             "corr_b": cb,
-            "correct": correct
+            "correct": correct,
+            "epistemic": epistemic
         })
         window_index += 1
         
@@ -169,6 +178,7 @@ def run_phase_12_1_validation(ckpt_path_arg=None):
         print("Using untrained weights.")
         
     buffer = SequentialWindowBuffer()
+    accumulator = TemporalEvidenceAccumulator(momentum=0.9)
     fs = 64
     win_samples = 10 * fs
     hop_samples = fs
@@ -181,10 +191,11 @@ def run_phase_12_1_validation(ckpt_path_arg=None):
             wav_a = trial["audio_a"].unsqueeze(0).to(device).mean(dim=1, keepdim=True)
             wav_b = trial["audio_b"].unsqueeze(0).to(device).mean(dim=1, keepdim=True)
             
-            windows = custom_sliding_window_evaluation(model, eeg, wav_a, wav_b, win_samples, hop_samples)
-            
             # Reset buffer for new trial to isolate temporal memory per trial
             buffer.reset()
+            accumulator.reset()
+            
+            windows = custom_sliding_window_evaluation(model, eeg, wav_a, wav_b, win_samples, hop_samples, accumulator)
             
             for w in windows:
                 current_time = time.time()
@@ -198,8 +209,9 @@ def run_phase_12_1_validation(ckpt_path_arg=None):
                     margin=w["margin"],
                     corr_a=w["corr_a"],
                     corr_b=w["corr_b"],
-                    accepted=True,  # No decision logic yet
-                    correct=w["correct"]
+                    accepted=True,
+                    correct=w["correct"],
+                    epistemic=w.get("epistemic", 0.0)
                 )
                 
                 buffer.append(wp)

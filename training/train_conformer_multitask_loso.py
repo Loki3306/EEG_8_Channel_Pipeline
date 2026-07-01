@@ -14,6 +14,7 @@ sys.path.insert(0, str(REPO_ROOT))
 
 from data.kul_cached_dataset import KULCachedLoader
 from models.aad_conformer import AADConformer
+from training.evidential_loss import EvidentialLoss
 
 def safe_corr_torch(x, y, eps=1e-8):
     """Batched Pearson correlation in PyTorch. x, y: (Batch, Time)"""
@@ -29,7 +30,7 @@ def safe_corr_torch(x, y, eps=1e-8):
     corr = cov / (torch.sqrt(x_var * y_var) + eps)
     return corr
 
-def custom_multitask_loss(pred, Ya_batch, Yb_batch, conf_pred, is_corrupted=None, lambda_conf=0.1, mse_weight=0.5, corr_weight=0.5):
+def custom_multitask_loss(pred, Ya_batch, Yb_batch, conf_pred, epoch, evidential_loss_fn, is_corrupted=None, lambda_conf=0.1, mse_weight=0.5, corr_weight=0.5):
     # Regression Loss (Primary)
     mse = nn.functional.mse_loss(pred, Ya_batch)
     corr_a = safe_corr_torch(pred, Ya_batch)
@@ -44,16 +45,14 @@ def custom_multitask_loss(pred, Ya_batch, Yb_batch, conf_pred, is_corrupted=None
     margin = corr_a - corr_b
     
     # Target is 1 if margin > 0 (correct), else 0
-    correct = (margin > 0).float()
+    correct = (margin > 0).long()
     
     # OUTLIER EXPOSURE: If a sample is corrupted, its confidence target is strictly forced to 0
     if is_corrupted is not None:
-        correct = correct * (1.0 - is_corrupted.float())
+        correct = correct * (1 - is_corrupted.long())
     
-    # Confidence Loss (Auxiliary)
-    conf_pred = conf_pred.squeeze()
-    conf_pred = torch.clamp(conf_pred, 1e-7, 1.0 - 1e-7)
-    conf_loss = nn.functional.binary_cross_entropy(conf_pred, correct)
+    # Evidential Loss (Auxiliary)
+    conf_loss = evidential_loss_fn(conf_pred, correct, epoch)
     
     total_loss = reg_loss + lambda_conf * conf_loss
     
@@ -106,7 +105,7 @@ def prepare_multitask_data(subject_data, window_sec=2, hop_sec=1, fs=64):
         
     return torch.stack(X), torch.stack(Y_a), torch.stack(Y_b)
 
-def evaluate_fold(model, val_loader, device):
+def evaluate_fold(model, val_loader, device, epoch, evidential_loss_fn):
     model.eval()
     val_loss = 0.0
     val_reg_loss = 0.0
@@ -122,9 +121,9 @@ def evaluate_fold(model, val_loader, device):
             corr_b = safe_corr_torch(pred, yb)
             margin = corr_a - corr_b
             
-            conf_pred = model.predict_confidence(z_pool, corr_a, corr_b, margin)
+            conf_pred = model.predict_confidence(z_pool)
             
-            loss, reg, conf = custom_multitask_loss(pred, ya, yb, conf_pred)
+            loss, reg, conf = custom_multitask_loss(pred, ya, yb, conf_pred, epoch, evidential_loss_fn)
             val_loss += loss.item()
             val_reg_loss += reg.item()
             val_conf_loss += conf.item()
@@ -230,6 +229,8 @@ def main():
             epochs = 5
             optimizer = optim.AdamW(model.parameters(), lr=1e-4, weight_decay=1e-4) # Lower LR for fine-tuning
         
+        evidential_loss_fn = EvidentialLoss(num_classes=2, annealing_step=10).to(device)
+        
         for ep in range(epochs):
             model.train()
             train_loss = 0.0
@@ -257,13 +258,9 @@ def main():
                 
                 pred, z_pool = model(eeg, return_features=True)
                 
-                corr_a = safe_corr_torch(pred, ya)
-                corr_b = safe_corr_torch(pred, yb)
-                margin = corr_a - corr_b
+                conf_pred = model.predict_confidence(z_pool)
                 
-                conf_pred = model.predict_confidence(z_pool, corr_a, corr_b, margin)
-                
-                loss, reg, conf = custom_multitask_loss(pred, ya, yb, conf_pred, is_corrupted=is_corrupted)
+                loss, reg, conf = custom_multitask_loss(pred, ya, yb, conf_pred, ep, evidential_loss_fn, is_corrupted=is_corrupted)
                 
                 loss.backward()
                 optimizer.step()
@@ -276,7 +273,7 @@ def main():
             train_reg /= len(train_loader)
             train_conf /= len(train_loader)
             
-            val_loss, val_reg, val_conf, val_margin = evaluate_fold(model, val_loader, device)
+            val_loss, val_reg, val_conf, val_margin = evaluate_fold(model, val_loader, device, ep, evidential_loss_fn)
             
             print(f"Epoch {ep+1:02d} | Train Loss: {train_loss:.4f} (Reg:{train_reg:.4f} Conf:{train_conf:.4f}) "
                   f"| Val Loss: {val_loss:.4f} (Reg:{val_reg:.4f} Conf:{val_conf:.4f}) | Val Margin: {val_margin:.4f}")

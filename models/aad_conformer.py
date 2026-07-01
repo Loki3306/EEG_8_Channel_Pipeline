@@ -121,32 +121,21 @@ class AADConformer(nn.Module):
         # Final Regression Head
         self.head = nn.Conv1d(embed_dim, 1, kernel_size=1)
         
-        # Auxiliary Learned Confidence Head (Late Fusion)
-        # Inputs: z_pool (embed_dim) + corr_a (1) + corr_b (1) + margin (1) + embedding_norm (1) = embed_dim + 4
+        # Auxiliary Evidential Confidence Head (Latent Only)
+        # Inputs: z_pool (embed_dim) -> Outputs: 2 classes (Correct, Incorrect)
         self.confidence_head = nn.Sequential(
-            nn.Linear(embed_dim + 4, 32),
+            nn.Linear(embed_dim, 64),
             nn.ReLU(),
             nn.Dropout(dropout),
-            nn.Linear(32, 1),
-            nn.Sigmoid()
+            nn.Linear(64, 2)
         )
 
-    def predict_confidence(self, z_pool: torch.Tensor, corr_a: torch.Tensor, corr_b: torch.Tensor, margin: torch.Tensor):
+    def predict_confidence(self, z_pool: torch.Tensor):
         """
-        Predicts confidence based on the EEG latent representation and post-hoc Pearson metrics.
+        Predicts evidential uncertainty directly from the EEG latent representation.
+        Returns the raw evidence logits. (Use F.softplus(out) + 1 for Dirichlet alpha).
         """
-        # Calculate latent norm
-        z_norm = torch.norm(z_pool, dim=-1, keepdim=True)
-        
-        # Ensure metrics are [Batch, 1]
-        ca = corr_a.unsqueeze(-1) if corr_a.ndim == 1 else corr_a
-        cb = corr_b.unsqueeze(-1) if corr_b.ndim == 1 else corr_b
-        m = margin.unsqueeze(-1) if margin.ndim == 1 else margin
-        
-        # Concatenate features
-        features = torch.cat([z_pool, ca, cb, m, z_norm], dim=-1)
-        
-        return self.confidence_head(features).squeeze(-1)
+        return self.confidence_head(z_pool)
 
     def forward(self, x: torch.Tensor, return_features: bool = False):
         # Expected x: [Batch, Channels, Time]
