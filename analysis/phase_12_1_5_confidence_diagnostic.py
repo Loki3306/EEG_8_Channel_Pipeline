@@ -269,11 +269,13 @@ def audit_input_sensitivity(model, data, device):
     conf_logits = model.predict_confidence(z_pool)
     alphas = F.softplus(conf_logits) + 1.0
     S = torch.sum(alphas, dim=-1, keepdim=True)
-    conf = (alphas[:, 1] / S[:, 0]).detach().cpu().numpy()
+    conf = (alphas[:, 1] / S[:, 0])
     
     # Compute gradients w.r.t inputs
     conf.backward()
     
+    # Store sensitivity
+    sens_z = z_pool.grad.abs().mean().item() if z_pool.grad is not None else 0.0
     eeg_sens = torch.norm(eeg.grad).item() if eeg.grad is not None else 0.0
     wa_sens = torch.norm(ca_t.grad).item() if ca_t.grad is not None else 0.0
     wb_sens = torch.norm(cb_t.grad).item() if cb_t.grad is not None else 0.0
