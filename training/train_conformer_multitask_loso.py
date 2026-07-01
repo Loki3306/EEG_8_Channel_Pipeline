@@ -30,7 +30,7 @@ def safe_corr_torch(x, y, eps=1e-8):
     corr = cov / (torch.sqrt(x_var * y_var) + eps)
     return corr
 
-def custom_multitask_loss(pred, Ya_batch, Yb_batch, conf_pred, epoch, evidential_loss_fn, is_corrupted=None, lambda_conf=0.1, mse_weight=0.5, corr_weight=0.5):
+def custom_multitask_loss(pred, Ya_batch, Yb_batch, conf_pred, epoch, evidential_loss_fn, is_corrupted=None, lambda_conf=1.0, mse_weight=0.5, corr_weight=0.5):
     # Regression Loss (Primary)
     mse = nn.functional.mse_loss(pred, Ya_batch)
     corr_a = safe_corr_torch(pred, Ya_batch)
@@ -141,7 +141,7 @@ def evaluate_fold(model, val_loader, device, epoch, evidential_loss_fn):
     return val_loss, val_reg_loss, val_conf_loss, mean_margin
 
 def main():
-    print("--- Phase 7: Multi-Task Confidence Training (LOSO) ---")
+    print("--- Phase 13: HETC Multi-Task Training (LOSO) ---")
     
     cache_dir = REPO_ROOT / "data" / "processed_kul"
     if Path("/kaggle/input/datasets/lowk1ee/kul-preprocessed-cache/data/processed_kul").exists():
@@ -305,7 +305,7 @@ def main():
         print(f"Fold completed. Best Val Margin: {best_val_margin:.4f}")
         loso_results[test_subject] = float(best_val_margin)
         
-    print("\n--- Phase 7 Multi-Task Training Summary ---")
+    print("\n--- Phase 13 HETC Multi-Task Training Summary ---")
     mean_margin = np.mean(list(loso_results.values()))
     print(f"Mean Validation Margin across 16 subjects: {mean_margin:.4f}")
     
