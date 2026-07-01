@@ -27,9 +27,17 @@ def corrupt_eeg(eeg, wav_a, wav_b, mode, device):
         return torch.roll(eeg, shifts=shift, dims=-1), wav_a, wav_b
     return eeg, wav_a, wav_b
 
+def batched_pearson(x, y):
+    x_mean = x.mean(axis=1, keepdims=True)
+    y_mean = y.mean(axis=1, keepdims=True)
+    x_zm = x - x_mean
+    y_zm = y - y_mean
+    num = (x_zm * y_zm).sum(axis=1)
+    den = np.sqrt((x_zm**2).sum(axis=1) * (y_zm**2).sum(axis=1))
+    den[den == 0] = 1e-8
+    return num / den
+
 def get_predictions_for_xgb(model, eeg, wav_a, wav_b, win_samples, hop_samples):
-    features_list = []
-    
     # 1. Unfold tensors into overlapping windows: [1, Channels, Num_Windows, Win_Samples]
     eeg_unfold = eeg.unfold(2, win_samples, hop_samples).squeeze(0)          # [Channels, Num_Windows, Win_Samples]
     wav_a_unfold = wav_a.unfold(2, win_samples, hop_samples).squeeze(0)      # [1, Num_Windows, Win_Samples]
@@ -42,8 +50,8 @@ def get_predictions_for_xgb(model, eeg, wav_a, wav_b, win_samples, hop_samples):
     
     num_windows = eeg_batch.shape[0]
     
-    # Process in chunks to avoid OOM just in case, though 600 is small enough
-    chunk_size = 1024
+    # Process in chunks 
+    chunk_size = 2048
     
     pred_list, z_pool_list = [], []
     for i in range(0, num_windows, chunk_size):
@@ -57,29 +65,22 @@ def get_predictions_for_xgb(model, eeg, wav_a, wav_b, win_samples, hop_samples):
     wav_a_np = wav_a_batch.cpu().numpy()
     wav_b_np = wav_b_batch.cpu().numpy()
     
-    for i in range(num_windows):
-        pred_np = preds[i]
-        wa = wav_a_np[i]
-        wb = wav_b_np[i]
+    # Fully vectorized numpy computations (removes CPU bottleneck)
+    ca = batched_pearson(preds, wav_a_np)
+    cb = batched_pearson(preds, wav_b_np)
+    margin = ca - cb
+    correct = (margin > 0).astype(int)
+    z_norm = np.linalg.norm(z_pools, axis=1)
+    z_std = np.std(z_pools, axis=1)
+    
+    feat_dict = {
+        'ca': ca, 'cb': cb, 'margin': margin, 
+        'latent_norm': z_norm, 'latent_std': z_std, 'correct': correct
+    }
+    for j in range(z_pools.shape[1]):
+        feat_dict[f'z_{j}'] = z_pools[:, j]
         
-        ca = safe_corr_np(pred_np, wa)
-        cb = safe_corr_np(pred_np, wb)
-        margin = ca - cb
-        
-        z_np = z_pools[i]
-        z_norm = np.linalg.norm(z_np)
-        z_std = np.std(z_np)
-        
-        correct = 1 if margin > 0 else 0
-        feat = {
-            'ca': ca, 'cb': cb, 'margin': margin, 
-            'latent_norm': z_norm, 'latent_std': z_std, 'correct': correct
-        }
-        for j, val in enumerate(z_np):
-            feat[f'z_{j}'] = val
-        features_list.append(feat)
-        
-    return features_list
+    return pd.DataFrame(feat_dict)
 
 import argparse
 
@@ -130,11 +131,12 @@ def main():
                     wav_b = normalize_audio(t["audio_b"].unsqueeze(0).to(device).mean(dim=1, keepdim=True))
                     min_len = min(eeg.shape[-1], wav_a.shape[-1], wav_b.shape[-1])
                     
-                    feats = get_predictions_for_xgb(model, eeg[:,:,:min_len], wav_a[:,:,:min_len], wav_b[:,:,:min_len], win_samples, hop_samples)
-                    for f in feats: f['source_subject'] = t_subj
-                    train_features.extend(feats)
-        pd.DataFrame(train_features).to_csv(out_dir / f"fold_{test_subj}_train_clean.csv", index=False)
-        print(f"  -> Saved {len(train_features)} train windows.")
+                    df_feats = get_predictions_for_xgb(model, eeg[:,:,:min_len], wav_a[:,:,:min_len], wav_b[:,:,:min_len], win_samples, hop_samples)
+                    df_feats['source_subject'] = t_subj
+                    train_features.append(df_feats)
+        if train_features:
+            pd.concat(train_features, ignore_index=True).to_csv(out_dir / f"fold_{test_subj}_train_clean.csv", index=False)
+            print(f"  -> Saved {sum(len(df) for df in train_features)} train windows.")
         
         # 2. Extract Test Features (All Modes)
         for mode in modes:
@@ -149,11 +151,12 @@ def main():
                     eeg, wav_a, wav_b = normalize_eeg(eeg), normalize_audio(wav_a), normalize_audio(wav_b)
                     min_len = min(eeg.shape[-1], wav_a.shape[-1], wav_b.shape[-1])
                     
-                    feats = get_predictions_for_xgb(model, eeg[:,:,:min_len], wav_a[:,:,:min_len], wav_b[:,:,:min_len], win_samples, hop_samples)
-                    for f in feats: f['source_subject'] = test_subj
-                    test_features.extend(feats)
-            pd.DataFrame(test_features).to_csv(out_dir / f"fold_{test_subj}_test_{mode}.csv", index=False)
-            print(f"  -> Saved {len(test_features)} test windows ({mode}).")
+                    df_feats = get_predictions_for_xgb(model, eeg[:,:,:min_len], wav_a[:,:,:min_len], wav_b[:,:,:min_len], win_samples, hop_samples)
+                    df_feats['source_subject'] = test_subj
+                    test_features.append(df_feats)
+            if test_features:
+                pd.concat(test_features, ignore_index=True).to_csv(out_dir / f"fold_{test_subj}_test_{mode}.csv", index=False)
+                print(f"  -> Saved {sum(len(df) for df in test_features)} test windows ({mode}).")
 
 if __name__ == "__main__":
     main()
