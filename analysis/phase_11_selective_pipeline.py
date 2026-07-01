@@ -125,27 +125,45 @@ def run_selective_pipeline(subject="S1", model_path=None, threshold=0.70):
             trial_res["trial_idx"] = t_idx
             trial_results.append(trial_res)
             
-            if t_idx < 3: # Print first 3 trials explicitly as requested by "Verbose"
-                print(f"  Trial {t_idx} -> Accepted Windows: {trial_res['accepted_windows_count']}/{trial_res['total_windows_count']}, Trial Accepted: {trial_res['accepted']}, Pred: {trial_res['prediction']}, Truth: {label}")
+            if t_idx == 0:
+                print("\n" + "-" * 40)
+                print(f"TRIAL 0 TRACE (Threshold {threshold})")
+                print("-" * 40)
+                for w_idx, w in enumerate(window_results):
+                    print(f"Window {w_idx+1:<2}: Confidence={w['confidence']:.4f}, Margin={w['margin']:.4f}, Pred={w['prediction']}, Truth={label}, Accepted={w['accepted']}, Correct={w['prediction']==label}")
                 
-    # Calculate aggregate metrics
+                print("-" * 40)
+                print(f"Threshold:                {threshold}")
+                print(f"Accepted windows:         {trial_res['accepted_windows_count']}/{trial_res['total_windows_count']}")
+                print(f"Mean window confidence:   {trial_res.get('mean_window_confidence', 0.0):.4f}")
+                print(f"Median window confidence: {trial_res.get('median_window_confidence', 0.0):.4f}")
+                print(f"Trial decision reason:    {trial_res.get('reason', 'N/A')}")
+                print(f"Trial prediction:         {trial_res['prediction']}")
+                print(f"Trial correctness:        {trial_res['prediction'] == label}")
+                print("-" * 40 + "\n")
+                
+    # Function to print report
+    def print_report(t_results, title, thresh):
+        t_truths = [t["ground_truth"] for t in t_results]
+        t_preds = [t["prediction"] for t in t_results]
+        t_confs = [t["confidence"] for t in t_results]
+        
+        metrics = calculate_selective_risk(t_truths, t_preds, t_confs, thresh)
+        print(f"\n{title} (Threshold = {thresh}):")
+        print(f"  Trial Coverage:          {metrics['coverage']*100:.1f}%")
+        print(f"  Overall Accuracy:        {metrics['overall_accuracy']*100:.1f}%")
+        print(f"  Accepted Accuracy:       {metrics['accepted_accuracy']*100:.1f}%")
+        print(f"  Rejected Accuracy:       {metrics['rejected_accuracy']*100:.1f}%")
+        print(f"  Selective Risk:          {metrics['selective_risk']:.4f}  <-- (Defined as 1.0 - Accepted Accuracy)")
+        print(f"  Accepted Trials:         {metrics['accepted_count']}/{metrics['total_count']}")
+        print(f"  Rejected Trials:         {metrics['rejected_count']}")
+                
     print("\n" + "=" * 80)
     print("SELECTIVE METRICS REPORT")
     print("=" * 80)
     
-    # Trial Level
-    t_truths = [t["ground_truth"] for t in trial_results]
-    t_preds = [t["prediction"] for t in trial_results]
-    t_confs = [t["confidence"] for t in trial_results]
-    
-    metrics = calculate_selective_risk(t_truths, t_preds, t_confs, threshold)
-    print(f"Trial-Level Results (Threshold = {threshold}):")
-    print(f"  Coverage:          {metrics['coverage']*100:.1f}%")
-    print(f"  Accepted Accuracy: {metrics['accepted_accuracy']*100:.1f}%")
-    print(f"  Rejected Accuracy: {metrics['rejected_accuracy']*100:.1f}%")
-    print(f"  Selective Risk:    {metrics['selective_risk']:.4f}")
-    print(f"  Accepted Trials:   {metrics['accepted_count']}")
-    print(f"  Rejected Trials:   {metrics['rejected_count']}")
+    print_report(trial_results, "Baseline Results", 0.00)
+    print_report(trial_results, "Selective Results", threshold)
     
     print("\nPipeline execution complete.")
     

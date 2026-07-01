@@ -44,19 +44,15 @@ class SelectivePredictor:
             # Re-evaluate prediction based on Pearson if required
             prediction = 0 if pearson_a > pearson_b else 1
             
-        # Compute normalized confidence [0, 1]
-        # Margin is in [-1, 1]. Confidence = abs(margin) in [0, 1].
+        # Calculate window confidence
         if use_pearson:
-            # Pearson diff is in [0, 2], typically much smaller. 
-            # We scale it arbitrarily or just use the absolute difference.
-            # To treat it as a probability-like score, we could pass it through a sigmoid or just use it raw.
-            # Since we sweep thresholds, raw is fine, but bounded is better.
-            confidence = abs(pearson_a - pearson_b)
+            # Confidence is defined as the absolute Pearson correlation margin
+            confidence = abs(pearson_a - pearson_b) if (pearson_a is not None and pearson_b is not None) else 0.0
         else:
+            # Placeholder for latent-based confidence
             confidence = abs(margin)
             
-        # Decision
-        accepted = confidence >= self.threshold
+        accepted = bool(confidence >= self.threshold)
         
         return {
             "prediction": prediction,
@@ -68,13 +64,14 @@ class SelectivePredictor:
             "pearson_diff": abs(pearson_a - pearson_b) if (pearson_a is not None and pearson_b is not None) else None
         }
 
-    def predict_trial(self, window_results, aggregation="majority"):
+    def predict_trial(self, window_results, aggregation="majority", min_accept_ratio=0.0):
         """
         Aggregates window-level results into a trial-level selective prediction.
         
         Args:
             window_results (list of dict): The output of predict_window for all windows in a trial.
             aggregation (str): Strategy to aggregate ('majority', 'weighted_majority', 'accumulated_pearson')
+            min_accept_ratio (float): Minimum ratio of accepted windows required to accept the trial.
             
         Returns:
             dict: Trial-level prediction, confidence, and acceptance.
@@ -84,21 +81,33 @@ class SelectivePredictor:
                 "prediction": None, 
                 "confidence": 0.0, 
                 "accepted": False,
+                "reason": "No windows provided",
                 "accepted_windows_count": 0,
-                "total_windows_count": 0
+                "total_windows_count": 0,
+                "mean_window_confidence": 0.0,
+                "median_window_confidence": 0.0
             }
             
         accepted_windows = [w for w in window_results if w["accepted"]]
+        total_windows = len(window_results)
         
-        # Strategy 1: Reject trial if NO windows are accepted
-        if len(accepted_windows) == 0:
+        all_confs = [w["confidence"] for w in window_results]
+        mean_conf = sum(all_confs) / total_windows
+        median_conf = sorted(all_confs)[total_windows // 2]
+        
+        accept_ratio = len(accepted_windows) / total_windows
+        
+        # Strategy 1: Reject trial if accept ratio is too low
+        if accept_ratio <= min_accept_ratio or len(accepted_windows) == 0:
             return {
                 "prediction": -1, 
-                "confidence": 0.0, 
+                "confidence": mean_conf, 
                 "accepted": False,
-                "reason": "All windows rejected",
-                "accepted_windows_count": 0,
-                "total_windows_count": len(window_results)
+                "reason": f"Rejected: {len(accepted_windows)}/{total_windows} accepted windows <= {min_accept_ratio*100}% threshold",
+                "accepted_windows_count": len(accepted_windows),
+                "total_windows_count": total_windows,
+                "mean_window_confidence": mean_conf,
+                "median_window_confidence": median_conf
             }
             
         if aggregation == "majority":
@@ -109,16 +118,18 @@ class SelectivePredictor:
             
             trial_pred = 1 if count_1 > count_0 else 0
             
-            # Trial confidence = margin of the vote (e.g., 5-3 vote -> 2/8 = 0.25)
-            # Or average confidence of accepted windows.
-            trial_conf = abs(count_1 - count_0) / len(preds)
+            # Trial confidence = average confidence of accepted windows
+            trial_conf = sum([w["confidence"] for w in accepted_windows]) / len(accepted_windows)
             
             return {
                 "prediction": trial_pred,
                 "confidence": trial_conf,
                 "accepted": True,
+                "reason": f"Accepted: {len(accepted_windows)}/{total_windows} > {min_accept_ratio*100}% threshold",
                 "accepted_windows_count": len(accepted_windows),
-                "total_windows_count": len(window_results)
+                "total_windows_count": total_windows,
+                "mean_window_confidence": mean_conf,
+                "median_window_confidence": median_conf
             }
             
         elif aggregation == "accumulated_pearson":
@@ -134,8 +145,11 @@ class SelectivePredictor:
                 "prediction": trial_pred,
                 "confidence": trial_conf,
                 "accepted": True,
+                "reason": f"Accepted: {len(accepted_windows)}/{total_windows} > {min_accept_ratio*100}% threshold",
                 "accepted_windows_count": len(accepted_windows),
-                "total_windows_count": len(window_results)
+                "total_windows_count": total_windows,
+                "mean_window_confidence": mean_conf,
+                "median_window_confidence": median_conf
             }
             
         return {"prediction": None, "confidence": 0.0, "accepted": False}

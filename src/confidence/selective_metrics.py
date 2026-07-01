@@ -1,17 +1,18 @@
 import numpy as np
+from sklearn.metrics import roc_curve, auc
 
 def calculate_selective_risk(y_true, y_pred, y_conf, threshold):
     """
-    Calculates metrics for selective classification at a specific threshold.
+    Calculates Selective Risk and related metrics for a given confidence threshold.
     
     Args:
-        y_true: Ground truth labels
-        y_pred: Predicted labels
-        y_conf: Confidence scores
-        threshold: Confidence threshold for acceptance
+        y_true (list): Ground truth labels
+        y_pred (list): Predicted labels
+        y_conf (list): Confidence scores
+        threshold (float): Confidence threshold for acceptance
         
     Returns:
-        dict: Coverage, Accepted Accuracy, Rejected Accuracy, Selective Risk
+        dict: Metrics dictionary
     """
     y_true = np.array(y_true)
     y_pred = np.array(y_pred)
@@ -20,27 +21,39 @@ def calculate_selective_risk(y_true, y_pred, y_conf, threshold):
     accepted_mask = y_conf >= threshold
     rejected_mask = ~accepted_mask
     
-    coverage = np.mean(accepted_mask)
+    accepted_count = int(np.sum(accepted_mask))
+    rejected_count = int(np.sum(rejected_mask))
+    total_count = len(y_true)
     
-    if np.sum(accepted_mask) > 0:
-        accepted_acc = np.mean(y_true[accepted_mask] == y_pred[accepted_mask])
-        selective_risk = 1.0 - accepted_acc
+    coverage = accepted_count / max(1, total_count)
+    
+    if accepted_count > 0:
+        accepted_correct = np.sum(y_true[accepted_mask] == y_pred[accepted_mask])
+        accepted_accuracy = accepted_correct / accepted_count
     else:
-        accepted_acc = 0.0
-        selective_risk = 0.0
+        accepted_accuracy = 0.0
         
-    if np.sum(rejected_mask) > 0:
-        rejected_acc = np.mean(y_true[rejected_mask] == y_pred[rejected_mask])
+    if rejected_count > 0:
+        rejected_correct = np.sum(y_true[rejected_mask] == y_pred[rejected_mask])
+        rejected_accuracy = rejected_correct / rejected_count
     else:
-        rejected_acc = 0.0
+        rejected_accuracy = 0.0
         
+    overall_correct = np.sum(y_true == y_pred)
+    overall_accuracy = overall_correct / max(1, total_count)
+        
+    # Selective Risk is explicitly defined as the error rate of ACCEPTED predictions
+    selective_risk = 1.0 - accepted_accuracy
+    
     return {
         "coverage": float(coverage),
-        "accepted_accuracy": float(accepted_acc),
-        "rejected_accuracy": float(rejected_acc),
+        "overall_accuracy": float(overall_accuracy),
+        "accepted_accuracy": float(accepted_accuracy),
+        "rejected_accuracy": float(rejected_accuracy),
         "selective_risk": float(selective_risk),
-        "accepted_count": int(np.sum(accepted_mask)),
-        "rejected_count": int(np.sum(rejected_mask))
+        "accepted_count": accepted_count,
+        "rejected_count": rejected_count,
+        "total_count": total_count
     }
 
 def get_risk_coverage_curve(y_true, y_pred, y_conf):
