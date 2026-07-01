@@ -88,4 +88,4 @@ Every implementation must conclude by printing the following log. If a stage was
 
 ## SAFE CODING PRACTICES
 
-When utilizing external classes, objects, or modules, always verify the available attributes and methods before invoking them. Do not assume the existence of functions (e.g., `load_subject()`) without confirming their definition in the source file. This prevents `AttributeError` and runtime failures.
+When utilizing external classes, objects, or modules, always verify the available attributes and methods before invoking them. Do not assume the existence of functions (e.g., `load_subject()`) or class attributes (e.g., `AADConformer.transformer`) without confirming their definition in the source file. This prevents `AttributeError` and runtime failures.
