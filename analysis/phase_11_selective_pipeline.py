@@ -114,13 +114,28 @@ def run_selective_pipeline(subject="S1", model_path=None, threshold=0.70):
                 
                 margin = sim_b - sim_a  # positive means B > A (predict 1), negative means A > B (predict 0)
                 
-                res = predictor.predict_window(margin, pearson_a=sim_a, pearson_b=sim_b, use_pearson=True)
+                # Extract Learned Confidence
+                # predict_confidence expects z_pool, corr_a, corr_b, margin
+                c_prob = model.predict_confidence(
+                    z_pool, 
+                    torch.tensor([sim_a], device=device, dtype=torch.float32), 
+                    torch.tensor([sim_b], device=device, dtype=torch.float32), 
+                    torch.tensor([margin], device=device, dtype=torch.float32)
+                ).item()
+                
+                res = predictor.predict_window(
+                    margin, 
+                    pearson_a=sim_a, 
+                    pearson_b=sim_b, 
+                    use_pearson=True,
+                    learned_confidence=c_prob
+                )
                 res["ground_truth"] = label
                 window_results.append(res)
                 all_window_results.append(res)
                 
             # Trial aggregation
-            trial_res = predictor.predict_trial(window_results, aggregation="majority")
+            trial_res = predictor.predict_trial(window_results, aggregation="majority", min_accept_ratio=0.50)
             trial_res["ground_truth"] = label
             trial_res["trial_idx"] = t_idx
             trial_results.append(trial_res)
@@ -170,4 +185,4 @@ def run_selective_pipeline(subject="S1", model_path=None, threshold=0.70):
 if __name__ == "__main__":
     # Test path: /kaggle/working/EEG_8_Channel_Pipeline/results/run7_multitask_conformer_loso/checkpoints/seed_1/model_S1.pt
     model_path = "/kaggle/working/EEG_8_Channel_Pipeline/results/run7_multitask_conformer_loso/checkpoints/seed_1/model_S1.pt"
-    run_selective_pipeline(subject="S1", model_path=model_path, threshold=0.02)
+    run_selective_pipeline(subject="S1", model_path=model_path, threshold=0.55)

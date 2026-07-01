@@ -112,12 +112,27 @@ def test_robustness(subject="S1", model_path=None, threshold=0.70):
                     
                     sim_a = (cov_a / torch.sqrt(var_pred * var_a + 1e-8)).item()
                     sim_b = (cov_b / torch.sqrt(var_pred * var_b + 1e-8)).item()
-                    
                     margin = sim_b - sim_a
                     
-                    window_results.append(predictor.predict_window(margin, pearson_a=sim_a, pearson_b=sim_b, use_pearson=True))
+                    c_prob = model.predict_confidence(
+                        z_pool, 
+                        torch.tensor([sim_a], device=device, dtype=torch.float32), 
+                        torch.tensor([sim_b], device=device, dtype=torch.float32), 
+                        torch.tensor([margin], device=device, dtype=torch.float32)
+                    ).item()
                     
-                trial_res = predictor.predict_trial(window_results, aggregation="majority")
+                    res = predictor.predict_window(
+                        margin, 
+                        pearson_a=sim_a, 
+                        pearson_b=sim_b, 
+                        use_pearson=True,
+                        learned_confidence=c_prob
+                    )
+                    res["ground_truth"] = label
+                    window_results.append(res)
+                    
+                # Trial aggregation
+                trial_res = predictor.predict_trial(window_results, aggregation="majority", min_accept_ratio=0.50)
                 
                 t_truths.append(label)
                 t_preds.append(trial_res["prediction"])
@@ -134,4 +149,4 @@ def test_robustness(subject="S1", model_path=None, threshold=0.70):
 
 if __name__ == "__main__":
     model_path = "/kaggle/working/EEG_8_Channel_Pipeline/results/run7_multitask_conformer_loso/checkpoints/seed_1/model_S1.pt"
-    test_robustness(subject="S1", model_path=model_path, threshold=0.02)
+    test_robustness(subject="S1", model_path=model_path, threshold=0.55)

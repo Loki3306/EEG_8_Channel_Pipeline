@@ -13,25 +13,24 @@ class SelectivePredictor:
         """
         self.threshold = threshold
 
-    def predict_window(self, margin, pearson_a=None, pearson_b=None, use_pearson=False):
+    def predict_window(self, margin, pearson_a=None, pearson_b=None, use_pearson=False, learned_confidence=None):
         """
-        Given window-level statistics, returns the prediction and whether it was accepted.
+        Predicts whether a single window should be accepted or rejected.
         
         Args:
-            margin (float): Confidence margin (e.g., from Conformer's confidence head).
-            pearson_a (float): Pearson correlation for Stream A.
-            pearson_b (float): Pearson correlation for Stream B.
-            use_pearson (bool): If True, confidence is derived from abs(pearson_a - pearson_b).
-                                If False, confidence is derived directly from the margin.
-                                
+            margin (float): The margin between Stream A and Stream B metrics.
+            pearson_a (float, optional): Pearson correlation for Stream A.
+            pearson_b (float, optional): Pearson correlation for Stream B.
+            use_pearson (bool): Whether to use explicit Pearson correlations.
+            learned_confidence (float, optional): The probability score from the model's confidence head.
+            
         Returns:
-            dict: {
-                "prediction": 0 for Stream A, 1 for Stream B.
+            dict: Window prediction details including:
+                "prediction": 1 for Stream B, 0 for Stream A.
                 "confidence": The normalized confidence score [0, 1].
                 "accepted": True if confidence >= threshold, False otherwise.
                 "margin": Raw margin for downstream analysis.
                 "pearson_diff": Raw pearson difference for downstream analysis.
-            }
         """
         # Determine raw prediction
         # Margin > 0 implies Stream B (since margin = P(B) - P(A))
@@ -45,8 +44,11 @@ class SelectivePredictor:
             prediction = 0 if pearson_a > pearson_b else 1
             
         # Calculate window confidence
-        if use_pearson:
-            # Confidence is defined as the absolute Pearson correlation margin
+        if learned_confidence is not None:
+            # Use the actual output from the model's confidence head
+            confidence = float(learned_confidence)
+        elif use_pearson:
+            # Fallback: Confidence is defined as the absolute Pearson correlation margin
             confidence = abs(pearson_a - pearson_b) if (pearson_a is not None and pearson_b is not None) else 0.0
         else:
             # Placeholder for latent-based confidence

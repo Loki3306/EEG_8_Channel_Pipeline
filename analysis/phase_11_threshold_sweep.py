@@ -58,6 +58,7 @@ def run_threshold_sweep():
     print(f"{'Threshold':<12} | {'Coverage':<10} | {'Accuracy':<10} | {'Selective Risk':<15}")
     print("-" * 55)
     
+    # For learned confidence, we care about the [0.5, 0.9] range
     for target_cov in [1.0, 0.9, 0.8, 0.5, 0.2]:
         # Find closest coverage
         idx = (np.abs(coverages - target_cov)).argmin()
