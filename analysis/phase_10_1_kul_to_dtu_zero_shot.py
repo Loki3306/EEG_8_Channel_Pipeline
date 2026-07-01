@@ -170,8 +170,13 @@ def load_and_preprocess_subject(path, mapping, envelopes, dtu_indices):
             
         min_len = min(x_norm.shape[1], env_a_full.shape[1])
         x_norm = x_norm[:, :min_len]
-        env_a = normalize_array(env_a_full[:, :min_len].T).T
-        env_b = normalize_array(env_b_full[:, :min_len].T).T
+        
+        # Audio preprocessing: mean over the 28 subbands to get a single broad envelope
+        env_a = env_a_full.mean(axis=0, keepdims=True)
+        env_b = env_b_full.mean(axis=0, keepdims=True)
+        
+        env_a = normalize_array(env_a[:, :min_len].T).T
+        env_b = normalize_array(env_b[:, :min_len].T).T
         
         X.append(x_norm)
         Y_A.append(env_a)
@@ -194,7 +199,7 @@ def phase2_debug_forward_pass(model, device, X, Y_A, Y_B):
     byb = torch.FloatTensor(yb_chunk[0]).unsqueeze(0).to(device)
     
     print(f"Input EEG Shape: {bx.shape} (Expected: [1, 8, 320])")
-    print(f"Input Aud Shape: {bya.shape} (Expected: [1, 28, 320])")
+    print(f"Input Aud Shape: {bya.shape} (Expected: [1, 1, 320])")
     
     # Forward pass manually step-by-step
     with torch.no_grad():
@@ -205,23 +210,20 @@ def phase2_debug_forward_pass(model, device, X, Y_A, Y_B):
             print("CRITICAL: NaNs in Spatial Encoder. Covariance shift too high!")
             sys.exit(1)
             
-        x_emb = model.eeg_encoder.temporal_conv(x_emb)
-        print(f"CNN Output: {x_emb.shape}")
+        # Manually trace step by step for debugging
+        x_emb = model.spatial_conv(model.temporal_norm(model.temporal_conv(bx.unsqueeze(1))))
+        print(f"Spatial Encoder Output: {x_emb.shape} | Mean: {x_emb.mean().item():.4f} | Std: {x_emb.std().item():.4f}")
         
-        x_emb = x_emb.squeeze(2).transpose(1, 2)
-        x_emb = model.eeg_encoder.transformer(x_emb)
-        print(f"Transformer Output: {x_emb.shape}")
+        if torch.isnan(x_emb).any():
+            print("CRITICAL: NaNs in Spatial Encoder. Covariance shift too high!")
+            sys.exit(1)
+            
+        pred, z_pool = model(bx, return_features=True)
+        print(f"Transformer Pooled Output: {z_pool.shape} | Mean: {z_pool.mean().item():.4f} | Std: {z_pool.std().item():.4f}")
+        print(f"Prediction Output: {pred.shape} | Mean: {pred.mean().item():.4f} | Std: {pred.std().item():.4f}")
         
-        eeg_proj = model.eeg_encoder.project(x_emb.mean(dim=1))
-        print(f"EEG Projection: {eeg_proj.shape} | Mean: {eeg_proj.mean().item():.4f} | Std: {eeg_proj.std().item():.4f}")
-        
-        a_emb = model.audio_encoder(bya)
-        b_emb = model.audio_encoder(byb)
-        
-        a_proj = model.audio_encoder.project(a_emb.mean(dim=1))
-        
-        sim_a = F.cosine_similarity(eeg_proj, a_proj)
-        print(f"Cosine Similarity: {sim_a.item():.4f}")
+        sim_a = F.cosine_similarity(pred, bya.squeeze(1))
+        print(f"Cosine Similarity (pred, aud_A): {sim_a.item():.4f}")
         
     print("Forward Pass: PASS (No NaNs, Valid shapes).")
 
@@ -258,12 +260,21 @@ def phase4_zero_shot_inference(model, device, paths, mapping, envelopes, dtu_ind
                 byb = torch.FloatTensor(yb_chunks[j]).unsqueeze(0).to(device)
                 
                 with torch.no_grad():
-                    z_eeg, z_a, z_b = model(bx, bya, byb)
+                    pred = model(bx)
                     
-                    # We compute Pearson over time dimension for compatibility
-                    # Wait, InfoNCE uses Cosine Similarity. Let's use Cosine Similarity as trained.
-                    sim_a = F.cosine_similarity(z_eeg, z_a).item()
-                    sim_b = F.cosine_similarity(z_eeg, z_b).item()
+                    # Compute Pearson over time dimension
+                    pred_centered = pred - pred.mean(dim=1, keepdim=True)
+                    ya_centered = bya.squeeze(1) - bya.squeeze(1).mean(dim=1, keepdim=True)
+                    yb_centered = byb.squeeze(1) - byb.squeeze(1).mean(dim=1, keepdim=True)
+                    
+                    cov_a = (pred_centered * ya_centered).sum(dim=1)
+                    cov_b = (pred_centered * yb_centered).sum(dim=1)
+                    var_pred = (pred_centered ** 2).sum(dim=1)
+                    var_a = (ya_centered ** 2).sum(dim=1)
+                    var_b = (yb_centered ** 2).sum(dim=1)
+                    
+                    sim_a = (cov_a / torch.sqrt(var_pred * var_a + 1e-8)).item()
+                    sim_b = (cov_b / torch.sqrt(var_pred * var_b + 1e-8)).item()
                     
                     if sim_a > sim_b:
                         subj_win_correct += 1
@@ -321,7 +332,16 @@ def main():
     
     # Load model
     print("\nLoading AAD-Conformer (FROZEN)...")
-    model = AADConformer(eeg_channels=8, audio_channels=28).to(device)
+    model = AADConformer(
+        in_channels=8,
+        temporal_filters=32,
+        spatial_filters=64,
+        embed_dim=64,
+        num_heads=4,
+        num_layers=2,
+        dropout=0.3,
+        stride=4
+    ).to(device)
     model.load_state_dict(torch.load(ckpt_path, map_location=device))
     model.eval() # Freeze
     for param in model.parameters():
