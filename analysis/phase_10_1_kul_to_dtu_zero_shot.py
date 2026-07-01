@@ -94,19 +94,21 @@ def phase1_compatibility_audit(dtu_paths):
     
     # Channels
     dtu_channels = channel_labels(mat_data)
-    # The MatchNet pipeline used indices: 13, 46, 43, 23, 50, 0, 52, 14
-    # Let's verify what these map to in DTU.
-    try:
-        dtu_extracted_names = [dtu_channels[i] for i in [13, 46, 43, 23, 50, 0, 52, 14]]
-        # Check against KUL exactly (case-insensitive)
-        dtu_upper = [c.upper() for c in dtu_extracted_names]
-        kul_upper = [c.upper() for c in EXPECTED_CHANNELS]
-        print("Expected KUL channels:", kul_upper)
-        print("Actual DTU channels at indices [13, 46, 43, 23, 50, 0, 52, 14]:", dtu_upper)
-        verify("Channel Names Match", str(kul_upper), str(dtu_upper))
-    except Exception as e:
-        print("FAIL: Channel extraction failed:", e)
+    
+    dtu_upper = [c.upper() for c in dtu_channels]
+    kul_upper = [c.upper() for c in EXPECTED_CHANNELS]
+    
+    missing_channels = [c for c in kul_upper if c not in dtu_upper]
+    if missing_channels:
+        print(f"FAIL: The following required KUL channels are missing in DTU: {missing_channels}")
+        print(f"Available DTU channels: {dtu_upper}")
         sys.exit(1)
+        
+    dtu_indices = [dtu_upper.index(c) for c in kul_upper]
+    print(f"[CHECK 3] EEG Channels")
+    print(f"  Required KUL channels: {kul_upper}")
+    print(f"  Found dynamically at DTU indices: {dtu_indices}")
+    print("  PASS.")
 
     print("[CHECK 4] Reference Scheme")
     print("  Expected: KUL used CAR (Common Average Reference).")
@@ -135,7 +137,9 @@ def phase1_compatibility_audit(dtu_paths):
     print("  Expected Audio: [Batch, 28, 320]")
     print("  Will be verified in Phase 2. PASS.")
     
-def load_and_preprocess_subject(path, mapping, envelopes):
+    return dtu_indices
+    
+def load_and_preprocess_subject(path, mapping, envelopes, dtu_indices):
     examples = load_subject_examples(path)
     X, Y_A, Y_B = [], [], []
     
@@ -146,8 +150,8 @@ def load_and_preprocess_subject(path, mapping, envelopes):
         eeg_full = ex.eeg
         eeg_car = eeg_full - eeg_full.mean(axis=0, keepdims=True)
         
-        # 2. Select Channels
-        eeg = eeg_car[[13, 46, 43, 23, 50, 0, 52, 14], :].T
+        # 2. Select Channels using dynamically found indices
+        eeg = eeg_car[dtu_indices, :].T
         
         # 3. Apply 1.0-8.0Hz Bandpass filter (Butterworth order 4)
         eeg = butter_bandpass_filter(eeg, 1.0, 8.0, FS, order=4, axis=0)
@@ -229,14 +233,14 @@ def pearson_corr(x, y, dim=1):
     var_y = (y_centered ** 2).sum(dim=dim)
     return cov / torch.sqrt(var_x * var_y + 1e-8)
 
-def phase4_zero_shot_inference(model, device, paths, mapping, envelopes):
+def phase4_zero_shot_inference(model, device, paths, mapping, envelopes, dtu_indices):
     print_header("PHASE 4 — ZERO-SHOT INFERENCE")
     
     all_win_correct = []
     all_trial_correct = []
     
     for path in paths:
-        X, Y_A, Y_B = load_and_preprocess_subject(path, mapping, envelopes)
+        X, Y_A, Y_B = load_and_preprocess_subject(path, mapping, envelopes, dtu_indices)
         
         subj_win_correct = 0
         subj_win_total = 0
@@ -313,7 +317,7 @@ def main():
     dtu_paths = subject_files()
     
     # Phase 1
-    phase1_compatibility_audit(dtu_paths)
+    dtu_indices = phase1_compatibility_audit(dtu_paths)
     
     # Load model
     print("\nLoading AAD-Conformer (FROZEN)...")
@@ -327,13 +331,13 @@ def main():
     mapping, envelopes = get_mapping_data()
     
     # We load Subject 1 for Debug
-    X_debug, YA_debug, YB_debug = load_and_preprocess_subject(dtu_paths[0], mapping, envelopes)
+    X_debug, YA_debug, YB_debug = load_and_preprocess_subject(dtu_paths[0], mapping, envelopes, dtu_indices)
     
     # Phase 2
     phase2_debug_forward_pass(model, device, X_debug, YA_debug, YB_debug)
     
     # Phase 4 & 5
-    phase4_zero_shot_inference(model, device, dtu_paths, mapping, envelopes)
+    phase4_zero_shot_inference(model, device, dtu_paths, mapping, envelopes, dtu_indices)
 
 if __name__ == "__main__":
     main()
