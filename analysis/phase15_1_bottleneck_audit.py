@@ -83,6 +83,8 @@ def run_bottleneck_audit(preds_csv, out_dir):
     
     with open(transition_log_path, 'w') as f_trans, open(uncertainty_log_path, 'w') as f_uncert:
         for (subj, trial), group in df.groupby(['subject', 'trial']):
+            subj_clean = int(subj) if isinstance(subj, (int, np.integer)) else str(subj)
+            trial_clean = int(trial) if isinstance(trial, (int, np.integer)) else str(trial)
             engine = AuditedDecisionPolicyEngine()
             
             prev_state_str = State.INITIALIZING
@@ -99,8 +101,8 @@ def run_bottleneck_audit(preds_csv, out_dir):
                 # Log Transitions
                 if curr_state_str != prev_state_str:
                     t_log = {
-                        'subject': subj,
-                        'trial': trial,
+                        'subject': subj_clean,
+                        'trial': trial_clean,
                         'window': win,
                         'previous_state': prev_state_str,
                         'new_state': curr_state_str,
@@ -120,8 +122,8 @@ def run_bottleneck_audit(preds_csv, out_dir):
                     reason_counts[reason] += 1
                     
                     u_event = {
-                        'subject': subj,
-                        'trial': trial,
+                        'subject': subj_clean,
+                        'trial': trial_clean,
                         'window': win,
                         'probability': float(prob),
                         'margin': float(margin),
