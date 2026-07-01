@@ -121,6 +121,10 @@ def evaluate_fold(model, val_loader, device, epoch, evidential_loss_fn):
             else:
                 pred, z_pool = model(eeg, return_features=True)
                 conf_pred = model.predict_confidence(z_pool)
+                
+            corr_a = safe_corr_torch(pred, ya)
+            corr_b = safe_corr_torch(pred, yb)
+            margin = corr_a - corr_b
             
             loss, reg, conf = custom_multitask_loss(pred, ya, yb, conf_pred, epoch, evidential_loss_fn)
             val_loss += loss.item()
@@ -200,10 +204,10 @@ def main():
         X_train, Ya_train, Yb_train = train_tensors
         X_val, Ya_val, Yb_val = val_tensors
         
-        # Increased batch size and added DataLoader optimizations (num_workers, pin_memory)
-        # to alleviate CPU bottleneck and maximize GPU VRAM utilization.
-        train_loader = DataLoader(TensorDataset(X_train, Ya_train, Yb_train), batch_size=512, shuffle=True, num_workers=4, pin_memory=True, persistent_workers=True)
-        val_loader = DataLoader(TensorDataset(X_val, Ya_val, Yb_val), batch_size=512, shuffle=False, num_workers=4, pin_memory=True, persistent_workers=True)
+        # Increased batch size to 4096. The Conformer and EEG data are so lightweight
+        # that even 512 barely uses any VRAM. Pushing it to 4096 should utilize much more GPU.
+        train_loader = DataLoader(TensorDataset(X_train, Ya_train, Yb_train), batch_size=4096, shuffle=True, num_workers=4, pin_memory=True, persistent_workers=True)
+        val_loader = DataLoader(TensorDataset(X_val, Ya_val, Yb_val), batch_size=4096, shuffle=False, num_workers=4, pin_memory=True, persistent_workers=True)
         
         model = AADConformer(in_channels=8)
         if torch.cuda.device_count() > 1:
