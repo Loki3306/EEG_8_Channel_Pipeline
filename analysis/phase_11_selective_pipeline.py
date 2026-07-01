@@ -42,8 +42,8 @@ def run_selective_pipeline(subject="S1", model_path=None, threshold=0.70):
         eeg, wav_a, wav_b, labels = [], [], [], []
         for trial in subject_trials:
             eeg.append(trial["eeg"])
-            wav_a.append(trial["audio_a"])
-            wav_b.append(trial["audio_b"])
+            wav_a.append(trial["audio_a"].mean(dim=0, keepdim=True))
+            wav_b.append(trial["audio_b"].mean(dim=0, keepdim=True))
             # KUL cache always sets audio_a to the attended audio, so label is 0
             labels.append(0)
             
