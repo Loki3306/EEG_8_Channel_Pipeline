@@ -143,8 +143,21 @@ def run_phase_12_1_validation(ckpt_path_arg=None):
                 ckpt_path = possible[0]
 
     if ckpt_path.exists():
-        model.load_state_dict(torch.load(ckpt_path, map_location=device))
-        print(f"Loaded frozen Conformer checkpoint from {ckpt_path}")
+        print(f"Attempting to load checkpoint from: {ckpt_path}")
+        try:
+            model.load_state_dict(torch.load(ckpt_path, map_location=device))
+            print(f"Loaded frozen Conformer checkpoint successfully.")
+        except RuntimeError as e:
+            if "confidence_head" in str(e):
+                print("\n" + "!" * 80)
+                print("CRITICAL ERROR: OLD CHECKPOINT DETECTED")
+                print(f"The checkpoint at '{ckpt_path}' DOES NOT contain the confidence head!")
+                print("Your Phase 7 weights are no longer in /kaggle/working/ (likely cleared by Kaggle).")
+                print("The script fell back to searching your Kaggle datasets and found an old Phase 5 checkpoint.")
+                print("Please either re-run the Phase 7 multitask training to generate the weights, or provide the correct dataset path using: --ckpt_path /kaggle/input/your-dataset-name/model_S1.pt")
+                print("!" * 80 + "\n")
+                sys.exit(1)
+            raise e
     else:
         print("WARNING: Checkpoint not found! It looked for:")
         print(" - /kaggle/working/EEG_8_Channel_Pipeline/results/run7_multitask_conformer_loso/checkpoints/seed_1/model_S1.pt")
