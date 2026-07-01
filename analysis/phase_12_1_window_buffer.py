@@ -14,6 +14,7 @@ from models.aad_conformer import AADConformer
 from data.kul_cached_dataset import KULCachedLoader
 from decision_engine.window_buffer import WindowPrediction, SequentialWindowBuffer
 from analysis.interpretability.utils import safe_corr_np, normalize_eeg, normalize_audio
+import argparse
 
 def custom_sliding_window_evaluation(model, eeg, wav_a, wav_b, win_samples, hop_samples):
     """
@@ -89,7 +90,7 @@ def validate_infrastructure():
     
     print("All infrastructure validations passed.")
 
-def run_phase_12_1_validation():
+def run_phase_12_1_validation(ckpt_path_arg=None):
     print("================================================================================")
     print("PHASE 12.1 — SEQUENTIAL WINDOW BUFFER VALIDATION")
     print("================================================================================")
@@ -124,15 +125,25 @@ def run_phase_12_1_validation():
     model = AADConformer(in_channels=8).to(device)
     model.eval()
     
-    ckpt_path = REPO_ROOT / "results" / "run7_multitask_conformer_loso" / "checkpoints" / "seed_1" / "model_S1.pt"
-    if not ckpt_path.exists():
-        ckpt_path = Path("/kaggle/working/EEG_8_Channel_Pipeline/results/run7_multitask_conformer_loso/checkpoints/seed_1/model_S1.pt")
+    if ckpt_path_arg and Path(ckpt_path_arg).exists():
+        ckpt_path = Path(ckpt_path_arg)
+    else:
+        ckpt_path = REPO_ROOT / "results" / "run7_multitask_conformer_loso" / "checkpoints" / "seed_1" / "model_S1.pt"
+        if not ckpt_path.exists():
+            ckpt_path = Path("/kaggle/working/EEG_8_Channel_Pipeline/results/run7_multitask_conformer_loso/checkpoints/seed_1/model_S1.pt")
+        # Try kaggle input just in case
+        if not ckpt_path.exists():
+            # common kaggle input path guesses
+            possible = list(Path("/kaggle/input").rglob("model_S1.pt"))
+            if possible:
+                ckpt_path = possible[0]
 
     if ckpt_path.exists():
         model.load_state_dict(torch.load(ckpt_path, map_location=device))
-        print("Loaded frozen Conformer checkpoint.")
+        print(f"Loaded frozen Conformer checkpoint from {ckpt_path}")
     else:
         print("WARNING: Checkpoint not found, using untrained weights.")
+        print("Please provide the correct path using --ckpt_path")
         
     buffer = SequentialWindowBuffer()
     fs = 64
@@ -169,18 +180,6 @@ def run_phase_12_1_validation():
                 )
                 
                 buffer.append(wp)
-                
-                print("-" * 33)
-                print(f"Window {w['window_index']}")
-                print(f"Prediction               : {wp.prediction}")
-                print(f"Confidence               : {wp.confidence:.4f}")
-                print(f"Margin                   : {wp.margin:.4f}")
-                print(f"CorrA                    : {wp.corr_a:.4f}")
-                print(f"CorrB                    : {wp.corr_b:.4f}")
-                print(f"Buffer Size              : {buffer.length()}")
-                print(f"Running Mean Confidence  : {buffer.running_mean_confidence():.4f}")
-                print(f"Running Mean Margin      : {buffer.running_mean_margin():.4f}")
-                print(f"Running Prediction Ratio : {buffer.running_accuracy():.4f}")
                 
                 trace_data.append({
                     "subject": subject,
@@ -219,4 +218,7 @@ def run_phase_12_1_validation():
     validate_infrastructure()
 
 if __name__ == "__main__":
-    run_phase_12_1_validation()
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--ckpt_path", type=str, default=None, help="Path to the model checkpoint")
+    args = parser.parse_args()
+    run_phase_12_1_validation(args.ckpt_path)
