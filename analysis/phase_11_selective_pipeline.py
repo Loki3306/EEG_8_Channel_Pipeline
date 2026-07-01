@@ -152,4 +152,4 @@ def run_selective_pipeline(subject="S1", model_path=None, threshold=0.70):
 if __name__ == "__main__":
     # Test path: /kaggle/working/EEG_8_Channel_Pipeline/results/run7_multitask_conformer_loso/checkpoints/seed_1/model_S1.pt
     model_path = "/kaggle/working/EEG_8_Channel_Pipeline/results/run7_multitask_conformer_loso/checkpoints/seed_1/model_S1.pt"
-    run_selective_pipeline(subject="S1", model_path=model_path, threshold=0.70)
+    run_selective_pipeline(subject="S1", model_path=model_path, threshold=0.02)

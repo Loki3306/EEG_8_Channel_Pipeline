@@ -134,4 +134,4 @@ def test_robustness(subject="S1", model_path=None, threshold=0.70):
 
 if __name__ == "__main__":
     model_path = "/kaggle/working/EEG_8_Channel_Pipeline/results/run7_multitask_conformer_loso/checkpoints/seed_1/model_S1.pt"
-    test_robustness(subject="S1", model_path=model_path, threshold=0.60)
+    test_robustness(subject="S1", model_path=model_path, threshold=0.02)
