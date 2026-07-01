@@ -218,10 +218,14 @@ def main():
         
         loaded_pretrain = False
         if kaggle_ckpt.exists():
-            model.load_state_dict(torch.load(kaggle_ckpt, map_location=device), strict=False)
+            state_dict = torch.load(kaggle_ckpt, map_location=device)
+            state_dict = {k: v for k, v in state_dict.items() if not k.startswith("confidence_head.")}
+            model.load_state_dict(state_dict, strict=False)
             loaded_pretrain = True
         elif pretrain_ckpt.exists():
-            model.load_state_dict(torch.load(pretrain_ckpt, map_location=device), strict=False)
+            state_dict = torch.load(pretrain_ckpt, map_location=device)
+            state_dict = {k: v for k, v in state_dict.items() if not k.startswith("confidence_head.")}
+            model.load_state_dict(state_dict, strict=False)
             loaded_pretrain = True
             
         if loaded_pretrain:
