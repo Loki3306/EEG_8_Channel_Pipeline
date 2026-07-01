@@ -125,7 +125,7 @@ def main():
     
     ckpt_dir = REPO_ROOT / "results" / "run1_baseline_conformer_loso" / "checkpoints" / "seed_1"
     if not ckpt_dir.exists():
-        ckpt_dir = Path("/kaggle/input/datasets/lowk1ee/eeg-aad-conformer-seed1-checkpoints/checkpoints/seed_1")
+        ckpt_dir = Path("/kaggle/input/datasets/lowkieee/eeg-aad-conformer-seed1-checkpoints/checkpoints/seed_1")
     if not ckpt_dir.exists():
         ckpt_dir = Path("/kaggle/input/datasets/lokeshgile/eeg-aad-conformer-seed1-checkpoints/checkpoints/seed_1")
         
@@ -146,7 +146,7 @@ def main():
             continue
             
         model = AADConformer(in_channels=8).to(device)
-        model.load_state_dict(torch.load(ckpt_path, map_location=device))
+        model.load_state_dict(torch.load(ckpt_path, map_location=device), strict=False)
         model.eval()
         
         val_df = extract_margins(model, all_subject_data[val_subject], device)
