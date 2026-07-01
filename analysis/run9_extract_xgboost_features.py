@@ -29,21 +29,44 @@ def corrupt_eeg(eeg, wav_a, wav_b, mode, device):
 
 def get_predictions_for_xgb(model, eeg, wav_a, wav_b, win_samples, hop_samples):
     features_list = []
-    for start in range(0, eeg.shape[-1] - win_samples + 1, hop_samples):
-        stop = start + win_samples
-        eeg_win = eeg[:, :, start:stop]
+    
+    # 1. Unfold tensors into overlapping windows: [1, Channels, Num_Windows, Win_Samples]
+    eeg_unfold = eeg.unfold(2, win_samples, hop_samples).squeeze(0)          # [Channels, Num_Windows, Win_Samples]
+    wav_a_unfold = wav_a.unfold(2, win_samples, hop_samples).squeeze(0)      # [1, Num_Windows, Win_Samples]
+    wav_b_unfold = wav_b.unfold(2, win_samples, hop_samples).squeeze(0)
+    
+    # Transpose to [Num_Windows, Channels, Win_Samples]
+    eeg_batch = eeg_unfold.transpose(0, 1)
+    wav_a_batch = wav_a_unfold.transpose(0, 1).squeeze(1) # [Num_Windows, Win_Samples]
+    wav_b_batch = wav_b_unfold.transpose(0, 1).squeeze(1)
+    
+    num_windows = eeg_batch.shape[0]
+    
+    # Process in chunks to avoid OOM just in case, though 600 is small enough
+    chunk_size = 1024
+    
+    pred_list, z_pool_list = [], []
+    for i in range(0, num_windows, chunk_size):
+        chunk = eeg_batch[i:i+chunk_size]
+        pred_chunk, z_pool_chunk = model(chunk, return_features=True)
+        pred_list.append(pred_chunk)
+        z_pool_list.append(z_pool_chunk)
         
-        pred, z_pool = model(eeg_win, return_features=True)
-        pred_np = pred.squeeze(0).cpu().numpy()
-        
-        wa = wav_a[:, :, start:stop].squeeze(1).squeeze(0).cpu().numpy()
-        wb = wav_b[:, :, start:stop].squeeze(1).squeeze(0).cpu().numpy()
+    preds = torch.cat(pred_list, dim=0).cpu().numpy()
+    z_pools = torch.cat(z_pool_list, dim=0).cpu().numpy()
+    wav_a_np = wav_a_batch.cpu().numpy()
+    wav_b_np = wav_b_batch.cpu().numpy()
+    
+    for i in range(num_windows):
+        pred_np = preds[i]
+        wa = wav_a_np[i]
+        wb = wav_b_np[i]
         
         ca = safe_corr_np(pred_np, wa)
         cb = safe_corr_np(pred_np, wb)
         margin = ca - cb
         
-        z_np = z_pool.squeeze(0).cpu().numpy()
+        z_np = z_pools[i]
         z_norm = np.linalg.norm(z_np)
         z_std = np.std(z_np)
         
@@ -52,9 +75,10 @@ def get_predictions_for_xgb(model, eeg, wav_a, wav_b, win_samples, hop_samples):
             'ca': ca, 'cb': cb, 'margin': margin, 
             'latent_norm': z_norm, 'latent_std': z_std, 'correct': correct
         }
-        for i, val in enumerate(z_np):
-            feat[f'z_{i}'] = val
+        for j, val in enumerate(z_np):
+            feat[f'z_{j}'] = val
         features_list.append(feat)
+        
     return features_list
 
 import argparse
