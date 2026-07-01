@@ -144,7 +144,7 @@ def run_side_by_side_audit(subject="S1", ckpt_path=None):
         
         print_stats("Temporal Conv Output", activations['temporal_conv'])
         print_stats("Spatial Conv Output", activations['spatial_conv'])
-        print_stats("Transformer Output", activations['transformer'])
+        print_stats("Transformer Output", activations['conformer_block'])
         print_stats("Global Pooling (z_pool)", z_pool_p2)
         print_stats("Regression Head Output", pred_p2)
         
