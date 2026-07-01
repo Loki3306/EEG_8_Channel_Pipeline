@@ -16,7 +16,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.append(str(REPO_ROOT))
 
 from models.aad_conformer import AADConformer
-from dataset.kul_dataset import KULCachedLoader
+from data.kul_cached_dataset import KULCachedLoader
 
 def safe_corr_torch(x, y, eps=1e-8):
     x_mean = x.mean(dim=-1, keepdim=True)
