@@ -115,13 +115,12 @@ def evaluate_fold(model, val_loader, device, epoch, evidential_loss_fn):
     with torch.no_grad():
         for eeg, ya, yb in val_loader:
             eeg, ya, yb = eeg.to(device), ya.to(device), yb.to(device)
-            pred, z_pool = model(eeg, return_features=True)
-            
-            corr_a = safe_corr_torch(pred, ya)
-            corr_b = safe_corr_torch(pred, yb)
-            margin = corr_a - corr_b
-            
-            conf_pred = model.predict_confidence(z_pool)
+            if isinstance(model, nn.DataParallel):
+                pred, z_pool = model.module(eeg, return_features=True)
+                conf_pred = model.module.predict_confidence(z_pool)
+            else:
+                pred, z_pool = model(eeg, return_features=True)
+                conf_pred = model.predict_confidence(z_pool)
             
             loss, reg, conf = custom_multitask_loss(pred, ya, yb, conf_pred, epoch, evidential_loss_fn)
             val_loss += loss.item()
@@ -201,11 +200,19 @@ def main():
         X_train, Ya_train, Yb_train = train_tensors
         X_val, Ya_val, Yb_val = val_tensors
         
-        train_loader = DataLoader(TensorDataset(X_train, Ya_train, Yb_train), batch_size=128, shuffle=True)
-        val_loader = DataLoader(TensorDataset(X_val, Ya_val, Yb_val), batch_size=128, shuffle=False)
+        # Increased batch size and added DataLoader optimizations (num_workers, pin_memory)
+        # to alleviate CPU bottleneck and maximize GPU VRAM utilization.
+        train_loader = DataLoader(TensorDataset(X_train, Ya_train, Yb_train), batch_size=512, shuffle=True, num_workers=4, pin_memory=True, persistent_workers=True)
+        val_loader = DataLoader(TensorDataset(X_val, Ya_val, Yb_val), batch_size=512, shuffle=False, num_workers=4, pin_memory=True, persistent_workers=True)
         
-        model = AADConformer(in_channels=8).to(device)
-        optimizer = optim.AdamW(model.parameters(), lr=1e-3, weight_decay=1e-4)
+        model = AADConformer(in_channels=8)
+        if torch.cuda.device_count() > 1:
+            print(f"Using {torch.cuda.device_count()} GPUs for DataParallel!")
+            model = nn.DataParallel(model)
+        model = model.to(device)
+        
+        # When using DataParallel, access original parameters via model.module
+        optimizer = optim.AdamW(model.module.parameters() if isinstance(model, nn.DataParallel) else model.parameters(), lr=1e-3, weight_decay=1e-4)
         
         epochs = 15
         best_val_margin = -float('inf')
@@ -220,18 +227,18 @@ def main():
         if kaggle_ckpt.exists():
             state_dict = torch.load(kaggle_ckpt, map_location=device)
             state_dict = {k: v for k, v in state_dict.items() if not k.startswith("confidence_head.")}
-            model.load_state_dict(state_dict, strict=False)
-            loaded_pretrain = True
-        elif pretrain_ckpt.exists():
-            state_dict = torch.load(pretrain_ckpt, map_location=device)
-            state_dict = {k: v for k, v in state_dict.items() if not k.startswith("confidence_head.")}
-            model.load_state_dict(state_dict, strict=False)
+            
+            # Remove module. prefix if loading into a DataParallel model, or if loading from one
+            if isinstance(model, nn.DataParallel):
+                model.module.load_state_dict(state_dict, strict=False)
+            else:
+                model.load_state_dict(state_dict, strict=False)
             loaded_pretrain = True
             
         if loaded_pretrain:
             print(f"Successfully loaded pre-trained Phase 4 regression weights! Fine-tuning for 5 epochs...")
             epochs = 5
-            optimizer = optim.AdamW(model.parameters(), lr=1e-4, weight_decay=1e-4) # Lower LR for fine-tuning
+            optimizer = optim.AdamW(model.module.parameters() if isinstance(model, nn.DataParallel) else model.parameters(), lr=1e-4, weight_decay=1e-4)
         
         evidential_loss_fn = EvidentialLoss(num_classes=2, annealing_step=10).to(device)
         
@@ -260,9 +267,12 @@ def main():
                     eeg[corrupt_idx[:half]] = torch.randn_like(eeg[corrupt_idx[:half]])
                     eeg[corrupt_idx[half:]] = torch.zeros_like(eeg[corrupt_idx[half:]])
                 
-                pred, z_pool = model(eeg, return_features=True)
-                
-                conf_pred = model.predict_confidence(z_pool)
+                if isinstance(model, nn.DataParallel):
+                    pred, z_pool = model.module(eeg, return_features=True)
+                    conf_pred = model.module.predict_confidence(z_pool)
+                else:
+                    pred, z_pool = model(eeg, return_features=True)
+                    conf_pred = model.predict_confidence(z_pool)
                 
                 loss, reg, conf = custom_multitask_loss(pred, ya, yb, conf_pred, ep, evidential_loss_fn, is_corrupted=is_corrupted)
                 
@@ -284,7 +294,9 @@ def main():
                   
             if val_margin > best_val_margin:
                 best_val_margin = val_margin
-                torch.save(model.state_dict(), ckpt_path)
+                # Save unwrapped model
+                unwrapped_model = model.module if isinstance(model, nn.DataParallel) else model
+                torch.save(unwrapped_model.state_dict(), ckpt_path)
                 
         print(f"Fold completed. Best Val Margin: {best_val_margin:.4f}")
         loso_results[test_subject] = float(best_val_margin)
