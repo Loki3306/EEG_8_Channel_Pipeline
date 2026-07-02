@@ -177,13 +177,13 @@ def process_subject(mat_path, model, audio_cache, device):
             if tc.upper() in chan_names:
                 sel_idx.append(chan_names.index(tc.upper()))
             else:
-                # Fallback to BioSemi 64 standard approx if not found
-                print(f"[WARN] Channel {tc} not found, using fallback")
-                fallback_map = {'T7':15, 'C2':48, 'FT8':53, 'P7':23, 'CPz':38, 'Fp1':0, 'TP8':55, 'C3':11}
-                sel_idx.append(fallback_map.get(tc, 0))
+                raise ValueError("Channel not found")
     except Exception as e:
-        print(f"[WARN] Failed to parse chanlocs: {e}. Using BioSemi 64 standard indices.")
-        sel_idx = [15, 48, 53, 23, 38, 0, 55, 11] # Approximation
+        # AASD `.mat` files often lack `chanlocs`. They use standard BioSemi 64 (A1-A32, B1-B32).
+        # Correct 0-indexed positions for ['T7', 'C2', 'FT8', 'P7', 'CPz', 'Fp1', 'TP8', 'C3']:
+        # T7=A15(14), C2=B12(43), FT8=B8(39), P7=A23(22), CPz=A32(31), Fp1=A1(0), TP8=B16(47), C3=A13(12)
+        fallback_map = {'T7': 14, 'C2': 43, 'FT8': 39, 'P7': 22, 'CPz': 31, 'Fp1': 0, 'TP8': 47, 'C3': 12}
+        sel_idx = [fallback_map[tc] for tc in target_channels]
         
     eeg_8 = eeg_filt[sel_idx, :]
     
