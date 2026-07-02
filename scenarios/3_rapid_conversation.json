@@ -1,0 +1,38 @@
+{
+  "scenario_name": "Rapid_Conversation",
+  "description": "A -> B -> A -> B. Stress switching logic.",
+  "scenes": [
+    {
+      "scene_name": "Speaker A - Segment 1",
+      "dataset": "KUL",
+      "subject": "S1",
+      "trial": 1,
+      "start_sec": 0,
+      "duration_seconds": 60
+    },
+    {
+      "scene_name": "Speaker B - Segment 1",
+      "dataset": "KUL",
+      "subject": "S1",
+      "trial": 2,
+      "start_sec": 0,
+      "duration_seconds": 30
+    },
+    {
+      "scene_name": "Speaker A - Segment 2",
+      "dataset": "KUL",
+      "subject": "S1",
+      "trial": 1,
+      "start_sec": 60,
+      "duration_seconds": 30
+    },
+    {
+      "scene_name": "Speaker B - Segment 2",
+      "dataset": "KUL",
+      "subject": "S1",
+      "trial": 2,
+      "start_sec": 30,
+      "duration_seconds": 30
+    }
+  ]
+}

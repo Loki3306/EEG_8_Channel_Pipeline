@@ -1,0 +1,46 @@
+{
+  "scenario_name": "Long_Continuous_Session",
+  "description": "Several recordings concatenated for multi-hour hearing aid simulation.",
+  "scenes": [
+    {
+      "scene_name": "Morning Meeting",
+      "dataset": "KUL",
+      "subject": "S1",
+      "trial": 1,
+      "start_sec": 0,
+      "duration_seconds": null
+    },
+    {
+      "scene_name": "Coffee Break",
+      "dataset": "KUL",
+      "subject": "S1",
+      "trial": 2,
+      "start_sec": 0,
+      "duration_seconds": null
+    },
+    {
+      "scene_name": "Lunch Chat",
+      "dataset": "KUL",
+      "subject": "S1",
+      "trial": 3,
+      "start_sec": 0,
+      "duration_seconds": null
+    },
+    {
+      "scene_name": "Afternoon Call",
+      "dataset": "KUL",
+      "subject": "S1",
+      "trial": 4,
+      "start_sec": 0,
+      "duration_seconds": null
+    },
+    {
+      "scene_name": "Dinner",
+      "dataset": "KUL",
+      "subject": "S1",
+      "trial": 5,
+      "start_sec": 0,
+      "duration_seconds": null
+    }
+  ]
+}

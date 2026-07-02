@@ -1,0 +1,30 @@
+{
+  "scenario_name": "Mixed_Difficulty_Session",
+  "description": "Combine multiple existing recordings without difficulty labels. Evaluate adaptive behaviour.",
+  "scenes": [
+    {
+      "scene_name": "Library (Trial 3)",
+      "dataset": "KUL",
+      "subject": "S1",
+      "trial": 3,
+      "start_sec": 0,
+      "duration_seconds": 120
+    },
+    {
+      "scene_name": "Coffee Shop (Trial 6)",
+      "dataset": "KUL",
+      "subject": "S1",
+      "trial": 6,
+      "start_sec": 0,
+      "duration_seconds": 120
+    },
+    {
+      "scene_name": "Subway (Trial 11)",
+      "dataset": "KUL",
+      "subject": "S1",
+      "trial": 11,
+      "start_sec": 0,
+      "duration_seconds": 120
+    }
+  ]
+}

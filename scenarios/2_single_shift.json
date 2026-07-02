@@ -1,0 +1,30 @@
+{
+  "scenario_name": "Single_Attention_Shift",
+  "description": "Recording A -> Recording B -> Recording A. Measure switch latency.",
+  "scenes": [
+    {
+      "scene_name": "Initial Stable",
+      "dataset": "KUL",
+      "subject": "S1",
+      "trial": 1,
+      "start_sec": 0,
+      "duration_seconds": 120
+    },
+    {
+      "scene_name": "Attention Shift",
+      "dataset": "KUL",
+      "subject": "S1",
+      "trial": 2,
+      "start_sec": 0,
+      "duration_seconds": 60
+    },
+    {
+      "scene_name": "Return",
+      "dataset": "KUL",
+      "subject": "S1",
+      "trial": 1,
+      "start_sec": 120,
+      "duration_seconds": 120
+    }
+  ]
+}

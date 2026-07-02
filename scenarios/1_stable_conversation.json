@@ -1,0 +1,14 @@
+{
+  "scenario_name": "Stable_Conversation",
+  "description": "Single long recording. Baseline stability.",
+  "scenes": [
+    {
+      "scene_name": "Full Trial",
+      "dataset": "KUL",
+      "subject": "S1",
+      "trial": 1,
+      "start_sec": 0,
+      "duration_seconds": null
+    }
+  ]
+}
