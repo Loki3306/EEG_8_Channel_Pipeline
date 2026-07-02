@@ -7,7 +7,7 @@ from pathlib import Path
 import argparse
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
-from decision_engine.decision_policy_engine import DecisionPolicyEngine
+from decision_policy_engine import DecisionPolicyEngine
 from decision_engine.context_aware_engine import ContextAwarePolicyEngine, Action, State
 
 def evaluate_policy(df, engine, name):
