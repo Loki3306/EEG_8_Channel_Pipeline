@@ -12,8 +12,15 @@ def load_data():
     switches_file = REPO_ROOT / "results" / "phase17_3" / "audible_switches.csv"
     latency_file = REPO_ROOT / "results" / "phase17_3" / "latency_breakdown.csv"
     
+    if not event_file.exists():
+        # Fallback for nested Kaggle directory structure
+        nested_root = REPO_ROOT / "EEG_8_Channel_Pipeline"
+        event_file = nested_root / "results" / "phase17_2" / "event_log.jsonl"
+        switches_file = nested_root / "results" / "phase17_3" / "audible_switches.csv"
+        latency_file = nested_root / "results" / "phase17_3" / "latency_breakdown.csv"
+
     if not event_file.exists() or not switches_file.exists() or not latency_file.exists():
-        print("Missing Phase 17 outputs. Run Phase 17 pipeline first.")
+        print(f"Missing Phase 17 outputs at {event_file}. Run Phase 17 pipeline first.")
         return None, None, None
         
     events = []
