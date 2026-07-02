@@ -13,27 +13,36 @@ warnings.filterwarnings("ignore")
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 try:
     from models.aad_conformer import AADConformer
+    from data.extract_gammatone_envelopes import extract_gammatone_envelopes
 except ImportError:
-    print("Could not import AADConformer.")
+    print("Could not import AADConformer or Gammatone Extractor.")
     sys.exit(1)
 
-def extract_broadband_envelope(wav_path, target_fs=64):
-    """Fallback 1D envelope extraction using Hilbert transform."""
+def extract_true_gammatone_envelopes(wav_path, target_fs=64):
+    """Uses the real 28-band ERB gammatone filterbank and averages across bands to create the 1D target."""
+    import tempfile
+    
     fs, audio = wavfile.read(wav_path)
     # audio is (Samples, 2)
     left = audio[:, 0].astype(np.float32)
     right = audio[:, 1].astype(np.float32)
     
-    # Hilbert envelope
-    env_l = np.abs(hilbert(left))
-    env_r = np.abs(hilbert(right))
+    with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as tl:
+        wavfile.write(tl.name, fs, left)
+        # Returns (28, Time)
+        env_l_28 = extract_gammatone_envelopes(tl.name, target_fs=target_fs)
+        os.remove(tl.name)
+        
+    with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as tr:
+        wavfile.write(tr.name, fs, right)
+        env_r_28 = extract_gammatone_envelopes(tr.name, target_fs=target_fs)
+        os.remove(tr.name)
+        
+    # KUL Training Target: Mean across the 28 subbands!
+    env_l_1d = env_l_28.mean(axis=0)
+    env_r_1d = env_r_28.mean(axis=0)
     
-    # Downsample
-    num_samples = int(len(env_l) * target_fs / fs)
-    env_l_64 = resample(env_l, num_samples)
-    env_r_64 = resample(env_r, num_samples)
-    
-    return env_l_64, env_r_64
+    return env_l_1d, env_r_1d
 
 def run_phase25a(aasd_eeg_path, aasd_audio_path, checkpoint_path, out_dir):
     print("====================================================")
@@ -81,8 +90,8 @@ def run_phase25a(aasd_eeg_path, aasd_audio_path, checkpoint_path, out_dir):
     if audio_marker is not None:
         audio_file = os.path.join(aasd_audio_path, f"mixed_{int(audio_marker):03d}.wav")
         if os.path.exists(audio_file):
-            print(f"[INFO] Extracting envelopes from {audio_file}")
-            env_l, env_r = extract_broadband_envelope(audio_file, target_fs=64)
+            print(f"[INFO] Extracting TRUE Gammatone envelopes from {audio_file}...")
+            env_l, env_r = extract_true_gammatone_envelopes(audio_file, target_fs=64)
         else:
             print(f"[WARN] Audio file not found. Using mock envelopes.")
             env_l = np.random.randn(60*64)
