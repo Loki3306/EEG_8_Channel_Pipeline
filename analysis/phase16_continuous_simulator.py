@@ -14,6 +14,8 @@ from decision_policy_engine import DecisionPolicyEngine, State
 class ContinuousSimulator:
     def __init__(self, mode='fixed', early_threshold_map=None):
         self.mode = mode
+        # These heuristic thresholds were strictly predefined from Phase 15.4.1 prior knowledge,
+        # they are NOT fit on the evaluation dataset.
         self.early_threshold_map = early_threshold_map or {
             'EASY': 0.70,
             'MEDIUM': 0.85,
@@ -21,7 +23,6 @@ class ContinuousSimulator:
         }
     
     def run_simulation(self, df):
-        # We don't hardcode seed globally to avoid side-effects, just local
         rng = np.random.RandomState(42)
         
         global_metrics = {
@@ -60,6 +61,10 @@ class ContinuousSimulator:
             else:
                 true_label = int(group['label'].iloc[0])
                 
+            # Verify dataset label semantics (0=Right, 1=Left)
+            if true_label not in [0, 1]:
+                raise ValueError("Ground truth labels must be binary 0 or 1.")
+                
             engine = DecisionPolicyEngine(confidence_threshold=self.early_threshold_map['MEDIUM'])
             
             trial_id = f"{subj}_{trial}"
@@ -80,6 +85,7 @@ class ContinuousSimulator:
                     if not difficulty_locked:
                         prob_buffer.append(prob)
                         if len(prob_buffer) >= 5: 
+                            # Pre-calibrated heuristics applied online without look-ahead
                             prob_mean = np.mean(prob_buffer)
                             if prob_mean > 0.65: diff = 'EASY'
                             elif prob_mean < 0.55: diff = 'HARD'
@@ -100,6 +106,9 @@ class ContinuousSimulator:
                 
                 res = engine.update(prob, margin)
                 
+                # Directly track absolute state occupancy to avoid percentage reconstruction assumptions
+                global_metrics['state_occupancy'][res['state']] += 1
+                
                 state_trace.append({
                     'trial_id': trial_id,
                     'window': win,
@@ -113,10 +122,10 @@ class ContinuousSimulator:
                 })
                 
                 if res['action'] in ["SWITCH_LEFT", "SWITCH_RIGHT"] and res['decision'] is not None:
-                    try:
-                        dec_val = int(res['decision'])
-                    except (ValueError, TypeError):
-                        raise RuntimeError(f"Decision engine returned non-integer semantic label: {res['decision']}")
+                    dec_val = int(res['decision'])
+                    # Verify DecisionPolicyEngine semantics (Decision 1 = LEFT, Decision 0 = RIGHT)
+                    if dec_val not in [0, 1]:
+                        raise RuntimeError(f"Engine emitted non-binary decision: {dec_val}")
                         
                     is_corr = (dec_val == true_label)
                     
@@ -138,7 +147,6 @@ class ContinuousSimulator:
             global_metrics['rejects'] += stat['rejects']
             global_metrics['oscillations'] += stat['oscillations']
             
-            # Add adaptation cost latency penalty to all adaptive policies so comparison isn't biased
             adaptation_penalty = 5 if self.mode == 'adaptive' else 0
             
             if stat['latency'] is not None:
@@ -147,11 +155,6 @@ class ContinuousSimulator:
                 global_metrics['lock_durations'].append(stat['avg_lock_duration'])
             if stat['avg_uncertain_duration'] > 0:
                 global_metrics['uncertainty_durations'].append(stat['avg_uncertain_duration'])
-                
-            # Safely recover absolute counts from percentages
-            total_time = engine.window_index
-            for state_val, pct in stat['state_occupancy'].items():
-                global_metrics['state_occupancy'][state_val] += int(pct * total_time)
                 
         results = {
             'mode': self.mode,
@@ -164,12 +167,13 @@ class ContinuousSimulator:
             'Wrong Switches': global_metrics['wrong_switches'],
             'Total Rejects': global_metrics['rejects'],
             'Total Oscillations': global_metrics['oscillations'],
-            'raw_latencies': global_metrics['lock_latencies'] # for statistical paired testing
+            'raw_latencies': global_metrics['lock_latencies'],
+            'state_occupancy': global_metrics['state_occupancy']
         }
         
-        return results, state_trace, decision_log, global_metrics
+        return results, state_trace, decision_log
 
-def write_phase16A_outputs(out_dir, results, trace, dec, metrics):
+def write_phase16A_outputs(out_dir, results, trace, dec):
     p16a_dir = out_dir / 'phase16A'
     p16a_dir.mkdir(parents=True, exist_ok=True)
     
@@ -181,16 +185,15 @@ def write_phase16A_outputs(out_dir, results, trace, dec, metrics):
         
     pd.DataFrame(trace).to_csv(p16a_dir / 'timeline.csv', index=False)
     
-    # Exclude raw latencies from json dump
-    res_dump = {k:v for k,v in results.items() if k != 'raw_latencies'}
+    res_dump = {k:v for k,v in results.items() if k not in ['raw_latencies', 'state_occupancy']}
     with open(p16a_dir / 'metrics.json', 'w') as f:
         json.dump(res_dump, f, indent=4)
         
-    total_steps = sum(metrics['state_occupancy'].values())
+    total_steps = sum(results['state_occupancy'].values())
     state_df = pd.DataFrame([{
         'State': k, 
         'Avg Occupancy Pct': v / max(1, total_steps)
-    } for k, v in metrics['state_occupancy'].items()])
+    } for k, v in results['state_occupancy'].items()])
     state_df.to_csv(p16a_dir / 'state_statistics.csv', index=False)
     
     with open(p16a_dir / 'phase16A_report.md', 'w') as f:
@@ -215,14 +218,14 @@ def write_phase16B_outputs(out_dir, res_16a, res_16b, trace_16b, dec_16b, ab_df)
     with open(p16b_dir / 'adaptive_decision_log.jsonl', 'w') as f:
         for d in dec_16b: f.write(json.dumps(d) + '\n')
         
-    res_a_clean = {k:v for k,v in res_16a.items() if k != 'raw_latencies'}
-    res_b_clean = {k:v for k,v in res_16b.items() if k != 'raw_latencies'}
+    res_a_clean = {k:v for k,v in res_16a.items() if k not in ['raw_latencies', 'state_occupancy']}
+    res_b_clean = {k:v for k,v in res_16b.items() if k not in ['raw_latencies', 'state_occupancy']}
     comp_df = pd.DataFrame([res_a_clean, res_b_clean])
     comp_df.to_csv(p16b_dir / 'comparison_metrics.csv', index=False)
     
     ab_clean = []
     for r in ab_df.to_dict('records'):
-        ab_clean.append({k:v for k,v in r.items() if k != 'raw_latencies'})
+        ab_clean.append({k:v for k,v in r.items() if k not in ['raw_latencies', 'state_occupancy']})
     pd.DataFrame(ab_clean).to_csv(p16b_dir / 'ablation_results.csv', index=False)
     
     lat_a = res_16a['Average Lock Latency']
@@ -230,13 +233,20 @@ def write_phase16B_outputs(out_dir, res_16a, res_16b, trace_16b, dec_16b, ab_df)
     err_a = res_16a['Wrong Switches']
     err_b = res_16b['Wrong Switches']
     
-    # Paired t-test
+    # Non-parametric Wilcoxon signed-rank test for paired latency differences
     lat_a_arr = np.array(res_16a['raw_latencies'])
     lat_b_arr = np.array(res_16b['raw_latencies'])
     min_len = min(len(lat_a_arr), len(lat_b_arr))
+    
     if min_len > 1:
-        t_stat, p_val = stats.ttest_rel(lat_a_arr[:min_len], lat_b_arr[:min_len])
-        stat_sig = p_val < 0.05
+        diff = lat_a_arr[:min_len] - lat_b_arr[:min_len]
+        if np.all(diff == 0):
+            p_val = 1.0
+            stat_sig = False
+        else:
+            res_w = stats.wilcoxon(lat_a_arr[:min_len], lat_b_arr[:min_len])
+            p_val = res_w.pvalue
+            stat_sig = p_val < 0.05
     else:
         p_val = 1.0
         stat_sig = False
@@ -246,7 +256,7 @@ def write_phase16B_outputs(out_dir, res_16a, res_16b, trace_16b, dec_16b, ab_df)
         f.write("## Architecture & Finite State Machine\n")
         f.write("The controller uses the `DecisionPolicyEngine` SPRT engine with states: INITIALIZING, WAITING, LOCKED, SWITCHING, UNCERTAIN.\n")
         f.write("In Phase 16B, the Early Difficulty Predictor maps trials to EASY, MEDIUM, or HARD based on the first 5 windows of `prob_mean`. During these first 5 windows, the threshold remains fixed (no look-ahead leakage).\n")
-        f.write("The threshold is dynamically adjusted: 0.70 (EASY), 0.85 (MEDIUM), 0.95 (HARD).\n\n")
+        f.write("The threshold is dynamically adjusted: 0.70 (EASY), 0.85 (MEDIUM), 0.95 (HARD). These thresholds are prior domain heuristics derived from Phase 15.4.1.\n\n")
         
         f.write("## A/B Comparison\n")
         f.write(comp_df[['mode', 'Average Lock Latency', 'Wrong Switches', 'Total Rejects', 'Total Oscillations']].to_markdown(index=False) + "\n\n")
@@ -255,11 +265,14 @@ def write_phase16B_outputs(out_dir, res_16a, res_16b, trace_16b, dec_16b, ab_df)
         f.write(pd.DataFrame(ab_clean)[['mode', 'Average Lock Latency', 'Wrong Switches', 'Total Rejects']].to_markdown(index=False) + "\n\n")
         
         f.write("## Engineering Discussion\n")
-        f.write("**DISCLAIMER: These adaptive policy conclusions remain strictly exploratory as the heuristic difficulty predictor has not yet been validated on a fully held-out dataset.**\n\n")
+        f.write("**DISCLAIMER: The heuristic difficulty predictor was configured using Phase 15 priors. While applied causally online, performance claims remain exploratory until fully validated on a held-out dataset.**\n\n")
         
         if lat_b < lat_a:
             f.write(f"The adaptive controller successfully lowered latency from {lat_a:.2f} to {lat_b:.2f} windows. ")
-            f.write(f"This difference is statistically significant (paired t-test, p={p_val:.4f}). " if stat_sig else f"However, this difference was not statistically significant (p={p_val:.4f}). ")
+            if stat_sig:
+                f.write(f"This difference is statistically significant (Wilcoxon signed-rank test, p={p_val:.4f}). ")
+            else:
+                f.write(f"However, this difference was not statistically significant (p={p_val:.4f}). ")
         else:
             f.write(f"The adaptive controller did NOT improve latency (Base: {lat_a:.2f}, Adapt: {lat_b:.2f}, p={p_val:.4f}). ")
             
@@ -281,12 +294,12 @@ def main():
     print("---------------------------------------")
     
     sim_16a = ContinuousSimulator(mode='fixed')
-    res_16a, trace_16a, dec_16a, metrics_16a = sim_16a.run_simulation(df)
-    write_phase16A_outputs(out_dir, res_16a, trace_16a, dec_16a, metrics_16a)
+    res_16a, trace_16a, dec_16a = sim_16a.run_simulation(df)
+    write_phase16A_outputs(out_dir, res_16a, trace_16a, dec_16a)
     print("Phase 16A ........ COMPLETE")
     
     sim_16b = ContinuousSimulator(mode='adaptive')
-    res_16b, trace_16b, dec_16b, metrics_16b = sim_16b.run_simulation(df)
+    res_16b, trace_16b, dec_16b = sim_16b.run_simulation(df)
     print("Phase 16B ........ COMPLETE")
     
     ablations = ['fixed', 'adaptive', 'time_decay', 'random', 'conservative', 'aggressive']
@@ -299,7 +312,7 @@ def main():
             ablation_res.append(res_16b)
         else:
             sim = ContinuousSimulator(mode=mode)
-            res, _, _, _ = sim.run_simulation(df)
+            res, _, _ = sim.run_simulation(df)
             ablation_res.append(res)
             
     ab_df = pd.DataFrame(ablation_res)
