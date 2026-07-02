@@ -127,12 +127,10 @@ def run_forensics(files, out_dir):
                 margin_correct_dir = (m > 0) if tgt == 1 else (m < 0)
                 
                 cat = None
-                if frame['active_lock'] == (1 - tgt):
+                if st in ['LOCKED', 'STABILIZING'] and frame['decision'] == (1 - tgt):
                     cat = 'Release Delay'
                 elif st == 'COOLDOWN':
                     cat = 'Cooldown / Hysteresis'
-                elif st == 'UNCERTAIN':
-                    cat = 'Release Delay'
                 else:
                     if not margin_correct_dir:
                         cat = 'Evidence Reset'
