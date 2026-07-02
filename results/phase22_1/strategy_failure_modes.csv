@@ -1,0 +1,10 @@
+Strategy,Failure_Mode
+InfiniteAccumulator,N/A - Sufficient Lock Persistence
+HardCapAccumulator(cap=20.0),Releases Too Early / Excessive Forgetting
+ExponentialDecay(λ=0.9),Releases Too Early / Excessive Forgetting
+AsymmetricDecay(λ=0.5),Excessive Oscillation / Forgetting
+SlidingWindow(N=32),Releases Too Early / Excessive Forgetting
+BayesianAccumulator(p_switch=0.01),Excessive Oscillation / Forgetting
+"CUSUMHybrid(d=0.5, h=3.0)",N/A - Sufficient Lock Persistence
+ShiryaevRobertsHybrid(h=20.0),Excessive Oscillation / Forgetting
+PageHinkleyHybrid(h=5.0),Excessive Oscillation / Forgetting
