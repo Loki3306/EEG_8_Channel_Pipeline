@@ -24,7 +24,7 @@ def audit_scenario(json_path, generator):
     
     # Layer 2: Temporal
     prev_timestamp = None
-    expected_hop = generator.hop_sec
+    expected_hop = int(generator.hop_sec * generator.fs) / generator.fs
     
     # Layer 4: Determinism State
     fingerprint_state = ""
@@ -61,8 +61,8 @@ def audit_scenario(json_path, generator):
 
     # Layer 1: Validate Total Duration Math
     # In continuous_stream, the last center sample is roughly end - window_sec/2
-    # So total duration is total_windows * hop + window_sec
-    total_duration_sec = total_windows * generator.hop_sec + generator.window_sec
+    # So total duration is total_windows * expected_hop + generator.window_sec
+    total_duration_sec = total_windows * expected_hop + generator.window_sec
     
     # Hash
     final_hash = compute_hash(fingerprint_state)
