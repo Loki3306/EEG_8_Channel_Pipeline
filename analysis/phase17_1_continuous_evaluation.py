@@ -230,7 +230,7 @@ def main():
         dropout=0.3,
         stride=4
     ).to(device)
-    model.load_state_dict(torch.load(args.model, map_location=device))
+    model.load_state_dict(torch.load(args.model, map_location=device), strict=False)
     model.eval()
     
     print("Initializing Generator...")
