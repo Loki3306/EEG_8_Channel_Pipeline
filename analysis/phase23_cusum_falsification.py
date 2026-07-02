@@ -12,16 +12,29 @@ from decision_engine.context_aware_engine import ContextAwarePolicyEngine
 from decision_engine.strategies import CUSUMHybrid, InfiniteAccumulator
 
 def find_scenarios():
-    kaggle_path = Path("/kaggle/input/datasets/lokeshgile/phase17-stream/kaggle/working/EEG_8_Channel_Pipeline/results/phase17_1/scenario_streams")
-    local_path = REPO_ROOT / "results" / "phase17_1" / "scenario_streams"
+    potential_paths = [
+        Path("/kaggle/input/phase17-stream/kaggle/working/EEG_8_Channel_Pipeline/results/phase17_1/scenario_streams"),
+        Path("/kaggle/input/datasets/lokeshgile/phase17-stream/kaggle/working/EEG_8_Channel_Pipeline/results/phase17_1/scenario_streams"),
+        Path("/kaggle/input/phase17-stream/results/phase17_1/scenario_streams"),
+        Path("/kaggle/input/phase17-stream"),
+        REPO_ROOT / "results" / "phase17_1" / "scenario_streams"
+    ]
     
-    if kaggle_path.exists():
-        p = kaggle_path
-    else:
-        p = local_path
-        
-    if not p.exists():
+    p = None
+    for path in potential_paths:
+        if path.exists():
+            p = path
+            break
+            
+    if p is None or not p.exists():
+        # Fallback to recursively searching the input directory just in case
+        kaggle_in = Path("/kaggle/input")
+        if kaggle_in.exists():
+            matches = list(kaggle_in.rglob("*predictions.csv"))
+            if matches:
+                return matches
         return []
+    
     return list(p.glob("*predictions.csv"))
 
 def run_simulation(df, strategy):
@@ -214,7 +227,7 @@ def generate_report(out_dir, kills):
 CUSUM severely fails at detecting rapid or consecutive changes, as demonstrated by the {kills['mrate']*100:.1f}% missed change rate.
 
 ## 3. How sensitive is it to parameter choice?
-It exhibits a plateau of stable performance across `d` $\in [0.25, 0.75]$ and `h` $\in [2, 10]$ with a maximum absolute variance of {(kills['pmax']-kills['pmin'])*100:.1f}%.
+It exhibits a plateau of stable performance across `d` $\\in [0.25, 0.75]$ and `h` $\\in [2, 10]$ with a maximum absolute variance of {(kills['pmax']-kills['pmin'])*100:.1f}%.
 
 ## 4. How often does it falsely reset?
 {kills['frate']:.2f} times per hour, well within the acceptability threshold.
