@@ -80,8 +80,15 @@ def classify_reset(df_slice, reset_idx, lock_before):
 def analyze_resets(df, tdf, scenario_name):
     resets = []
     
-    # Find all indices where evidence hit 0 (a reset occurred)
-    reset_indices = tdf[(tdf['evidence'] == 0.0) & (tdf['window_idx'] > 0)].index
+    # Reconstruct LLR to detect when InfiniteAccumulator was forcefully reset
+    p = np.clip(df['prob'], 1e-5, 1 - 1e-5)
+    llr = np.log(p / (1 - p))
+    expected_evidence = tdf['evidence'].shift(1) + llr
+    
+    # A reset happened if the actual evidence is significantly different from expected
+    # (i.e. CUSUM flushed the buffer, so evidence just equals current llr)
+    reset_mask = (np.abs(tdf['evidence'] - expected_evidence) > 1e-3) & (tdf['window_idx'] > 0)
+    reset_indices = tdf[reset_mask].index
     
     for r_idx in reset_indices:
         # Context window 50 frames before reset
