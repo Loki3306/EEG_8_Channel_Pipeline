@@ -37,8 +37,8 @@ def audit_switches(df, out_dir):
         for idx, row in group.iterrows():
             curr_lock = row['active_lock']
             
-            # A switch occurs when lock changes from one state to another (not None)
-            if curr_lock != prev_lock and curr_lock is not None and prev_lock is not None:
+            # A switch occurs when lock changes from one state to another
+            if pd.notna(curr_lock) and pd.notna(prev_lock) and curr_lock != prev_lock:
                 # Calculate how long the new speaker has been speaking (for early/late)
                 gt = row['ground_truth']
                 is_correct = (curr_lock == gt)
