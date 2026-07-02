@@ -58,8 +58,8 @@ def load_eeg_sample(path, dataset_type='aasd'):
     elif path.endswith('.pt'):
         data = torch.load(path, map_location='cpu')
         
+        win = None
         if isinstance(data, dict):
-            # Try common keys
             if 'eeg' in data:
                 win = data['eeg']
             elif 'data' in data:
@@ -69,6 +69,13 @@ def load_eeg_sample(path, dataset_type='aasd'):
                     if isinstance(v, torch.Tensor) and v.ndim >= 2:
                         win = v
                         break
+        elif isinstance(data, list) and len(data) > 0 and isinstance(data[0], dict):
+            # Probably a list of trial dicts
+            trial = data[0]
+            if 'eeg' in trial:
+                win = trial['eeg']
+            elif 'data' in trial:
+                win = trial['data']
         else:
             win = data
             
@@ -81,7 +88,7 @@ def load_eeg_sample(path, dataset_type='aasd'):
                 win = win.view(-1)[:8*128].reshape(8, 128)
             return win.clone().detach().to(torch.float32).unsqueeze(0)
         else:
-            raise ValueError(f"Loaded .pt file, but found unsupported type: {type(win)}")
+            raise ValueError(f"Loaded .pt file, but found unsupported type or missing EEG data. Type: {type(win)}")
             
     else:
         raise ValueError(f"Unsupported file format: {path}")
@@ -98,8 +105,8 @@ def run_audit(kul_path, aasd_path, checkpoint_path):
             state_dict = torch.load(checkpoint_path, map_location='cpu')
             if 'model_state_dict' in state_dict:
                 state_dict = state_dict['model_state_dict']
-            model.load_state_dict(state_dict)
-            print(f"[INFO] Loaded checkpoint: {checkpoint_path.split('/')[-1]}")
+            model.load_state_dict(state_dict, strict=False)
+            print(f"[INFO] Loaded checkpoint (strict=False): {checkpoint_path.split('/')[-1]}")
         except Exception as e:
             print(f"[WARN] Failed to load checkpoint: {e}. Using random weights.")
     else:
