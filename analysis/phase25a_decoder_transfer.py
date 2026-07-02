@@ -64,12 +64,12 @@ def run_phase25a(aasd_eeg_path, aasd_audio_path, checkpoint_path, out_dir):
     # We will process Trial 0
     trial_eeg = eeg_data[:, :, 0] # (62, 7680) at 128Hz
     
-    # Extract audio marker for Trial 0
+    # Extract audio marker for Trial 1 (EEGLAB epochs are 1-indexed)
     audio_marker = None
     for i in range(events.shape[0]):
         ev = events[i] if events.ndim > 1 else events
         ep = int(ev[4] if events.ndim > 1 else getattr(ev, 'epoch', 0))
-        if ep == 0:
+        if ep == 1:
             ev_t = str(ev[0] if events.ndim > 1 else getattr(ev, 'type', '')).strip()
             if ev_t not in ['179', '184']:
                 audio_marker = ev_t
@@ -78,12 +78,17 @@ def run_phase25a(aasd_eeg_path, aasd_audio_path, checkpoint_path, out_dir):
     print(f"[INFO] Found Audio Marker: {audio_marker}")
     
     # Load Audio
-    audio_file = os.path.join(aasd_audio_path, f"mixed_{int(audio_marker):03d}.wav")
-    if os.path.exists(audio_file):
-        print(f"[INFO] Extracting envelopes from {audio_file}")
-        env_l, env_r = extract_broadband_envelope(audio_file, target_fs=64)
+    if audio_marker is not None:
+        audio_file = os.path.join(aasd_audio_path, f"mixed_{int(audio_marker):03d}.wav")
+        if os.path.exists(audio_file):
+            print(f"[INFO] Extracting envelopes from {audio_file}")
+            env_l, env_r = extract_broadband_envelope(audio_file, target_fs=64)
+        else:
+            print(f"[WARN] Audio file not found. Using mock envelopes.")
+            env_l = np.random.randn(60*64)
+            env_r = np.random.randn(60*64)
     else:
-        print(f"[WARN] Audio file not found. Using mock envelopes.")
+        print(f"[WARN] Could not find Audio marker. Using mock envelopes.")
         env_l = np.random.randn(60*64)
         env_r = np.random.randn(60*64)
         
