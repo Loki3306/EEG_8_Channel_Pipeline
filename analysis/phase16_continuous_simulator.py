@@ -6,6 +6,7 @@ from pathlib import Path
 import pandas as pd
 import numpy as np
 from tqdm import tqdm
+from scipy import stats
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from decision_policy_engine import DecisionPolicyEngine, State
@@ -19,25 +20,10 @@ class ContinuousSimulator:
             'HARD': 0.95
         }
     
-    def extract_early_features(self, group, max_windows=5):
-        probs = []
-        for i, (_, row) in enumerate(group.iterrows()):
-            if i >= max_windows:
-                break
-            probs.append(float(row['prob_platt'] if 'prob_platt' in row else row.get('calibrated_prob', 0.5)))
-        
-        if not probs:
-            return 'MEDIUM'
-            
-        prob_mean = np.mean(probs)
-        if prob_mean > 0.65:
-            return 'EASY'
-        elif prob_mean < 0.55:
-            return 'HARD'
-        else:
-            return 'MEDIUM'
-            
     def run_simulation(self, df):
+        # We don't hardcode seed globally to avoid side-effects, just local
+        rng = np.random.RandomState(42)
+        
         global_metrics = {
             'total_trials': 0,
             'total_windows': 0,
@@ -55,39 +41,62 @@ class ContinuousSimulator:
         state_trace = []
         decision_log = []
         
+        required_cols = ['subject', 'trial', 'window', 'margin']
+        for col in required_cols:
+            if col not in df.columns:
+                raise ValueError(f"Dataset missing required column: {col}")
+                
+        if 'prob_platt' not in df.columns and 'calibrated_prob' not in df.columns:
+            raise ValueError("Dataset missing probability column (prob_platt or calibrated_prob)")
+            
+        if 'ground_truth' not in df.columns and 'label' not in df.columns:
+            raise ValueError("Dataset missing label column (ground_truth or label)")
+        
         for (subj, trial), group in tqdm(df.groupby(['subject', 'trial'])):
             group = group.sort_values('window')
-            true_label = group['ground_truth'].iloc[0] if 'ground_truth' in group else group.get('label', 1).iloc[0]
             
-            difficulty = 'MEDIUM'
-            if self.mode == 'adaptive':
-                difficulty = self.extract_early_features(group, max_windows=5)
-            elif self.mode == 'random':
-                difficulty = np.random.choice(['EASY', 'MEDIUM', 'HARD'])
-            elif self.mode == 'time_decay':
-                difficulty = 'MEDIUM' 
-            elif self.mode == 'aggressive':
-                difficulty = 'EASY'
-            elif self.mode == 'conservative':
-                difficulty = 'HARD'
-            elif self.mode == 'fixed':
-                difficulty = 'MEDIUM'
+            if 'ground_truth' in group:
+                true_label = int(group['ground_truth'].iloc[0])
+            else:
+                true_label = int(group['label'].iloc[0])
                 
-            engine = DecisionPolicyEngine(confidence_threshold=self.early_threshold_map[difficulty])
+            engine = DecisionPolicyEngine(confidence_threshold=self.early_threshold_map['MEDIUM'])
             
             trial_id = f"{subj}_{trial}"
             global_metrics['total_trials'] += 1
             
+            prob_buffer = []
+            difficulty_locked = False
+            pre_random_diff = rng.choice(['EASY', 'MEDIUM', 'HARD'])
+            
             for _, row in group.iterrows():
                 global_metrics['total_windows'] += 1
                 
-                prob = float(row['prob_platt'] if 'prob_platt' in row else row.get('calibrated_prob', 0.5))
-                margin = float(row.get('margin', 0.0))
+                prob = float(row['prob_platt'] if 'prob_platt' in row else row['calibrated_prob'])
+                margin = float(row['margin'])
                 win = int(row['window'])
                 
-                if self.mode == 'time_decay':
+                if self.mode == 'adaptive':
+                    if not difficulty_locked:
+                        prob_buffer.append(prob)
+                        if len(prob_buffer) >= 5: 
+                            prob_mean = np.mean(prob_buffer)
+                            if prob_mean > 0.65: diff = 'EASY'
+                            elif prob_mean < 0.55: diff = 'HARD'
+                            else: diff = 'MEDIUM'
+                            engine.config['confidence_threshold'] = self.early_threshold_map[diff]
+                            difficulty_locked = True
+                elif self.mode == 'random':
+                    engine.config['confidence_threshold'] = self.early_threshold_map[pre_random_diff]
+                elif self.mode == 'time_decay':
                     decay_conf = max(0.70, 0.95 - (win / 30.0) * 0.25)
                     engine.config['confidence_threshold'] = decay_conf
+                elif self.mode == 'aggressive':
+                    engine.config['confidence_threshold'] = self.early_threshold_map['EASY']
+                elif self.mode == 'conservative':
+                    engine.config['confidence_threshold'] = self.early_threshold_map['HARD']
+                elif self.mode == 'fixed':
+                    pass 
                 
                 res = engine.update(prob, margin)
                 
@@ -103,17 +112,24 @@ class ContinuousSimulator:
                     'threshold_used': engine.config['confidence_threshold']
                 })
                 
-                if res['action'] in ["SWITCH_LEFT", "SWITCH_RIGHT"]:
+                if res['action'] in ["SWITCH_LEFT", "SWITCH_RIGHT"] and res['decision'] is not None:
+                    try:
+                        dec_val = int(res['decision'])
+                    except (ValueError, TypeError):
+                        raise RuntimeError(f"Decision engine returned non-integer semantic label: {res['decision']}")
+                        
+                    is_corr = (dec_val == true_label)
+                    
                     decision_log.append({
                         'trial_id': trial_id,
                         'window': win,
-                        'decision': res['decision'],
+                        'decision': dec_val,
                         'true_label': true_label,
-                        'is_correct': res['decision'] == true_label,
+                        'is_correct': is_corr,
                         'confidence_threshold': engine.config['confidence_threshold']
                     })
                     
-                    if res['decision'] != true_label:
+                    if not is_corr:
                         global_metrics['wrong_switches'] += 1
                         global_metrics['false_locks'] += 1
             
@@ -121,19 +137,21 @@ class ContinuousSimulator:
             global_metrics['switches'] += stat['switches']
             global_metrics['rejects'] += stat['rejects']
             global_metrics['oscillations'] += stat['oscillations']
+            
+            # Add adaptation cost latency penalty to all adaptive policies so comparison isn't biased
+            adaptation_penalty = 5 if self.mode == 'adaptive' else 0
+            
             if stat['latency'] is not None:
-                global_metrics['lock_latencies'].append(stat['latency'])
+                global_metrics['lock_latencies'].append(stat['latency'] + adaptation_penalty)
             if stat['avg_lock_duration'] > 0:
                 global_metrics['lock_durations'].append(stat['avg_lock_duration'])
             if stat['avg_uncertain_duration'] > 0:
                 global_metrics['uncertainty_durations'].append(stat['avg_uncertain_duration'])
                 
-            for k, v in stat['state_occupancy'].items():
-                if isinstance(v, float): 
-                    # stat['state_occupancy'] returns percentages! Recompute absolute later or sum percentages
-                    global_metrics['state_occupancy'][k] += v
-                else:
-                    global_metrics['state_occupancy'][k] += v
+            # Safely recover absolute counts from percentages
+            total_time = engine.window_index
+            for state_val, pct in stat['state_occupancy'].items():
+                global_metrics['state_occupancy'][state_val] += int(pct * total_time)
                 
         results = {
             'mode': self.mode,
@@ -145,7 +163,8 @@ class ContinuousSimulator:
             'Total Switches': global_metrics['switches'],
             'Wrong Switches': global_metrics['wrong_switches'],
             'Total Rejects': global_metrics['rejects'],
-            'Total Oscillations': global_metrics['oscillations']
+            'Total Oscillations': global_metrics['oscillations'],
+            'raw_latencies': global_metrics['lock_latencies'] # for statistical paired testing
         }
         
         return results, state_trace, decision_log, global_metrics
@@ -162,18 +181,18 @@ def write_phase16A_outputs(out_dir, results, trace, dec, metrics):
         
     pd.DataFrame(trace).to_csv(p16a_dir / 'timeline.csv', index=False)
     
-    # Save metrics JSON
+    # Exclude raw latencies from json dump
+    res_dump = {k:v for k,v in results.items() if k != 'raw_latencies'}
     with open(p16a_dir / 'metrics.json', 'w') as f:
-        json.dump(results, f, indent=4)
+        json.dump(res_dump, f, indent=4)
         
-    # State statistics CSV
+    total_steps = sum(metrics['state_occupancy'].values())
     state_df = pd.DataFrame([{
         'State': k, 
-        'Avg Occupancy Pct': v / max(1, metrics['total_trials'])
+        'Avg Occupancy Pct': v / max(1, total_steps)
     } for k, v in metrics['state_occupancy'].items()])
     state_df.to_csv(p16a_dir / 'state_statistics.csv', index=False)
     
-    # Report
     with open(p16a_dir / 'phase16A_report.md', 'w') as f:
         f.write("# Phase 16A: Continuous Hearing Aid Simulator (Baseline)\n\n")
         f.write("## Overview\n")
@@ -196,28 +215,58 @@ def write_phase16B_outputs(out_dir, res_16a, res_16b, trace_16b, dec_16b, ab_df)
     with open(p16b_dir / 'adaptive_decision_log.jsonl', 'w') as f:
         for d in dec_16b: f.write(json.dumps(d) + '\n')
         
-    # Comparison metrics
-    comp_df = pd.DataFrame([res_16a, res_16b])
+    res_a_clean = {k:v for k,v in res_16a.items() if k != 'raw_latencies'}
+    res_b_clean = {k:v for k,v in res_16b.items() if k != 'raw_latencies'}
+    comp_df = pd.DataFrame([res_a_clean, res_b_clean])
     comp_df.to_csv(p16b_dir / 'comparison_metrics.csv', index=False)
     
-    ab_df.to_csv(p16b_dir / 'ablation_results.csv', index=False)
+    ab_clean = []
+    for r in ab_df.to_dict('records'):
+        ab_clean.append({k:v for k,v in r.items() if k != 'raw_latencies'})
+    pd.DataFrame(ab_clean).to_csv(p16b_dir / 'ablation_results.csv', index=False)
+    
+    lat_a = res_16a['Average Lock Latency']
+    lat_b = res_16b['Average Lock Latency']
+    err_a = res_16a['Wrong Switches']
+    err_b = res_16b['Wrong Switches']
+    
+    # Paired t-test
+    lat_a_arr = np.array(res_16a['raw_latencies'])
+    lat_b_arr = np.array(res_16b['raw_latencies'])
+    min_len = min(len(lat_a_arr), len(lat_b_arr))
+    if min_len > 1:
+        t_stat, p_val = stats.ttest_rel(lat_a_arr[:min_len], lat_b_arr[:min_len])
+        stat_sig = p_val < 0.05
+    else:
+        p_val = 1.0
+        stat_sig = False
     
     with open(p16b_dir / 'phase16B_report.md', 'w') as f:
         f.write("# Phase 16B: Adaptive Decision Controller\n\n")
         f.write("## Architecture & Finite State Machine\n")
         f.write("The controller uses the `DecisionPolicyEngine` SPRT engine with states: INITIALIZING, WAITING, LOCKED, SWITCHING, UNCERTAIN.\n")
-        f.write("In Phase 16B, the Early Difficulty Predictor maps trials to EASY, MEDIUM, or HARD based on the first 5 windows of `prob_mean`.\n")
+        f.write("In Phase 16B, the Early Difficulty Predictor maps trials to EASY, MEDIUM, or HARD based on the first 5 windows of `prob_mean`. During these first 5 windows, the threshold remains fixed (no look-ahead leakage).\n")
         f.write("The threshold is dynamically adjusted: 0.70 (EASY), 0.85 (MEDIUM), 0.95 (HARD).\n\n")
         
         f.write("## A/B Comparison\n")
         f.write(comp_df[['mode', 'Average Lock Latency', 'Wrong Switches', 'Total Rejects', 'Total Oscillations']].to_markdown(index=False) + "\n\n")
         
         f.write("## Ablation Study\n")
-        f.write(ab_df[['mode', 'Average Lock Latency', 'Wrong Switches', 'Total Rejects']].to_markdown(index=False) + "\n\n")
+        f.write(pd.DataFrame(ab_clean)[['mode', 'Average Lock Latency', 'Wrong Switches', 'Total Rejects']].to_markdown(index=False) + "\n\n")
         
         f.write("## Engineering Discussion\n")
-        f.write("The adaptive controller trades minimal false locks for significantly improved lock latency in easy environments. ")
-        f.write("Random and naive time-decay thresholds perform worse, validating the early predictor's online capability.\n")
+        f.write("**DISCLAIMER: These adaptive policy conclusions remain strictly exploratory as the heuristic difficulty predictor has not yet been validated on a fully held-out dataset.**\n\n")
+        
+        if lat_b < lat_a:
+            f.write(f"The adaptive controller successfully lowered latency from {lat_a:.2f} to {lat_b:.2f} windows. ")
+            f.write(f"This difference is statistically significant (paired t-test, p={p_val:.4f}). " if stat_sig else f"However, this difference was not statistically significant (p={p_val:.4f}). ")
+        else:
+            f.write(f"The adaptive controller did NOT improve latency (Base: {lat_a:.2f}, Adapt: {lat_b:.2f}, p={p_val:.4f}). ")
+            
+        if err_b <= err_a:
+            f.write(f"This was achieved without increasing false locks (Base errors: {err_a}, Adapt errors: {err_b}).\n")
+        else:
+            f.write(f"However, this came at the cost of increased false locks (Base errors: {err_a}, Adapt errors: {err_b}).\n")
 
 def main():
     parser = argparse.ArgumentParser()
