@@ -296,27 +296,40 @@ def run_phase25a5(aasd_eeg_dir, aasd_audio_dir, checkpoint_path, out_dir):
     cache_dir = os.path.join(out_dir, "audio_cache")
     audio_cache = build_audio_cache(aasd_audio_dir, cache_dir, target_fs=64)
     
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    model = AADConformer(in_channels=8)
-    if checkpoint_path and os.path.exists(checkpoint_path):
-        state_dict = torch.load(checkpoint_path, map_location='cpu')
-        if 'model_state_dict' in state_dict:
-            state_dict = state_dict['model_state_dict']
-        model.load_state_dict(state_dict, strict=False)
-    model.to(device)
-    model.eval()
+    num_gpus = torch.cuda.device_count()
+    print(f"[INFO] Using {num_gpus} GPUs for parallel processing...")
     
     mat_files = glob.glob(os.path.join(aasd_eeg_dir, '*', '*.mat'))
     if not mat_files:
         print(f"[FAIL] No .mat files found in {aasd_eeg_dir}")
         sys.exit(1)
         
-    print(f"[INFO] Processing {len(mat_files)} subjects sequentially on {device}...")
+    print(f"[INFO] Processing {len(mat_files)} subjects in parallel...")
     
-    all_results = {}
-    for mat_path in tqdm(mat_files, desc="Subjects"):
-        subj, subj_res = process_subject(mat_path, model, audio_cache, device)
-        all_results[subj] = subj_res
+    def process_subject_wrapper(mat_path, audio_cache, checkpoint_path, idx, num_gpus):
+        device_id = idx % num_gpus if num_gpus > 0 else 0
+        device = torch.device(f'cuda:{device_id}' if num_gpus > 0 else 'cpu')
+        
+        model = AADConformer(in_channels=8)
+        if checkpoint_path and os.path.exists(checkpoint_path):
+            state_dict = torch.load(checkpoint_path, map_location='cpu')
+            if 'model_state_dict' in state_dict:
+                state_dict = state_dict['model_state_dict']
+            model.load_state_dict(state_dict, strict=False)
+        model.to(device)
+        model.eval()
+        
+        return process_subject(mat_path, model, audio_cache, device)
+
+    from joblib import Parallel, delayed
+    n_workers = num_gpus * 4 if num_gpus > 0 else 4 # Maximize parallel workers per GPU
+    
+    results = Parallel(n_jobs=n_workers, backend="loky")(
+        delayed(process_subject_wrapper)(mat_files[i], audio_cache, checkpoint_path, i, num_gpus)
+        for i in range(len(mat_files))
+    )
+    
+    all_results = {subj: res for subj, res in results}
         
     print("[INFO] Evaluation complete. Computing Population Statistics...")
     
