@@ -8,6 +8,18 @@ import numpy as np
 from tqdm import tqdm
 from scipy import stats
 
+class NpEncoder(json.JSONEncoder):
+    def default(self, obj):
+        if isinstance(obj, np.integer):
+            return int(obj)
+        if isinstance(obj, np.floating):
+            return float(obj)
+        if isinstance(obj, np.ndarray):
+            return obj.tolist()
+        if isinstance(obj, np.bool_):
+            return bool(obj)
+        return super(NpEncoder, self).default(obj)
+
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from decision_policy_engine import DecisionPolicyEngine, State
 
@@ -180,16 +192,16 @@ def write_phase16A_outputs(out_dir, results, trace, dec):
     p16a_dir.mkdir(parents=True, exist_ok=True)
     
     with open(p16a_dir / 'state_trace.jsonl', 'w') as f:
-        for t in trace: f.write(json.dumps(t) + '\n')
+        for t in trace: f.write(json.dumps(t, cls=NpEncoder) + '\n')
         
     with open(p16a_dir / 'decision_log.jsonl', 'w') as f:
-        for d in dec: f.write(json.dumps(d) + '\n')
+        for d in dec: f.write(json.dumps(d, cls=NpEncoder) + '\n')
         
     pd.DataFrame(trace).to_csv(p16a_dir / 'timeline.csv', index=False)
     
     res_dump = {k:v for k,v in results.items() if k not in ['raw_latencies', 'state_occupancy']}
     with open(p16a_dir / 'metrics.json', 'w') as f:
-        json.dump(res_dump, f, indent=4)
+        json.dump(res_dump, f, indent=4, cls=NpEncoder)
         
     total_steps = sum(results['state_occupancy'].values())
     state_df = pd.DataFrame([{
@@ -215,10 +227,10 @@ def write_phase16B_outputs(out_dir, res_16a, res_16b, trace_16b, dec_16b, ab_df)
     p16b_dir.mkdir(parents=True, exist_ok=True)
     
     with open(p16b_dir / 'adaptive_state_trace.jsonl', 'w') as f:
-        for t in trace_16b: f.write(json.dumps(t) + '\n')
+        for t in trace_16b: f.write(json.dumps(t, cls=NpEncoder) + '\n')
         
     with open(p16b_dir / 'adaptive_decision_log.jsonl', 'w') as f:
-        for d in dec_16b: f.write(json.dumps(d) + '\n')
+        for d in dec_16b: f.write(json.dumps(d, cls=NpEncoder) + '\n')
         
     res_a_clean = {k:v for k,v in res_16a.items() if k not in ['raw_latencies', 'state_occupancy']}
     res_b_clean = {k:v for k,v in res_16b.items() if k not in ['raw_latencies', 'state_occupancy']}
