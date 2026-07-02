@@ -220,7 +220,16 @@ def main():
     print(f"Using device: {device}")
     
     print("Loading Model...")
-    model = AADConformer(in_channels=64, num_heads=4, num_layers=4).to(device)
+    model = AADConformer(
+        in_channels=8,
+        temporal_filters=32,
+        spatial_filters=64,
+        embed_dim=64,
+        num_heads=4,
+        num_layers=2,
+        dropout=0.3,
+        stride=4
+    ).to(device)
     model.load_state_dict(torch.load(args.model, map_location=device))
     model.eval()
     
