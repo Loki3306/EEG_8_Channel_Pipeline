@@ -1,0 +1,6 @@
+Subject,Coverage
+1_stable_conversation_predictions,0.995
+2_single_shift_predictions,0.47
+3_rapid_conversation_predictions,0.57
+4_mixed_difficulty_predictions,0.585
+5_long_continuous_predictions,0.599
