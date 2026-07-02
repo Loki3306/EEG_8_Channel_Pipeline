@@ -131,7 +131,15 @@ def run_phase25a(aasd_eeg_path, aasd_audio_path, checkpoint_path, out_dir):
     margins = []
     probabilities = []
     
-    print("[INFO] Running 10s sliding window inference with double Z-scoring...")
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    model = model.to(device)
+    
+    print(f"[INFO] Running 10s sliding window inference with double Z-scoring on {device}...")
+    
+    eeg_windows = []
+    l_windows = []
+    r_windows = []
+    
     for start in range(0, min(eeg_norm.shape[1], len(env_l_1d)) - win_len, stride):
         win_eeg = eeg_norm[:, start:start+win_len]
         
@@ -139,8 +147,7 @@ def run_phase25a(aasd_eeg_path, aasd_audio_path, checkpoint_path, out_dir):
         w_eeg_mean = win_eeg.mean(axis=1, keepdims=True)
         w_eeg_std = win_eeg.std(axis=1, keepdims=True) + 1e-8
         win_eeg_norm = (win_eeg - w_eeg_mean) / w_eeg_std
-        
-        win_eeg_t = torch.tensor(win_eeg_norm, dtype=torch.float32).unsqueeze(0)
+        eeg_windows.append(win_eeg_norm)
         
         win_l = env_l_1d[start:start+win_len]
         win_r = env_r_1d[start:start+win_len]
@@ -149,19 +156,36 @@ def run_phase25a(aasd_eeg_path, aasd_audio_path, checkpoint_path, out_dir):
         win_l_norm = (win_l - win_l.mean()) / (win_l.std() + 1e-8)
         win_r_norm = (win_r - win_r.mean()) / (win_r.std() + 1e-8)
         
-        with torch.no_grad():
-            out, _ = model(win_eeg_t, return_features=True)
-            pred_env = out.squeeze().numpy()
-            
-        # 8. Pearson Correlation (exactly as in KUL)
-        corr_l = safe_corr_np(pred_env, win_l_norm)
-        corr_r = safe_corr_np(pred_env, win_r_norm)
+        l_windows.append(win_l_norm)
+        r_windows.append(win_r_norm)
         
-        margin = corr_l - corr_r
-        prob = 1.0 / (1.0 + np.exp(-10 * margin))
+    # Batch inference
+    eeg_batch = torch.tensor(np.stack(eeg_windows), dtype=torch.float32).to(device)
+    
+    print(f"[INFO] Forward passing batch of {len(eeg_windows)} windows...")
+    with torch.no_grad():
+        out, _ = model(eeg_batch, return_features=True)
+        pred_envs = out.squeeze(1).cpu().numpy()
         
-        margins.append(margin)
-        probabilities.append(prob)
+    l_batch = np.stack(l_windows)
+    r_batch = np.stack(r_windows)
+    
+    # 8. Vectorized Pearson Correlation
+    def batch_pearson(x, y):
+        x_mean = x.mean(axis=1, keepdims=True)
+        y_mean = y.mean(axis=1, keepdims=True)
+        num = np.sum((x - x_mean) * (y - y_mean), axis=1)
+        den = np.sqrt(np.sum((x - x_mean)**2, axis=1) * np.sum((y - y_mean)**2, axis=1))
+        return num / (den + 1e-8)
+        
+    corr_l = batch_pearson(pred_envs, l_batch)
+    corr_r = batch_pearson(pred_envs, r_batch)
+    
+    margins = corr_l - corr_r
+    probabilities = 1.0 / (1.0 + np.exp(-10 * margins))
+    
+    margins = margins.tolist()
+    probabilities = probabilities.tolist()
         
     print("[PASS] Inference completed.")
     
