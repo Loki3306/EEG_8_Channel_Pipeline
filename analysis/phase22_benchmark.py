@@ -53,11 +53,11 @@ def extract_splices(df):
 def get_strategies():
     return [
         InfiniteAccumulator(),
-        HardCapAccumulator(cap=20.0),
-        ExponentialDecayAccumulator(decay=0.90),
-        AsymmetricDecayAccumulator(decay=0.50),
-        SlidingWindowAccumulator(window_size=32),
-        BayesianAccumulator(p_switch=0.01),
+        HardCapAccumulator(cap=150.0),
+        ExponentialDecayAccumulator(decay=0.99),
+        AsymmetricDecayAccumulator(decay=0.85),
+        SlidingWindowAccumulator(window_size=128),
+        BayesianAccumulator(p_switch=0.0001),
         CUSUMHybrid(drift=0.5, threshold=3.0),
         ShiryaevRobertsHybrid(threshold=20.0),
         PageHinkleyHybrid(delta=0.1, threshold=5.0)
