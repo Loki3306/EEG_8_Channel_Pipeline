@@ -124,6 +124,9 @@ class ContinuousSessionGenerator:
                 window_metadata.append({
                     'scene_name': scene_name,
                     'scenario_name': scenario_name,
+                    'dataset': dataset,
+                    'subject': subject,
+                    'trial': trial,
                     'ground_truth': label
                 })
                 
@@ -158,6 +161,9 @@ class ContinuousSessionGenerator:
                 'timestamp_sec': center_sample / self.fs,
                 'scene_name': meta['scene_name'],
                 'scenario_name': meta['scenario_name'],
+                'dataset': meta['dataset'],
+                'subject': meta['subject'],
+                'trial': meta['trial'],
                 'window_idx': window_idx
             }
             
