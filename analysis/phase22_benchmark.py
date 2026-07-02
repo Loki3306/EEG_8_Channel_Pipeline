@@ -21,10 +21,34 @@ try:
         ShiryaevRobertsHybrid,
         PageHinkleyHybrid
     )
-    from analysis.phase17_1_continuous_evaluation import extract_splices, ContinuousEvaluator
-    from analysis.phase21_release_dissection import find_prediction_files
 except ImportError as e:
     print(f"WARNING: Could not import dependencies: {e}")
+
+def find_prediction_files():
+    search_paths = [
+        REPO_ROOT / "results" / "phase17_1" / "scenario_streams",
+        Path("/kaggle/working/EEG_8_Channel_Pipeline/results/phase17_1/scenario_streams")
+    ]
+    for path in search_paths:
+        if path.exists():
+            files = list(path.glob("*predictions.csv"))
+            if len(files) > 0:
+                return files
+    return []
+
+def extract_splices(df):
+    splices = []
+    current_scene = None
+    for idx, row in df.iterrows():
+        if row['scene_name'] != current_scene:
+            if current_scene is not None:
+                splices.append({
+                    'timestamp_sec': row['timestamp_sec'],
+                    'old_gt': current_scene,
+                    'new_gt': int(row['ground_truth'])
+                })
+            current_scene = row['scene_name']
+    return splices
 
 def get_strategies():
     return [
