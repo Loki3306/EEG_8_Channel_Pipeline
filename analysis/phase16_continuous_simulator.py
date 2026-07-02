@@ -21,6 +21,12 @@ class ContinuousSimulator:
             'MEDIUM': 0.85,
             'HARD': 0.95
         }
+        
+        # Explicit semantic mapping between engine actions and dataset labels
+        self.action_to_label = {
+            "SWITCH_LEFT": 1,
+            "SWITCH_RIGHT": 0
+        }
     
     def run_simulation(self, df):
         rng = np.random.RandomState(42)
@@ -36,7 +42,7 @@ class ContinuousSimulator:
             'lock_latencies': [],
             'lock_durations': [],
             'uncertainty_durations': [],
-            'state_occupancy': {s: 0 for s in [State.INITIALIZING, State.WAITING, State.LOCKED, State.SWITCHING, State.UNCERTAIN]}
+            'state_occupancy': {}
         }
         
         state_trace = []
@@ -61,7 +67,6 @@ class ContinuousSimulator:
             else:
                 true_label = int(group['label'].iloc[0])
                 
-            # Verify dataset label semantics (0=Right, 1=Left)
             if true_label not in [0, 1]:
                 raise ValueError("Ground truth labels must be binary 0 or 1.")
                 
@@ -85,7 +90,6 @@ class ContinuousSimulator:
                     if not difficulty_locked:
                         prob_buffer.append(prob)
                         if len(prob_buffer) >= 5: 
-                            # Pre-calibrated heuristics applied online without look-ahead
                             prob_mean = np.mean(prob_buffer)
                             if prob_mean > 0.65: diff = 'EASY'
                             elif prob_mean < 0.55: diff = 'HARD'
@@ -106,8 +110,8 @@ class ContinuousSimulator:
                 
                 res = engine.update(prob, margin)
                 
-                # Directly track absolute state occupancy to avoid percentage reconstruction assumptions
-                global_metrics['state_occupancy'][res['state']] += 1
+                # Safely track occupancy for any emitted state
+                global_metrics['state_occupancy'][res['state']] = global_metrics['state_occupancy'].get(res['state'], 0) + 1
                 
                 state_trace.append({
                     'trial_id': trial_id,
@@ -121,18 +125,16 @@ class ContinuousSimulator:
                     'threshold_used': engine.config['confidence_threshold']
                 })
                 
-                if res['action'] in ["SWITCH_LEFT", "SWITCH_RIGHT"] and res['decision'] is not None:
-                    dec_val = int(res['decision'])
-                    # Verify DecisionPolicyEngine semantics (Decision 1 = LEFT, Decision 0 = RIGHT)
-                    if dec_val not in [0, 1]:
-                        raise RuntimeError(f"Engine emitted non-binary decision: {dec_val}")
-                        
-                    is_corr = (dec_val == true_label)
+                if res['action'] in ["SWITCH_LEFT", "SWITCH_RIGHT"]:
+                    # Explicit semantic mapping check
+                    mapped_decision = self.action_to_label[res['action']]
+                    is_corr = (mapped_decision == true_label)
                     
                     decision_log.append({
                         'trial_id': trial_id,
                         'window': win,
-                        'decision': dec_val,
+                        'action': res['action'],
+                        'mapped_decision': mapped_decision,
                         'true_label': true_label,
                         'is_correct': is_corr,
                         'confidence_threshold': engine.config['confidence_threshold']
@@ -228,29 +230,6 @@ def write_phase16B_outputs(out_dir, res_16a, res_16b, trace_16b, dec_16b, ab_df)
         ab_clean.append({k:v for k,v in r.items() if k not in ['raw_latencies', 'state_occupancy']})
     pd.DataFrame(ab_clean).to_csv(p16b_dir / 'ablation_results.csv', index=False)
     
-    lat_a = res_16a['Average Lock Latency']
-    lat_b = res_16b['Average Lock Latency']
-    err_a = res_16a['Wrong Switches']
-    err_b = res_16b['Wrong Switches']
-    
-    # Non-parametric Wilcoxon signed-rank test for paired latency differences
-    lat_a_arr = np.array(res_16a['raw_latencies'])
-    lat_b_arr = np.array(res_16b['raw_latencies'])
-    min_len = min(len(lat_a_arr), len(lat_b_arr))
-    
-    if min_len > 1:
-        diff = lat_a_arr[:min_len] - lat_b_arr[:min_len]
-        if np.all(diff == 0):
-            p_val = 1.0
-            stat_sig = False
-        else:
-            res_w = stats.wilcoxon(lat_a_arr[:min_len], lat_b_arr[:min_len])
-            p_val = res_w.pvalue
-            stat_sig = p_val < 0.05
-    else:
-        p_val = 1.0
-        stat_sig = False
-    
     with open(p16b_dir / 'phase16B_report.md', 'w') as f:
         f.write("# Phase 16B: Adaptive Decision Controller\n\n")
         f.write("## Architecture & Finite State Machine\n")
@@ -265,21 +244,7 @@ def write_phase16B_outputs(out_dir, res_16a, res_16b, trace_16b, dec_16b, ab_df)
         f.write(pd.DataFrame(ab_clean)[['mode', 'Average Lock Latency', 'Wrong Switches', 'Total Rejects']].to_markdown(index=False) + "\n\n")
         
         f.write("## Engineering Discussion\n")
-        f.write("**DISCLAIMER: The heuristic difficulty predictor was configured using Phase 15 priors. While applied causally online, performance claims remain exploratory until fully validated on a held-out dataset.**\n\n")
-        
-        if lat_b < lat_a:
-            f.write(f"The adaptive controller successfully lowered latency from {lat_a:.2f} to {lat_b:.2f} windows. ")
-            if stat_sig:
-                f.write(f"This difference is statistically significant (Wilcoxon signed-rank test, p={p_val:.4f}). ")
-            else:
-                f.write(f"However, this difference was not statistically significant (p={p_val:.4f}). ")
-        else:
-            f.write(f"The adaptive controller did NOT improve latency (Base: {lat_a:.2f}, Adapt: {lat_b:.2f}, p={p_val:.4f}). ")
-            
-        if err_b <= err_a:
-            f.write(f"This was achieved without increasing false locks (Base errors: {err_a}, Adapt errors: {err_b}).\n")
-        else:
-            f.write(f"However, this came at the cost of increased false locks (Base errors: {err_a}, Adapt errors: {err_b}).\n")
+        f.write("**DISCLAIMER: This report strictly documents empirical simulation metrics. The adaptive difficulty predictor is evaluated on the identical trial distribution used for heuristic threshold selection. As no fully independent holdout validation is performed, these metrics represent exploratory baseline performance and do not establish generalized scientific validity or comparative superiority.**\n")
 
 def main():
     parser = argparse.ArgumentParser()
