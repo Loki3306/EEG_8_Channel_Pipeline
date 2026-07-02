@@ -339,5 +339,41 @@
     "experiment_id": "2026-06-30_18-19-03",
     "task": "Run 3.1 \u2014 Frequency Pipeline Verification + Multi-Subject Interpretability Smoke Test. \n\nPhase 1: Audit frequency ablation pipeline, verify mathematical correctness of frequency filtering. Generate frequency_pipeline_audit.csv and plots.\nPhase 2: Select 3 subjects (Strong, Average, Weak) from benchmark. Run Progressive Channel Ablation, Frequency Ablation, Temporal Occlusion, Gradient Saliency on them. Generate CSVs and plots.\nPhase 3: Cross-Subject Analysis. Answer if important channels/freqs/saliency remain consistent.\nDeliverables: Executive Summary, Verification Results, Files Modified, Multi-Subject Results, Cross-Subject Interpretation, Remaining Risks, Recommendation.\nEnsure the orchestrator follows the full confidence-based review pipeline (Developer -> Static -> Anti -> GPT -> Anti Re-review).",
     "status": "FAIL"
+  },
+  {
+    "summary": "The implementation attempted to strengthen the Phase 16 continuous hearing-aid simulator by improving reproducibility, latency accounting, reporting, and statistical comparison for the adaptive decision policy. The review failed because semantic decision-label compatibility, independent validation of the adaptive heuristic, statistical rigor, and assumptions about the DecisionPolicyEngine interface remained unresolved.",
+    "datasets": [],
+    "models": [
+      "DecisionPolicyEngine",
+      "Continuous Hearing Aid Simulator",
+      "Adaptive Decision Policy"
+    ],
+    "keywords": [
+      "Phase 16",
+      "continuous simulation",
+      "adaptive policy",
+      "online decision making",
+      "decision policy engine",
+      "latency accounting",
+      "paired t-test",
+      "statistical validation",
+      "semantic label compatibility",
+      "state occupancy",
+      "heuristic evaluation",
+      "reproducibility"
+    ],
+    "lessons": [
+      "Verify semantic compatibility between model decision outputs and ground-truth label encodings instead of relying on matching data types or integer conversion.",
+      "Treat adaptive policies evaluated on the same data used for adaptation as exploratory until validated on independent held-out data.",
+      "Do not use statistical significance alone to support comparative claims; verify test assumptions and accompany p-values with effect sizes or confidence intervals where appropriate.",
+      "Do not reconstruct internal metrics from undocumented assumptions about public interfaces; base analyses only on documented and verified semantics.",
+      "Restrict methodological conclusions to evidence directly supported by the implemented evaluation pipeline.",
+      "Label exploratory adaptive-policy results explicitly until independent validation is performed.",
+      "Prefer local random-number generators over modifying global RNG state to improve reproducibility without side effects.",
+      "Binary .pyc artifacts are not suitable evidence for source-level verification or code review."
+    ],
+    "experiment_id": "2026-07-02_13-59-19",
+    "task": "",
+    "status": "FAIL"
   }
 ]

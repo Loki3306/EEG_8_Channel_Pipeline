@@ -226,7 +226,9 @@ def main():
         dropout=0.3,
         stride=4
     ).to(device)
-    model.load_state_dict(torch.load(args.model, map_location=device), strict=False)
+    state_dict = torch.load(args.model, map_location=device)
+    state_dict = {k: v for k, v in state_dict.items() if not k.startswith('confidence_head')}
+    model.load_state_dict(state_dict, strict=False)
     model.eval()
     
     print("Initializing Generator...")
