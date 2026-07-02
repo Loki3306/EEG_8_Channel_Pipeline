@@ -39,7 +39,9 @@ def main():
     model = AADConformer(in_channels=8)
     ckpt_path = "/kaggle/input/datasets/lowkieee/eeg-aad-conformer-seed1-checkpoints/checkpoints/seed_1/model_S1.pt"
     if os.path.exists(ckpt_path):
-        state_dict = torch.load(ckpt_path, map_location='cpu')['model_state_dict']
+        state_dict = torch.load(ckpt_path, map_location='cpu')
+        if 'model_state_dict' in state_dict:
+            state_dict = state_dict['model_state_dict']
         model.load_state_dict(state_dict, strict=False)
     model.to(device)
     model.eval()
