@@ -50,15 +50,11 @@ def run_forensics(files, out_dir):
     delay_budgets = []
     reset_events = []
     
-    # Store aggregated counts for the final budget
     budget_counts = {
-        'Weak Evidence': 0,
-        'Evidence Reset': 0,
-        'Threshold Waiting': 0,
-        'Evidence Integration': 0,
-        'Cooldown / Hysteresis': 0,
-        'Release Delay': 0
+        'Weak Evidence': 0, 'Evidence Reset': 0, 'Threshold Waiting': 0,
+        'Evidence Integration': 0, 'Cooldown / Hysteresis': 0, 'Release Delay': 0
     }
+    budget_time = {k: 0.0 for k in budget_counts.keys()}
     
     total_delayed_switches = 0
     total_latencies_s = 0.0
@@ -82,48 +78,33 @@ def run_forensics(files, out_dir):
             old_evidence = engine.evidence
             res = engine.update(p, m)
             
-            # Record Reset
             if engine.evidence < old_evidence - 1.0 or (old_evidence > 0 and engine.evidence <= 0):
                 reset_events.append({
-                    'scenario': scenario,
-                    'timestamp_sec': row['timestamp_sec'],
-                    'old_evidence': old_evidence,
-                    'new_evidence': engine.evidence,
-                    'state': res['state'],
-                    'margin': m
+                    'scenario': scenario, 'timestamp_sec': row['timestamp_sec'],
+                    'old_evidence': old_evidence, 'new_evidence': engine.evidence,
+                    'state': res['state'], 'margin': m
                 })
             
             trace.append({
-                'scenario': scenario,
-                'timestamp_sec': row['timestamp_sec'],
-                'window_idx': idx,
-                'ground_truth': int(row['ground_truth']),
-                'margin': m,
-                'prob': p,
-                'llr': llr,
-                'cumulative_evidence': res['evidence'],
-                'confidence': res['confidence'],
-                'active_threshold': res['threshold_used'],
-                'state': res['state'],
+                'scenario': scenario, 'timestamp_sec': row['timestamp_sec'],
+                'window_idx': idx, 'ground_truth': int(row['ground_truth']),
+                'margin': m, 'prob': p, 'llr': llr,
+                'cumulative_evidence': res['evidence'], 'confidence': res['confidence'],
+                'active_threshold': res['threshold_used'], 'state': res['state'],
                 'decision': res['decision'],
                 'active_lock': 1 if res['action'] == 'SWITCH_LEFT' else (0 if res['action'] == 'SWITCH_RIGHT' else None)
             })
             
         trace_df = pd.DataFrame(trace)
-        
-        # Carry forward the last known lock to know what the current active lock is in every frame
         trace_df['active_lock'] = trace_df['active_lock'].ffill()
-        
         all_timelines.append(trace_df)
         
-        time_delta = trace_df['timestamp_sec'].diff().median() if len(trace_df) > 1 else 0.5
+        time_delta = trace_df['timestamp_sec'].diff().median() if len(trace_df) > 1 else 0.0625
         
-        # Calculate Delay Budget for this scenario
         for sp in splices:
             ts = sp['timestamp_sec']
             tgt = sp['new_gt']
             
-            # Find lock time
             post_splice = trace_df[trace_df['timestamp_sec'] >= ts]
             lock_row = post_splice[post_splice['active_lock'] == tgt]
             if lock_row.empty: continue
@@ -135,7 +116,6 @@ def run_forensics(files, out_dir):
             total_delayed_switches += 1
             total_latencies_s += latency
             
-            # Analyze frames in the delay period
             delay_frames = post_splice[post_splice['timestamp_sec'] < lock_ts]
             
             for _, frame in delay_frames.iterrows():
@@ -144,36 +124,39 @@ def run_forensics(files, out_dir):
                 th = frame['active_threshold']
                 m = frame['margin']
                 
-                # Check target direction. If tgt=1, m should be > 0. If tgt=0, m should be < 0.
                 margin_correct_dir = (m > 0) if tgt == 1 else (m < 0)
                 
-                if st in ['COOLDOWN', 'STABILIZING']:
-                    budget_counts['Cooldown / Hysteresis'] += 1
-                elif st == 'UNCERTAIN' or frame['active_lock'] == (1 - tgt):
-                    budget_counts['Release Delay'] += 1
+                cat = None
+                if frame['active_lock'] == (1 - tgt):
+                    cat = 'Release Delay'
+                elif st == 'COOLDOWN':
+                    cat = 'Cooldown / Hysteresis'
+                elif st == 'UNCERTAIN':
+                    cat = 'Release Delay'
                 else:
                     if not margin_correct_dir:
-                        budget_counts['Evidence Reset'] += 1
+                        cat = 'Evidence Reset'
                     elif abs(m) < 0.05:
-                        budget_counts['Weak Evidence'] += 1
+                        cat = 'Weak Evidence'
                     elif cf >= 0.85 and cf < th:
-                        budget_counts['Threshold Waiting'] += 1
+                        cat = 'Threshold Waiting'
                     else:
-                        budget_counts['Evidence Integration'] += 1
+                        cat = 'Evidence Integration'
+                        
+                budget_counts[cat] += 1
+                budget_time[cat] += time_delta
 
     full_timeline = pd.concat(all_timelines, ignore_index=True)
     full_timeline.to_csv(out_dir / "evidence_timelines.csv", index=False)
-    
     pd.DataFrame(reset_events).to_csv(out_dir / "reset_events.csv", index=False)
     
-    # Save the budget
-    total_budget_frames = sum(budget_counts.values())
+    total_budget_time = sum(budget_time.values())
     budget_df = pd.DataFrame([{
         'Category': k,
-        'Frames': v,
-        'Time (s)': v * 0.5, # approx
-        'Percentage': (v / total_budget_frames * 100) if total_budget_frames > 0 else 0
-    } for k, v in budget_counts.items()])
+        'Frames': budget_counts[k],
+        'Time (s)': budget_time[k],
+        'Percentage': (budget_time[k] / total_budget_time * 100) if total_budget_time > 0 else 0
+    } for k in budget_counts.keys()])
     
     budget_df = budget_df.sort_values('Percentage', ascending=False)
     budget_df.to_csv(out_dir / "delay_budget.csv", index=False)
