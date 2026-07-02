@@ -156,11 +156,41 @@ def process_subject(mat_path, model, audio_cache, device):
     b, a = signal.butter(4, [1.0/nyq, 8.0/nyq], btype='band')
     eeg_filt = signal.filtfilt(b, a, eeg_data, axis=1)
     
-    # 2. Downsample to 64Hz
+    # 2. Extract 8 channels matching KUL
+    # Target KUL channels: ['T7', 'C2', 'FT8', 'P7', 'CPz', 'Fp1', 'TP8', 'C3']
+    target_channels = ['T7', 'C2', 'FT8', 'P7', 'CPz', 'Fp1', 'TP8', 'C3']
+    
+    try:
+        chanlocs = mat[eeg_var].chanlocs
+        if isinstance(chanlocs, np.ndarray):
+            chan_names = []
+            for c in chanlocs:
+                lbl = getattr(c, 'labels', '')
+                if isinstance(lbl, (list, np.ndarray)) and len(lbl) > 0:
+                    lbl = lbl[0]
+                chan_names.append(str(lbl).strip().upper())
+        else:
+            chan_names = []
+            
+        sel_idx = []
+        for tc in target_channels:
+            if tc.upper() in chan_names:
+                sel_idx.append(chan_names.index(tc.upper()))
+            else:
+                # Fallback to BioSemi 64 standard approx if not found
+                print(f"[WARN] Channel {tc} not found, using fallback")
+                fallback_map = {'T7':15, 'C2':48, 'FT8':53, 'P7':23, 'CPz':38, 'Fp1':0, 'TP8':55, 'C3':11}
+                sel_idx.append(fallback_map.get(tc, 0))
+    except Exception as e:
+        print(f"[WARN] Failed to parse chanlocs: {e}. Using BioSemi 64 standard indices.")
+        sel_idx = [15, 48, 53, 23, 38, 0, 55, 11] # Approximation
+        
+    eeg_8 = eeg_filt[sel_idx, :]
+    
+    # 3. Downsample to 64Hz
     import math
     g = math.gcd(64, 128)
-    eeg_64 = signal.resample_poly(eeg_filt, 64 // g, 128 // g, axis=1)
-    eeg_64 = eeg_64[:8, :] # 8 Channels
+    eeg_64 = signal.resample_poly(eeg_8, 64 // g, 128 // g, axis=1)
     eeg_norm = norm_env(eeg_64)
     
     # Find max epoch
