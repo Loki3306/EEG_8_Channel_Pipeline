@@ -91,8 +91,8 @@ def analyze_resets(df, tdf, scenario_name):
     reset_indices = tdf[reset_mask].index
     
     for r_idx in reset_indices:
-        # Context window 50 frames before reset
-        start_idx = max(0, r_idx - 50)
+        # Context window 150 frames before reset (to catch delayed CUSUM responses)
+        start_idx = max(0, r_idx - 150)
         df_slice = df.loc[start_idx:r_idx]
         tdf_slice = tdf.loc[start_idx:r_idx]
         
@@ -165,6 +165,10 @@ def main():
     
     for f in files:
         df = pd.read_csv(f)
+        
+        gt_changes_total = df['ground_truth'].diff().abs().sum()
+        print(f"[{f.stem}] Total Ground Truth Changes in File: {gt_changes_total}")
+        
         s = CUSUMHybrid(drift=0.5, threshold=3.0)
         tdf = run_simulation(df, s)
         
