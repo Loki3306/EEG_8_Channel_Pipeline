@@ -40,6 +40,7 @@ def generate_output_events(df, stability_window=20):
             
             if pd.isna(internal_lock):
                 unstable_counter += 1
+                stable_counter = 0
                 if unstable_counter >= stability_window:
                     current_output = "NO_OUTPUT"
                     stable_counter = 0
@@ -136,8 +137,9 @@ def redesign_latency(out_df, splices, out_dir):
         # What was the state exactly before the splice?
         pre_splice = out_df[(out_df['scenario'] == scenario) & (out_df['timestamp_sec'] < splice_ts)]
         if pre_splice.empty:
-            continue
-        state_at_splice = pre_splice.iloc[-1]['output_state']
+            state_at_splice = "NO_OUTPUT"
+        else:
+            state_at_splice = pre_splice.iloc[-1]['output_state']
         
         category = "Unknown"
         if state_at_splice == target_gt_state:
