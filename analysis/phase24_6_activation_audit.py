@@ -32,14 +32,12 @@ def load_eeg_sample(path, dataset_type='aasd'):
         if hasattr(data, 'data'):
             data = data.data
         elif isinstance(data, np.ndarray):
-            pass # Keep as is
+            pass 
             
         if dataset_type == 'aasd':
-            # AASD: (62, 7680, 60) -> Downsample to 64Hz
             data = data[:, ::2, :]
             win = data[:8, :128, 0]
         else:
-            # Assume KUL format
             if data.ndim == 3:
                 win = data[:8, :128, 0]
             elif data.ndim == 2:
@@ -56,8 +54,37 @@ def load_eeg_sample(path, dataset_type='aasd'):
         else:
             win = data[:8, :128]
         return torch.tensor(win, dtype=torch.float32).unsqueeze(0)
+        
+    elif path.endswith('.pt'):
+        data = torch.load(path, map_location='cpu')
+        
+        if isinstance(data, dict):
+            # Try common keys
+            if 'eeg' in data:
+                win = data['eeg']
+            elif 'data' in data:
+                win = data['data']
+            else:
+                for k, v in data.items():
+                    if isinstance(v, torch.Tensor) and v.ndim >= 2:
+                        win = v
+                        break
+        else:
+            win = data
+            
+        if isinstance(win, torch.Tensor):
+            if win.ndim == 3:
+                win = win[0, :8, :128]
+            elif win.ndim == 2:
+                win = win[:8, :128]
+            else:
+                win = win.view(-1)[:8*128].reshape(8, 128)
+            return win.clone().detach().to(torch.float32).unsqueeze(0)
+        else:
+            raise ValueError(f"Loaded .pt file, but found unsupported type: {type(win)}")
+            
     else:
-        raise ValueError("Unsupported file format")
+        raise ValueError(f"Unsupported file format: {path}")
 
 def run_audit(kul_path, aasd_path, checkpoint_path):
     print("====================================================")
@@ -68,12 +95,11 @@ def run_audit(kul_path, aasd_path, checkpoint_path):
     
     if checkpoint_path and os.path.exists(checkpoint_path):
         try:
-            # Standard PyTorch load
             state_dict = torch.load(checkpoint_path, map_location='cpu')
             if 'model_state_dict' in state_dict:
                 state_dict = state_dict['model_state_dict']
             model.load_state_dict(state_dict)
-            print(f"[INFO] Loaded checkpoint: {checkpoint_path}")
+            print(f"[INFO] Loaded checkpoint: {checkpoint_path.split('/')[-1]}")
         except Exception as e:
             print(f"[WARN] Failed to load checkpoint: {e}. Using random weights.")
     else:
@@ -92,14 +118,14 @@ def run_audit(kul_path, aasd_path, checkpoint_path):
     if kul_path:
         try:
             datasets['KUL'] = load_eeg_sample(kul_path, 'kul')
-            print(f"[PASS] Loaded KUL sample from {kul_path}")
+            print(f"[PASS] Loaded KUL sample")
         except Exception as e:
             print(f"[FAIL] KUL load error: {e}")
             
     if aasd_path:
         try:
             datasets['AASD'] = load_eeg_sample(aasd_path, 'aasd')
-            print(f"[PASS] Loaded AASD sample from {aasd_path}")
+            print(f"[PASS] Loaded AASD sample")
         except Exception as e:
             print(f"[FAIL] AASD load error: {e}")
 
