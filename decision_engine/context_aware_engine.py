@@ -91,7 +91,7 @@ class ContextAwarePolicyEngine:
             self.evidence_history.pop(0)
             
         # 2. Bounded Confidence
-        confidence = 1.0 / (1.0 + np.exp(-self.evidence))
+        confidence = 1.0 / (1.0 + np.exp(np.clip(-self.evidence, -500, 500)))
         
         # 3. Process Heuristics (Dynamic Constraints)
         active_threshold = self.config['base_threshold']
