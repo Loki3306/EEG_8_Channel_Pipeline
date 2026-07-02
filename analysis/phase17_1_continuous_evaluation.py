@@ -138,21 +138,20 @@ def compute_metrics(predictions_df, policy_trace, splices):
     
     state_flips = 0
     prev_state = None
-    
     for t in policy_trace:
         st = t['state']
         gt = t['true_label']
+        lock = t['active_lock']
         
-        if st != prev_state and prev_state is not None:
+        if lock != prev_state and prev_state is not None:
             state_flips += 1
-        prev_state = st
+        prev_state = lock
         
-        if st == 'State.UNCERTAIN':
+        if lock is None:
             uncertain_windows += 1
         else:
             # Check if locked onto correct speaker
-            is_correct = (st == 'State.LOCKED_A' and gt == 1) or (st == 'State.LOCKED_B' and gt == 0)
-            if is_correct:
+            if lock == gt:
                 correct_locked_windows += 1
                 
     coverage_pct = (correct_locked_windows / total_windows) * 100
@@ -167,12 +166,11 @@ def compute_metrics(predictions_df, policy_trace, splices):
     for splice in splices:
         splice_ts = splice['timestamp_sec']
         target_gt = splice['new_gt']
-        target_state = 'State.LOCKED_A' if target_gt == 1 else 'State.LOCKED_B'
         
         # Find first time after splice where state hits target
         for t in policy_trace:
             if t['timestamp_sec'] >= splice_ts:
-                if t['state'] == target_state:
+                if t['active_lock'] == target_gt:
                     latency = t['timestamp_sec'] - splice_ts
                     latencies.append(latency)
                     break
@@ -182,14 +180,12 @@ def compute_metrics(predictions_df, policy_trace, splices):
     # False Switch Rate
     false_switches = 0
     for t in policy_trace:
-        st = t['state']
+        action = t.get('action')
         gt = t['true_label']
-        if st == 'State.LOCKED_A' and gt == 0:
-            if t.get('action') == 'Action.SWITCH_LEFT':
-                false_switches += 1
-        elif st == 'State.LOCKED_B' and gt == 1:
-            if t.get('action') == 'Action.SWITCH_RIGHT':
-                false_switches += 1
+        if action == 'SWITCH_LEFT' and gt == 0:
+            false_switches += 1
+        elif action == 'SWITCH_RIGHT' and gt == 1:
+            false_switches += 1
                 
     fsr = (false_switches / (total_duration / 3600.0)) if total_duration > 0 else 0
     
@@ -258,12 +254,24 @@ def main():
         # 3. Simulate Policy Engine
         trace = []
         engine.reset()
+        active_lock = None
         for idx, row in df.iterrows():
             res = engine.update(row['prob'], row['margin'])
+            action = str(res['action'])
+            st = str(res['state'])
+            
+            if action == 'SWITCH_LEFT':
+                active_lock = 1
+            elif action == 'SWITCH_RIGHT':
+                active_lock = 0
+            elif st in ['UNCERTAIN', 'INITIALIZING', 'WAITING']:
+                active_lock = None
+                
             trace.append({
                 'timestamp_sec': row['timestamp_sec'],
-                'state': str(res['state']),
-                'action': str(res['action']),
+                'state': st,
+                'action': action,
+                'active_lock': active_lock,
                 'true_label': int(row['ground_truth'])
             })
             
