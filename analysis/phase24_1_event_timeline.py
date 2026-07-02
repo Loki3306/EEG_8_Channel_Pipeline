@@ -17,14 +17,24 @@ def generate_timeline(mat_path):
     
     print(f"--- EVENT TIMELINE: {mat_path.split('/')[-1]} ---")
     
-    for ev in events:
-        ev_type = str(getattr(ev, 'type', ''))
-        latency = getattr(ev, 'latency', 0)
-        
-        # In EEGLAB, epoch is sometimes missing if it's continuous data, 
-        # but in this dataset, we saw epoch is column 5.
-        epoch = getattr(ev, 'epoch', 0)
-        
+    # In some datasets events are structs, but here they are a 2D object array (N, 5)
+    # Col 0: type, Col 1: latency, Col 2: urevent, Col 3: duration, Col 4: epoch
+    
+    for i in range(events.shape[0]):
+        ev = events[i] if events.ndim > 1 else events
+        if events.ndim > 1 and len(ev) >= 5:
+            ev_type = str(ev[0]).strip()
+            latency = float(ev[1])
+            epoch = int(ev[4])
+        else:
+            # Fallback if it's somehow a struct array
+            ev_type = str(getattr(ev, 'type', '')).strip()
+            latency = float(getattr(ev, 'latency', 0))
+            epoch = int(getattr(ev, 'epoch', 0))
+            
+        if not ev_type:
+            continue
+            
         # New Trial boundary
         if epoch != current_trial:
             current_trial = epoch
@@ -33,7 +43,7 @@ def generate_timeline(mat_path):
             audio_id = ev_type if ev_type not in ['179', '184'] else "Unknown"
             
             try:
-                audio_num = int(audio_id)
+                audio_num = int(float(audio_id))
                 print(f"\n[Trial {current_trial}] Audio: mixed_{audio_num:03d}.wav")
             except ValueError:
                 print(f"\n[Trial {current_trial}] Audio: {audio_id}")
