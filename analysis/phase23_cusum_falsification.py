@@ -12,7 +12,14 @@ from decision_engine.context_aware_engine import ContextAwarePolicyEngine
 from decision_engine.strategies import CUSUMHybrid, InfiniteAccumulator
 
 def find_scenarios():
-    p = REPO_ROOT / "results" / "phase17_1" / "scenario_streams"
+    kaggle_path = Path("/kaggle/input/datasets/lokeshgile/phase17-stream/kaggle/working/EEG_8_Channel_Pipeline/results/phase17_1/scenario_streams")
+    local_path = REPO_ROOT / "results" / "phase17_1" / "scenario_streams"
+    
+    if kaggle_path.exists():
+        p = kaggle_path
+    else:
+        p = local_path
+        
     if not p.exists():
         return []
     return list(p.glob("*predictions.csv"))
