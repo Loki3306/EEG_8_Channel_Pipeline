@@ -54,7 +54,8 @@ class KULAdapter(DatasetAdapter):
         eeg = trial_data['eeg']
         ya = trial_data['audio_a']
         yb = trial_data['audio_b']
-        label = int(trial_data['label'])
+        # In KUL cache, audio_a is always the attended stimulus, so ground truth is 1.
+        label = 1
         
         start_samp = int(start_sec * self.fs)
         if duration_sec is None:
