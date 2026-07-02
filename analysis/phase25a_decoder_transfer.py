@@ -2,11 +2,12 @@ import torch
 import numpy as np
 import scipy.io
 import scipy.io.wavfile as wavfile
-from scipy.signal import hilbert, resample
+import scipy.signal as signal
 import argparse
 import sys
 import os
 import matplotlib.pyplot as plt
+import tempfile
 import warnings
 warnings.filterwarnings("ignore")
 
@@ -15,43 +16,51 @@ try:
     from models.aad_conformer import AADConformer
     from data.extract_gammatone_envelopes import extract_gammatone_envelopes
 except ImportError:
-    print("Could not import AADConformer or Gammatone Extractor.")
+    print("Could not import dependencies.")
     sys.exit(1)
 
+def safe_corr_np(x, y, eps=1e-8):
+    x_mean = x.mean()
+    y_mean = y.mean()
+    num = np.sum((x - x_mean) * (y - y_mean))
+    den = np.sqrt(np.sum((x - x_mean)**2) * np.sum((y - y_mean)**2))
+    return num / (den + eps)
+
 def extract_true_gammatone_envelopes(wav_path, target_fs=64):
-    """Uses the real 28-band ERB gammatone filterbank and averages across bands to create the 1D target."""
-    import tempfile
-    
+    """Uses real 28-band ERB gammatone filterbank."""
     fs, audio = wavfile.read(wav_path)
-    # audio is (Samples, 2)
-    left = audio[:, 0].astype(np.float32)
-    right = audio[:, 1].astype(np.float32)
-    
-    with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as tl:
-        wavfile.write(tl.name, fs, left)
-        # Returns (28, Time)
-        env_l_28 = extract_gammatone_envelopes(tl.name, target_fs=target_fs)
-        os.remove(tl.name)
+    if len(audio.shape) > 1:
+        left = audio[:, 0].astype(np.float64)
+        right = audio[:, 1].astype(np.float64)
+    else:
+        left = audio.astype(np.float64)
+        right = left
         
-    with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as tr:
-        wavfile.write(tr.name, fs, right)
-        env_r_28 = extract_gammatone_envelopes(tr.name, target_fs=target_fs)
-        os.remove(tr.name)
+    def process_channel(data):
+        with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as t:
+            wavfile.write(t.name, fs, data)
+            env_28 = extract_gammatone_envelopes(t.name, target_fs=target_fs)
+            os.remove(t.name)
+        return env_28
         
-    # KUL Training Target: Mean across the 28 subbands!
-    env_l_1d = env_l_28.mean(axis=0)
-    env_r_1d = env_r_28.mean(axis=0)
-    
-    return env_l_1d, env_r_1d
+    env_l_28 = process_channel(left)
+    env_r_28 = process_channel(right)
+    return env_l_28, env_r_28
+
+def norm_env(env):
+    """Trial-wise Channel-wise Normalization matching KUL."""
+    # env is (Channels, Time)
+    env = env - env.mean(axis=1, keepdims=True)
+    env = env / (env.std(axis=1, keepdims=True) + 1e-12)
+    return env
 
 def run_phase25a(aasd_eeg_path, aasd_audio_path, checkpoint_path, out_dir):
     print("====================================================")
-    print("PHASE 25A: DECODER TRANSFER EVALUATION")
+    print("PHASE 25A: STRICT PIPELINE EQUIVALENCE")
     print("====================================================")
     
     os.makedirs(out_dir, exist_ok=True)
     
-    # Load Model
     model = AADConformer(in_channels=8)
     if checkpoint_path and os.path.exists(checkpoint_path):
         state_dict = torch.load(checkpoint_path, map_location='cpu')
@@ -63,17 +72,28 @@ def run_phase25a(aasd_eeg_path, aasd_audio_path, checkpoint_path, out_dir):
         print("[WARN] Using random weights!")
     model.eval()
     
-    # Load EEG
     print("[INFO] Loading AASD Trial 1...")
     mat = scipy.io.loadmat(aasd_eeg_path, squeeze_me=True, struct_as_record=False)
     eeg_var = [k for k in mat.keys() if not k.startswith('__')][0]
     eeg_data = mat[eeg_var].data
     events = mat[eeg_var].event
     
-    # We will process Trial 0
-    trial_eeg = eeg_data[:, :, 0] # (62, 7680) at 128Hz
+    trial_eeg_128 = eeg_data[:, :, 0] # (62, 7680) at 128Hz
     
-    # Extract audio marker for Trial 1 (EEGLAB epochs are 1-indexed)
+    # 1. EEG Filtering (1-8Hz) matching KUL
+    nyq = 128 / 2
+    b, a = signal.butter(4, [1.0/nyq, 8.0/nyq], btype='band')
+    trial_eeg_128_filt = signal.filtfilt(b, a, trial_eeg_128, axis=1)
+    
+    # 2. Downsample to 64Hz
+    import math
+    g = math.gcd(64, 128)
+    trial_eeg_64 = signal.resample_poly(trial_eeg_128_filt, 64 // g, 128 // g, axis=1)
+    trial_eeg_64 = trial_eeg_64[:8, :] # Keep first 8 channels
+    
+    # 3. Trial-wise Channel-wise Z-Score
+    eeg_norm = norm_env(trial_eeg_64)
+    
     audio_marker = None
     for i in range(events.shape[0]):
         ev = events[i] if events.ndim > 1 else events
@@ -84,64 +104,60 @@ def run_phase25a(aasd_eeg_path, aasd_audio_path, checkpoint_path, out_dir):
                 audio_marker = ev_t
                 break
                 
-    print(f"[INFO] Found Audio Marker: {audio_marker}")
-    
-    # Load Audio
     if audio_marker is not None:
         audio_file = os.path.join(aasd_audio_path, f"mixed_{int(audio_marker):03d}.wav")
         if os.path.exists(audio_file):
             print(f"[INFO] Extracting TRUE Gammatone envelopes from {audio_file}...")
-            env_l, env_r = extract_true_gammatone_envelopes(audio_file, target_fs=64)
+            env_l_28, env_r_28 = extract_true_gammatone_envelopes(audio_file, target_fs=64)
+            
+            # 4. Audio Trial-wise Z-Score (per band)
+            env_l_28_norm = norm_env(env_l_28)
+            env_r_28_norm = norm_env(env_r_28)
+            
+            # 5. Subband Pooling
+            env_l_1d = env_l_28_norm.mean(axis=0)
+            env_r_1d = env_r_28_norm.mean(axis=0)
         else:
-            print(f"[WARN] Audio file not found. Using mock envelopes.")
-            env_l = np.random.randn(60*64)
-            env_r = np.random.randn(60*64)
+            print(f"[FAIL] Audio file not found. Stop.")
+            sys.exit(1)
     else:
-        print(f"[WARN] Could not find Audio marker. Using mock envelopes.")
-        env_l = np.random.randn(60*64)
-        env_r = np.random.randn(60*64)
+        print(f"[FAIL] Audio marker not found. Stop.")
+        sys.exit(1)
         
-    # Preprocess EEG (Global Z-Score + Downsample)
-    eeg_64 = trial_eeg[:, ::2] # (62, 3840)
-    global_mean = np.mean(eeg_data[:, ::2, :])
-    global_std = np.std(eeg_data[:, ::2, :])
-    
-    eeg_norm = (eeg_64 - global_mean) / global_std
-    eeg_norm = eeg_norm[:8, :] # Keep 8 channels
-    
-    # Sliding Window Inference (2s window, 0.5s stride)
     fs = 64
-    win_len = int(2.0 * fs)
-    stride = int(0.5 * fs)
+    win_len = int(10.0 * fs)
+    stride = int(1.0 * fs)
     
     margins = []
     probabilities = []
-    confidences = []
     
-    print("[INFO] Running continuous sliding window inference...")
-    for start in range(0, eeg_norm.shape[1] - win_len, stride):
+    print("[INFO] Running 10s sliding window inference with double Z-scoring...")
+    for start in range(0, min(eeg_norm.shape[1], len(env_l_1d)) - win_len, stride):
         win_eeg = eeg_norm[:, start:start+win_len]
-        win_eeg_t = torch.tensor(win_eeg, dtype=torch.float32).unsqueeze(0)
         
-        # Audio chunks
-        win_a = env_l[start:start+win_len]
-        win_b = env_r[start:start+win_len]
+        # 6. Window-level Z-Score (EEG)
+        w_eeg_mean = win_eeg.mean(axis=1, keepdims=True)
+        w_eeg_std = win_eeg.std(axis=1, keepdims=True) + 1e-8
+        win_eeg_norm = (win_eeg - w_eeg_mean) / w_eeg_std
+        
+        win_eeg_t = torch.tensor(win_eeg_norm, dtype=torch.float32).unsqueeze(0)
+        
+        win_l = env_l_1d[start:start+win_len]
+        win_r = env_r_1d[start:start+win_len]
+        
+        # 7. Window-level Z-Score (Audio)
+        win_l_norm = (win_l - win_l.mean()) / (win_l.std() + 1e-8)
+        win_r_norm = (win_r - win_r.mean()) / (win_r.std() + 1e-8)
         
         with torch.no_grad():
-            out, z_pool = model(win_eeg_t, return_features=True)
+            out, _ = model(win_eeg_t, return_features=True)
             pred_env = out.squeeze().numpy()
             
-            if hasattr(model, 'confidence_head'):
-                conf = model.predict_confidence(z_pool)
-                # Simple mock confidence (softmax margin or var)
-                confidences.append(float(conf.std()))
-                
-        # Calculate Pearson Margin
-        corr_a = np.corrcoef(pred_env, win_a)[0, 1] if np.std(win_a) > 0 else 0
-        corr_b = np.corrcoef(pred_env, win_b)[0, 1] if np.std(win_b) > 0 else 0
+        # 8. Pearson Correlation (exactly as in KUL)
+        corr_l = safe_corr_np(pred_env, win_l_norm)
+        corr_r = safe_corr_np(pred_env, win_r_norm)
         
-        margin = corr_a - corr_b
-        # Convert margin to probability (mock logistic mapping)
+        margin = corr_l - corr_r
         prob = 1.0 / (1.0 + np.exp(-10 * margin))
         
         margins.append(margin)
@@ -149,13 +165,11 @@ def run_phase25a(aasd_eeg_path, aasd_audio_path, checkpoint_path, out_dir):
         
     print("[PASS] Inference completed.")
     
-    # Generate Plots
     plt.figure(figsize=(15, 10))
-    
     plt.subplot(3, 1, 1)
-    plt.plot(margins, label='Margin (Corr A - Corr B)')
+    plt.plot(margins, label='Margin (Corr L - Corr R)')
     plt.axhline(0, color='r', linestyle='--')
-    plt.title('Decoding Margin over Time')
+    plt.title('Decoding Margin over Time (10s windows)')
     plt.legend()
     
     plt.subplot(3, 1, 2)
