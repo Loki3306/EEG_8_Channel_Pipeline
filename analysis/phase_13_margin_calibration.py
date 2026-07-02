@@ -33,55 +33,98 @@ def extract_margins(model, subject_data, device, window_sec=2, hop_sec=2, fs=64)
     win_samples = int(window_sec * fs)
     hop_samples = int(hop_sec * fs)
     
-    margins = []
+    eeg_blocks = []
+    audio_a_blocks = []
+    audio_b_blocks = []
+    meta = []
     
-    with torch.no_grad():
-        for trial_idx, t in enumerate(subject_data):
-            eeg = t["eeg"]
-            audio_a = t["audio_a"].mean(dim=0, keepdim=True)
-            audio_b = t["audio_b"].mean(dim=0, keepdim=True)
+    # 1. Fast preparation loop (CPU only)
+    for trial_idx, t in enumerate(subject_data):
+        eeg = t["eeg"]
+        audio_a = t["audio_a"].mean(dim=0, keepdim=True)
+        audio_b = t["audio_b"].mean(dim=0, keepdim=True)
+        
+        n_windows = (eeg.shape[1] - win_samples) // hop_samples + 1
+        for w in range(max(1, n_windows)):
+            start = w * hop_samples
+            stop = start + win_samples
+            if stop > eeg.shape[1]:
+                break
+                
+            eeg_blocks.append(eeg[:, start:stop])
+            audio_a_blocks.append(audio_a[:, start:stop])
+            audio_b_blocks.append(audio_b[:, start:stop])
+            meta.append({"trial": trial_idx, "window": w})
             
-            n_windows = (eeg.shape[1] - win_samples) // hop_samples + 1
-            for w in range(max(1, n_windows)):
-                start = w * hop_samples
-                stop = start + win_samples
-                if stop > eeg.shape[1]:
-                    break
-                    
-                e = eeg[:, start:stop].unsqueeze(0).to(device)
-                a = audio_a[:, start:stop].unsqueeze(0).to(device)
-                b = audio_b[:, start:stop].unsqueeze(0).to(device)
-                
-                a = (a - a.mean(dim=-1, keepdim=True)) / (a.std(dim=-1, keepdim=True) + 1e-8)
-                b = (b - b.mean(dim=-1, keepdim=True)) / (b.std(dim=-1, keepdim=True) + 1e-8)
-                
-                pred = model(e, return_features=False)
-                
-                ca = safe_corr_torch(pred, a).item()
-                cb = safe_corr_torch(pred, b).item()
-                
-                # Randomly assign A and B to stream 1 and 2
-                if np.random.rand() > 0.5:
-                    c1, c2 = ca, cb
-                    is_stream1_attended = 1
-                else:
-                    c1, c2 = cb, ca
-                    is_stream1_attended = 0
-                    
-                margin = c1 - c2
-                prediction = 1 if margin > 0 else 0
-                correct = 1 if (prediction == is_stream1_attended) else 0
-                
-                margins.append({
-                    "trial": trial_idx,
-                    "window": w,
-                    "corrA": c1,
-                    "corrB": c2,
-                    "margin": margin,
-                    "ground_truth": is_stream1_attended,
-                    "prediction": prediction,
-                    "correct": correct
-                })
+    if not eeg_blocks:
+        return pd.DataFrame()
+        
+    # 2. Stack into giant tensors
+    E = torch.stack(eeg_blocks)
+    A = torch.stack(audio_a_blocks)
+    B = torch.stack(audio_b_blocks)
+    
+    # Normalize Audio
+    A = (A - A.mean(dim=-1, keepdim=True)) / (A.std(dim=-1, keepdim=True) + 1e-8)
+    B = (B - B.mean(dim=-1, keepdim=True)) / (B.std(dim=-1, keepdim=True) + 1e-8)
+    
+    # 3. Create DataLoader to hammer the GPU with massive batches
+    dataset = torch.utils.data.TensorDataset(E, A, B)
+    loader = torch.utils.data.DataLoader(
+        dataset, 
+        batch_size=8192, 
+        shuffle=False, 
+        num_workers=2, 
+        pin_memory=True
+    )
+    
+    all_ca = []
+    all_cb = []
+    
+    # 4. Batched GPU inference
+    with torch.no_grad():
+        for e_batch, a_batch, b_batch in tqdm(loader, desc="Batched Inference", leave=False):
+            e_batch = e_batch.to(device, non_blocking=True)
+            a_batch = a_batch.to(device, non_blocking=True)
+            b_batch = b_batch.to(device, non_blocking=True)
+            
+            pred = model(e_batch, return_features=False)
+            
+            ca_batch = safe_corr_torch(pred, a_batch).cpu().numpy()
+            cb_batch = safe_corr_torch(pred, b_batch).cpu().numpy()
+            
+            # Since pred could be [B, 1], flatten if needed
+            all_ca.extend(ca_batch.flatten())
+            all_cb.extend(cb_batch.flatten())
+            
+    # 5. Reconstruct dataframe
+    margins = []
+    for i in range(len(meta)):
+        c1_val = all_ca[i]
+        c2_val = all_cb[i]
+        
+        if np.random.rand() > 0.5:
+            c1, c2 = c1_val, c2_val
+            is_stream1_attended = 1
+        else:
+            c1, c2 = c2_val, c1_val
+            is_stream1_attended = 0
+            
+        margin = c1 - c2
+        prediction = 1 if margin > 0 else 0
+        correct = 1 if (prediction == is_stream1_attended) else 0
+        
+        margins.append({
+            "trial": meta[i]["trial"],
+            "window": meta[i]["window"],
+            "corrA": float(c1),
+            "corrB": float(c2),
+            "margin": float(margin),
+            "ground_truth": is_stream1_attended,
+            "prediction": prediction,
+            "correct": correct
+        })
+        
     return pd.DataFrame(margins)
 
 def temperature_scaling_nll(T, margins, labels):
@@ -147,6 +190,8 @@ def main():
             
         model = AADConformer(in_channels=8).to(device)
         model.load_state_dict(torch.load(ckpt_path, map_location=device), strict=False)
+        if torch.cuda.device_count() > 1:
+            model = torch.nn.DataParallel(model)
         model.eval()
         
         val_df = extract_margins(model, all_subject_data[val_subject], device)
