@@ -21,16 +21,8 @@ def reconstruct_events():
     out_dir.mkdir(parents=True, exist_ok=True)
     out_file = out_dir / "event_log.jsonl"
     
-    engine = ContextAwarePolicyEngine(config={
-        'confidence_threshold': 0.85,
-        'consecutive_required': 10,
-        'minimum_switch_gap': 20,
-        'cooldown_duration': 40,
-        'stabilizing_threshold': 40,
-        'minimum_lock_duration': 15,
-        'entrenched_confidence': 0.90,
-        'entrenched_consecutive': 15
-    }, heuristics=['difficulty_adaptation', 'cooldown', 'hysteresis'])
+    engine = ContextAwarePolicyEngine(base_threshold=0.85, 
+        active_heuristics=['difficulty', 'growth_rate', 'hysteresis', 'oscillation_penalty', 'cooldown'])
     
     total_events = 0
     with open(out_file, 'w') as f:
