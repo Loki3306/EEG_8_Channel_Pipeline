@@ -23,8 +23,9 @@ def extract_gammatone_envelopes(wav_path, num_bands=28, low_freq=50, high_freq=8
     if len(data.shape) > 1:
         data = np.mean(data, axis=1) # mix to mono
         
-    if high_freq > fs / 2:
-        high_freq = fs / 2 - 100
+    if high_freq >= fs / 2:
+        # Prevent floating point precision exceeding Nyquist
+        high_freq = fs / 2 - 1.0
         
     cfs = erb_space(low_freq, high_freq, num_bands)
     
