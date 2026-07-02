@@ -100,8 +100,6 @@ def redesign_switches(out_df, out_dir):
                         'is_correct': is_correct
                     })
                     last_committed_lock = curr_state
-            elif curr_state == "NO_OUTPUT":
-                last_committed_lock = "NO_OUTPUT"
             
     pd.DataFrame(audible_switches).to_csv(out_dir / "audible_switches.csv", index=False)
     return audible_switches
