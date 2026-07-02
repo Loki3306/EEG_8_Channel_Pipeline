@@ -28,7 +28,8 @@ class ContextAwarePolicyEngine:
                  minimum_consecutive_windows=3, 
                  maximum_wait_time=15, 
                  uncertainty_threshold=0.15,
-                 active_heuristics=None):
+                 active_heuristics=None,
+                 strategy=None):
         self.config = {
             'base_threshold': base_threshold,
             'minimum_lock_duration': minimum_lock_duration,
@@ -40,6 +41,13 @@ class ContextAwarePolicyEngine:
             'stabilizing_threshold': 30       # Windows required in LOCKED to become STABILIZING
         }
         self.heuristics = active_heuristics or []
+        
+        if strategy is None:
+            from .strategies import InfiniteAccumulator
+            self.strategy = InfiniteAccumulator()
+        else:
+            self.strategy = strategy
+            
         self.reset()
         
     def reset(self):
@@ -47,6 +55,9 @@ class ContextAwarePolicyEngine:
         self.decision = None
         self.evidence = 0.0
         self.window_index = 0
+        if hasattr(self, 'strategy') and self.strategy is not None:
+            self.strategy.reset()
+        
         
         self.time_in_state = 0
         self.last_switch_time = -9999
@@ -85,7 +96,7 @@ class ContextAwarePolicyEngine:
         # 1. Update Evidence
         p = np.clip(probability, 1e-5, 1 - 1e-5)
         llr = np.log(p / (1 - p))
-        self.evidence += llr
+        self.evidence = self.strategy.update(p, margin, llr)
         self.evidence_history.append(self.evidence)
         if len(self.evidence_history) > 5:
             self.evidence_history.pop(0)
