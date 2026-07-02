@@ -18,7 +18,7 @@ def evaluate_policy(df, engine, name):
     for trial_id, group in trials:
         engine.reset()
         for idx, row in group.iterrows():
-            prob = row['prob']
+            prob = float(row['prob_platt'] if 'prob_platt' in row else row['calibrated_prob'])
             margin = row['margin']
             
             res = engine.update(prob, margin)
