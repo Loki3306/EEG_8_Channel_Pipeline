@@ -25,10 +25,10 @@ def run_diagnostic_inference(eeg_batch, model, device):
     eeg_batch = torch.tensor(eeg_batch, dtype=torch.float32).to(device)
     
     with torch.no_grad():
-        out, features = model(eeg_batch, return_features=True)
-        pred_envs = out.squeeze(1).cpu().numpy()
+        out, z_pool = model(eeg_batch, return_features=True)
+        pred_envs = out.cpu().numpy()
         
-    return pred_envs, features['z_pool'].cpu().numpy()
+    return pred_envs, z_pool.cpu().numpy()
 
 def main():
     print("====================================================")
