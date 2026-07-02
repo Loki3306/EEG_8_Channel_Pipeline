@@ -60,7 +60,13 @@ def load_eeg_sample(path, dataset_type='aasd'):
         
         win = None
         if isinstance(data, dict):
-            if 'eeg' in data:
+            if 'trials' in data and isinstance(data['trials'], list) and len(data['trials']) > 0:
+                trial = data['trials'][0]
+                if 'eeg' in trial:
+                    win = trial['eeg']
+                elif 'data' in trial:
+                    win = trial['data']
+            elif 'eeg' in data:
                 win = data['eeg']
             elif 'data' in data:
                 win = data['data']
@@ -70,7 +76,6 @@ def load_eeg_sample(path, dataset_type='aasd'):
                         win = v
                         break
         elif isinstance(data, list) and len(data) > 0 and isinstance(data[0], dict):
-            # Probably a list of trial dicts
             trial = data[0]
             if 'eeg' in trial:
                 win = trial['eeg']
@@ -88,7 +93,7 @@ def load_eeg_sample(path, dataset_type='aasd'):
                 win = win.view(-1)[:8*128].reshape(8, 128)
             return win.clone().detach().to(torch.float32).unsqueeze(0)
         else:
-            raise ValueError(f"Loaded .pt file, but found unsupported type or missing EEG data. Type: {type(win)}")
+            raise ValueError(f"Loaded .pt file, but found unsupported type or missing EEG data. Type: {type(win)}. Dict keys: {list(data.keys()) if isinstance(data, dict) else 'Not a dict'}")
             
     else:
         raise ValueError(f"Unsupported file format: {path}")
