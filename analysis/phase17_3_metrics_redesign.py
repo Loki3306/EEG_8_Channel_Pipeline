@@ -80,25 +80,27 @@ def redesign_switches(out_df, out_dir):
     audible_switches = []
     
     for scenario, group in out_df.groupby('scenario'):
-        prev_state = "NO_OUTPUT"
+        last_committed_lock = None
         
         for idx, row in group.iterrows():
             curr_state = row['output_state']
             
-            if curr_state != prev_state and curr_state.startswith("LOCK_"):
-                # We reached a committed lock
-                is_correct = (curr_state == f"LOCK_{int(row['ground_truth'])}")
-                
-                audible_switches.append({
-                    'scenario': scenario,
-                    'timestamp_sec': row['timestamp_sec'],
-                    'from_state': prev_state,
-                    'to_state': curr_state,
-                    'ground_truth': row['ground_truth'],
-                    'is_correct': is_correct
-                })
-            
-            prev_state = curr_state
+            if curr_state.startswith("LOCK_"):
+                if curr_state != last_committed_lock:
+                    # We reached a NEW committed lock
+                    is_correct = (curr_state == f"LOCK_{int(row['ground_truth'])}")
+                    
+                    audible_switches.append({
+                        'scenario': scenario,
+                        'timestamp_sec': row['timestamp_sec'],
+                        'from_state': last_committed_lock if last_committed_lock is not None else "NO_OUTPUT",
+                        'to_state': curr_state,
+                        'ground_truth': row['ground_truth'],
+                        'is_correct': is_correct
+                    })
+                    last_committed_lock = curr_state
+            elif curr_state == "NO_OUTPUT":
+                last_committed_lock = "NO_OUTPUT"
             
     pd.DataFrame(audible_switches).to_csv(out_dir / "audible_switches.csv", index=False)
     return audible_switches
@@ -109,14 +111,13 @@ def extract_json_splices(df):
         current_scene = None
         for idx, row in group.iterrows():
             if row['scene'] != current_scene:
-                if current_scene is not None:
-                    splices.append({
-                        'scenario': scenario,
-                        'timestamp_sec': row['timestamp_sec'],
-                        'old_scene': current_scene,
-                        'new_scene': row['scene'],
-                        'new_gt': int(row['ground_truth'])
-                    })
+                splices.append({
+                    'scenario': scenario,
+                    'timestamp_sec': row['timestamp_sec'],
+                    'old_scene': current_scene if current_scene is not None else "START",
+                    'new_scene': row['scene'],
+                    'new_gt': int(row['ground_truth'])
+                })
                 current_scene = row['scene']
     return splices
 
