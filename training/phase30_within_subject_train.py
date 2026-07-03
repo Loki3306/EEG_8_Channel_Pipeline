@@ -30,7 +30,7 @@ if str(REPO_ROOT) not in sys.path:
 if not os.path.exists('models') and os.path.exists('../models'):
     sys.path.insert(0, '..')
 
-from models.matchnet import ContrastiveMatchNet, infonce_loss
+from models.pearson_aad import PearsonAADModel, NegativePearsonLoss
 
 class WindowedDataset(Dataset):
     def __init__(self, trials, window_len=128, hop_len=64, censor_margin=256):
@@ -66,13 +66,7 @@ class WindowedDataset(Dataset):
                 w_eeg_std = w_eeg.std(dim=1, keepdim=True) + 1e-8
                 w_eeg = (w_eeg - w_eeg_mean) / w_eeg_std
                 
-                w_att_mean = w_att.mean(dim=1, keepdim=True)
-                w_att_std = w_att.std(dim=1, keepdim=True) + 1e-8
-                w_att = (w_att - w_att_mean) / w_att_std
-                
-                w_unatt_mean = w_unatt.mean(dim=1, keepdim=True)
-                w_unatt_std = w_unatt.std(dim=1, keepdim=True) + 1e-8
-                w_unatt = (w_unatt - w_unatt_mean) / w_unatt_std
+                # Removed window-level normalization for audio envelopes to preserve variance
                 
                 # Determine state for evaluation
                 mid_point = start + window_len // 2
@@ -166,6 +160,14 @@ def load_aasd_subject_trials(mat_path, b, a, sel_idx, audio_dir):
         })
     return trials
 
+def pearson_corr(x, y, dim=1):
+    x_centered = x - x.mean(dim=dim, keepdim=True)
+    y_centered = y - y.mean(dim=dim, keepdim=True)
+    cov = (x_centered * y_centered).sum(dim=dim)
+    var_x = (x_centered ** 2).sum(dim=dim)
+    var_y = (y_centered ** 2).sum(dim=dim)
+    return cov / torch.sqrt(var_x * var_y + 1e-8)
+
 def evaluate_model(model, val_loader, device):
     model.eval()
     all_margins = []
@@ -180,10 +182,11 @@ def evaluate_model(model, val_loader, device):
             unatt = batch['unatt'].to(device)
             states = batch['state']
             
-            z_eeg, z_a, z_b = model(eeg, att, unatt)
+            env_pred, _ = model(eeg, fs=64)
+            env_pred = env_pred.squeeze(1) # [B, T]
             
-            sim_att = F.cosine_similarity(z_eeg, z_a, dim=1).mean(dim=1)
-            sim_unatt = F.cosine_similarity(z_eeg, z_b, dim=1).mean(dim=1)
+            sim_att = pearson_corr(env_pred, att, dim=1)
+            sim_unatt = pearson_corr(env_pred, unatt, dim=1)
             margin = (sim_att - sim_unatt).cpu().numpy()
             
             for i in range(len(margin)):
@@ -263,8 +266,9 @@ def main():
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print(f"[INFO] Using device: {device}")
     
-    # 50k Parameter ContrastiveMatchNet with 1 audio channel
-    model = ContrastiveMatchNet(eeg_model_type="eegnet", eeg_channels=8, audio_channels=1, latent_dim=64).to(device)
+    # 1.3k Parameter PearsonAADModel with 1 subband
+    model = PearsonAADModel(num_subbands=1, rep_dim=64).to(device)
+    criterion = NegativePearsonLoss().to(device)
     optimizer = optim.AdamW(model.parameters(), lr=1e-3, weight_decay=1e-4)
     
     print("\n[INFO] Training...")
@@ -278,12 +282,11 @@ def main():
         for batch in train_loader:
             eeg = batch['eeg'].to(device)
             att = batch['att'].to(device)
-            unatt = batch['unatt'].to(device)
             
             optimizer.zero_grad()
-            z_eeg, z_a, z_b = model(eeg, att, unatt)
+            env_pred, _ = model(eeg, fs=64)
             
-            loss, sa, sb = infonce_loss(z_eeg, z_a, z_b, temperature=0.1)
+            loss = criterion(env_pred.squeeze(1), att)
             loss.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
             optimizer.step()
