@@ -305,6 +305,7 @@ def main():
             continue
         mf = mf[0]
         
+        import scipy.io
         mat = scipy.io.loadmat(mf, squeeze_me=True, struct_as_record=False)
         eeg_var = [k for k in mat.keys() if not k.startswith('__')][0]
         eeg_obj = mat[eeg_var]
