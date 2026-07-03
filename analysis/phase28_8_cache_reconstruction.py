@@ -205,12 +205,16 @@ def main():
         print(f"Old Cache Trial 2 EEG mean: {old_trials[1]['eeg'].mean():.4f}")
         print(f"New Cache Trial 2 EEG mean: {new_trials[1]['eeg'].mean():.4f}")
         
-        if torch.allclose(old_trials[0]['eeg'], old_trials[1]['eeg']):
+        old_1, old_2 = old_trials[0]['eeg'], old_trials[1]['eeg']
+        min_old = min(old_1.shape[1], old_2.shape[1])
+        if torch.allclose(old_1[:, :min_old], old_2[:, :min_old]):
             print("CONFIRMED: Old Cache Trial 1 is IDENTICAL to Trial 2.")
         else:
             print("Old Cache Trials 1 and 2 are different (maybe due to start_64 slice).")
             
-        if not torch.allclose(new_trials[0]['eeg'], new_trials[1]['eeg']):
+        new_1, new_2 = new_trials[0]['eeg'], new_trials[1]['eeg']
+        min_new = min(new_1.shape[1], new_2.shape[1])
+        if not torch.allclose(new_1[:, :min_new], new_2[:, :min_new]):
             print("CONFIRMED: New Cache Trials 1 and 2 are DIFFERENT (Correct behavior).")
     
     print("\n--- STAGE 4: ALIGNMENT AUDIT ---")
