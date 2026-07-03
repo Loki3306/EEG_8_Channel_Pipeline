@@ -64,6 +64,15 @@ class WindowedDataset(Dataset):
             for start in range(0, eeg.shape[1] - window_len + 1, hop_len):
                 w_eeg = eeg[:, start:start+window_len]
                 w_att = att[start:start+window_len]
+                
+                w_eeg_mean = w_eeg.mean(dim=1, keepdim=True)
+                w_eeg_std = w_eeg.std(dim=1, keepdim=True) + 1e-8
+                w_eeg = (w_eeg - w_eeg_mean) / w_eeg_std
+                
+                w_att_mean = w_att.mean()
+                w_att_std = w_att.std() + 1e-8
+                w_att = (w_att - w_att_mean) / w_att_std
+                
                 self.windows.append((w_eeg, w_att))
                 
     def __len__(self):
@@ -118,15 +127,23 @@ def evaluate_audit(model, trials, device, window_len=128, hop_len=64, transition
                         is_trans = True
                         break
                 
-                center = start + window_len // 2
-                current_state = switch_points[0][0]
-                for state, s_idx in switch_points:
-                    if center >= s_idx: current_state = state
-                        
-                w_eeg = eeg[:, start:end].unsqueeze(0).to(device)
+                w_eeg = eeg[:, start:end]
+                w_eeg_mean = w_eeg.mean(dim=1, keepdim=True)
+                w_eeg_std = w_eeg.std(dim=1, keepdim=True) + 1e-8
+                w_eeg = (w_eeg - w_eeg_mean) / w_eeg_std
+                
+                w_eeg = w_eeg.unsqueeze(0).to(device)
                 pred, _ = model(w_eeg, return_features=True)
                 pred = pred.squeeze().cpu().numpy()
+                
                 w_env_l, w_env_r = env_l[start:end].numpy(), env_r[start:end].numpy()
+                w_env_l = (w_env_l - w_env_l.mean()) / (w_env_l.std() + 1e-8)
+                w_env_r = (w_env_r - w_env_r.mean()) / (w_env_r.std() + 1e-8)
+                
+                mid_point = start + window_len // 2
+                current_state = switch_points[0][0]
+                for state, s_idx in switch_points:
+                    if mid_point >= s_idx: current_state = state
                 
                 if is_trans:
                     trans_preds.append(pred); trans_env_l.append(w_env_l)
@@ -182,11 +199,6 @@ def load_aasd_subject(mat_path, b, a, sel_idx, audio_dir):
         min_len = min(trial_eeg_8.shape[1], len(env_l))
         trial_eeg_8 = trial_eeg_8[:, :min_len]
         env_l, env_r = env_l[:min_len], env_r[:min_len]
-        
-        trial_eeg_8 = trial_eeg_8 - trial_eeg_8.mean(axis=1, keepdims=True)
-        trial_eeg_8 = trial_eeg_8 / (trial_eeg_8.std(axis=1, keepdims=True) + 1e-12)
-        env_l = (env_l - env_l.mean()) / (env_l.std() + 1e-12)
-        env_r = (env_r - env_r.mean()) / (env_r.std() + 1e-12)
         
         att, unatt = np.zeros_like(env_l), np.zeros_like(env_r)
         if len(switch_points) == 0: switch_points = [('R', 0)]
