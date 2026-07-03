@@ -218,8 +218,7 @@ def main():
             gt_B = generate_gt_state(t_array, raw_evs, 'B')
             
             switches_in_gt = np.sum(np.abs(np.diff(gt_B)) > 0)
-            if switches_in_gt > 0:
-                print(f"  [DEBUG] Trial {idx_ev} has {switches_in_gt} switches in gt_B!")
+            print(f"  [DEBUG] Trial {idx_ev}: t_array_len={len(t_array)}, raw_evs_len={len(raw_evs)}, switches={switches_in_gt}")
             
             # Initialize Controller for this trial
             # Default baseline: InfiniteAccumulator
