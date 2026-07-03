@@ -61,11 +61,6 @@ class WindowedDataset(Dataset):
                 w_att = att[:, start:end]
                 w_unatt = unatt[:, start:end]
                 
-                # Normalization
-                w_eeg_mean = w_eeg.mean(dim=1, keepdim=True)
-                w_eeg_std = w_eeg.std(dim=1, keepdim=True) + 1e-8
-                w_eeg = (w_eeg - w_eeg_mean) / w_eeg_std
-                
                 # Removed window-level normalization for audio envelopes to preserve variance
                 
                 # Determine state for evaluation
@@ -124,6 +119,10 @@ def load_aasd_subject_trials(mat_path, b, a, sel_idx, audio_dir):
         trial_eeg = trial_eeg - trial_eeg.mean(axis=0, keepdims=True)
         trial_eeg_filt = scipy.signal.filtfilt(b, a, trial_eeg, axis=1)
         trial_eeg_8 = scipy.signal.resample_poly(trial_eeg_filt, 1, 2, axis=1)[sel_idx, 4:] # Hardware lag
+        
+        # Global trial-level normalization (preserves spatial amplitude ratios)
+        trial_eeg_8 = trial_eeg_8 - trial_eeg_8.mean(axis=1, keepdims=True)
+        trial_eeg_8 = trial_eeg_8 / (trial_eeg_8.std() + 1e-8)
         
         audio_data = np.load(npz_path)
         env_l, env_r = audio_data['env_l'][:-4], audio_data['env_r'][:-4]
