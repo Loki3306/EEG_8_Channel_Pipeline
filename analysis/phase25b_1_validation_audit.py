@@ -66,6 +66,8 @@ def main():
         eeg_obj = mat[eeg_var]
         events = eeg_obj.event
         data_all = eeg_obj.data
+        if len(data_all.shape) == 3:
+            data_all = np.concatenate([data_all[:, :, i] for i in range(data_all.shape[2])], axis=1)
 
         # 1. Count switches directly from AASD event files
         raw_switches = 0

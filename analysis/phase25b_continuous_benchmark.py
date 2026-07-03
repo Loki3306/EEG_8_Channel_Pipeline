@@ -165,7 +165,11 @@ def main():
             return ''
 
         if len(data_all.shape) == 3:
-            data_all = data_all[:, :, 0]
+            # The dataset is epoched (Channels, Time, Trials) e.g. (62, 7680, 60)
+            # But the 'events' latencies are continuous (0, 7680, 15360...)
+            # We MUST concatenate the trials along the time axis to reconstruct the continuous stream
+            # rather than silently truncating to only the first trial!
+            data_all = np.concatenate([data_all[:, :, i] for i in range(data_all.shape[2])], axis=1)
             
         eeg_filt = signal.filtfilt(b, a, data_all, axis=1)
         eeg_64 = signal.resample_poly(eeg_filt, 1, 2, axis=1)
