@@ -273,8 +273,26 @@ def main():
     model = AADConformer(in_channels=8).to(device)
     if args.checkpoint and os.path.exists(args.checkpoint):
         state_dict = torch.load(args.checkpoint, map_location=device)
-        model.load_state_dict(state_dict, strict=False)
+        
+        # Diagnostic Checkpoint Loading
+        model_dict = model.state_dict()
+        loaded_keys = []
+        skipped_keys = []
+        for k, v in state_dict.items():
+            if k in model_dict:
+                if v.shape == model_dict[k].shape:
+                    model_dict[k] = v
+                    loaded_keys.append(k)
+                else:
+                    skipped_keys.append((k, v.shape, model_dict[k].shape))
+        
+        model.load_state_dict(model_dict)
         print(f"Loaded checkpoint: {args.checkpoint}")
+        print(f"[DIAGNOSTIC] Successfully loaded {len(loaded_keys)} keys.")
+        if skipped_keys:
+            print(f"[DIAGNOSTIC] WARNING! Skipped {len(skipped_keys)} keys due to shape mismatch:")
+            for k, s1, s2 in skipped_keys:
+                print(f"  --> {k}: Checkpoint shape {s1} != Model shape {s2}")
         
     criterion = NegativePearsonLoss().to(device)
     optimizer = optim.AdamW(model.parameters(), lr=1e-3, weight_decay=1e-4)
@@ -284,6 +302,37 @@ def main():
     best_test_auc = 0.0
     best_metrics = None
     best_epoch = 0
+    
+    # MINI OVERFIT TEST DIAGNOSTIC
+    print("\n[DIAGNOSTIC] RUNNING SINGLE-BATCH OVERFIT TEST (50 Epochs)")
+    overfit_batch = next(iter(train_loader))
+    
+    for epoch in range(1, 51):
+        model.train()
+        eeg = overfit_batch['eeg'].to(device)
+        att = overfit_batch['att'].squeeze(1).to(device)
+        
+        optimizer.zero_grad()
+        env_pred = model(eeg)
+        
+        # Variance Diagnostic
+        pred_var = env_pred.var(dim=-1).mean().item()
+        
+        loss = criterion(env_pred, att)
+        loss.backward()
+        
+        # Gradient Diagnostic
+        spatial_grad = model.spatial_conv.weight.grad.norm().item() if model.spatial_conv.weight.grad is not None else 0.0
+        head_grad = model.head.weight.grad.norm().item() if model.head.weight.grad is not None else 0.0
+        
+        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+        optimizer.step()
+        
+        if epoch % 10 == 0 or epoch == 1:
+            print(f"Overfit Epoch {epoch:02d} | Loss: {loss.item():.4f} | Pred Var: {pred_var:.6f} | Spatial Grad: {spatial_grad:.4f} | Head Grad: {head_grad:.4f}")
+            
+    print("[DIAGNOSTIC] Overfit test complete. Exiting diagnostic mode.\n")
+    sys.exit(0)
     
     for epoch in range(1, args.epochs + 1):
         model.train()
