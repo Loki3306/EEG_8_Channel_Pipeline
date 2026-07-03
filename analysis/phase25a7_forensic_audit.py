@@ -66,11 +66,21 @@ def main():
     eeg_64 = signal.resample_poly(eeg_8, 64 // g, 128 // g, axis=1)
     eeg_norm = norm_env(eeg_64)
     
-    # Find events in Epoch 1
     epoch_events = []
-    for ev in events:
-        if getattr(ev, 'epoch', 0) == 1:
-            epoch_events.append((str(getattr(ev, 'type', '')).strip(), float(getattr(ev, 'latency', 0))))
+    for i in range(events.shape[0]):
+        ev = events[i] if events.ndim > 1 else events
+        
+        if events.ndim > 1 and len(ev) >= 5:
+            ep = int(ev[4])
+            typ = str(ev[0]).strip()
+            lat = float(ev[1])
+        else:
+            ep = int(getattr(ev, 'epoch', 0))
+            typ = str(getattr(ev, 'type', '')).strip()
+            lat = float(getattr(ev, 'latency', 0))
+            
+        if ep == 1:
+            epoch_events.append((typ, lat))
             
     epoch_events.sort(key=lambda x: x[1])
     
