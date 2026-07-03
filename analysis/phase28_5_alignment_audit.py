@@ -51,7 +51,8 @@ def main():
     
     model = AADConformer(in_channels=8).to(device)
     ckpt_path = REPO_ROOT / 'checkpoints' / 'aasd_finetuned' / 'model_S18_loso.pt'
-    if ckpt_path.exists():
+    # Temporarily force KUL weights to get a cleaner neural envelope baseline
+    if False and ckpt_path.exists():
         model.load_state_dict(torch.load(ckpt_path, map_location=device, weights_only=False))
         print("[INFO] Loaded AASD Fine-Tuned Weights")
     else:
@@ -132,21 +133,29 @@ def main():
     peak_lag_sec = lags[peak_idx] / float(FS)
     peak_val = mean_corr_att[peak_idx]
     
+    peak_idx_u = np.argmax(mean_corr_unatt)
+    peak_lag_sec_u = lags[peak_idx_u] / float(FS)
+    peak_val_u = mean_corr_unatt[peak_idx_u]
+    
     print("\n==================================================")
     print("=== ALIGNMENT AUDIT RESULTS ===")
     print("==================================================")
-    print(f"Max Attended Correlation: {peak_val:.4f}")
-    print(f"Peak Lag (Offset):        {peak_lag_sec:+.3f} seconds ({lags[peak_idx]:+d} samples)")
+    print(f"Max Attended Correlation:   {peak_val:.4f} at {peak_lag_sec:+.3f}s")
+    print(f"Max Unattended Correlation: {peak_val_u:.4f} at {peak_lag_sec_u:+.3f}s")
     print("==================================================")
     
-    if abs(peak_lag_sec) <= 0.05:
-        print("DIAGNOSIS: PERFECT ALIGNMENT.")
-        print("The EEG and Audio are perfectly synced (within 1 sample).")
-        print("The 0.50 accuracy is NOT caused by temporal misalignment.")
+    if peak_val_u > peak_val:
+        print("DIAGNOSIS: LABELS ARE SWAPPED!")
+        print("The Unattended correlation is higher than the Attended correlation.")
+        print("The assumption that target_speaker == B is wrong.")
     else:
-        print("DIAGNOSIS: MISALIGNMENT DETECTED!")
-        print(f"The audio envelopes are shifted by {peak_lag_sec:+.3f} seconds relative to the EEG.")
-        print("This completely destroys Pearson Correlation training at lag=0.")
+        print("DIAGNOSIS: LABELS ARE CORRECT.")
+        if abs(peak_lag_sec) <= 0.05:
+            print("DIAGNOSIS: PERFECT ALIGNMENT.")
+            print("The EEG and Audio are perfectly synced (within 1 sample).")
+        else:
+            print("DIAGNOSIS: MISALIGNMENT DETECTED!")
+            print(f"The audio envelopes are shifted by {peak_lag_sec:+.3f} seconds relative to the EEG.")
 
 if __name__ == "__main__":
     main()
