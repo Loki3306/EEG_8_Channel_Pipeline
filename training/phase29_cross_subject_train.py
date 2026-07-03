@@ -55,31 +55,23 @@ class WindowedDataset(Dataset):
 
 def compute_metrics(preds, env_l_list, env_r_list, true_att_states):
     if len(preds) == 0:
-        return 0, 0, 0, 0, 0, 0
+        return 0, 0, 0, 0
         
     corrs_att, corrs_unatt, scores, labels = [], [], [], []
     for p, el, er, state in zip(preds, env_l_list, env_r_list, true_att_states):
         cl = cross_corr(p, el)
         cr = cross_corr(p, er)
         if state == 'L':
-            corrs_att.append(cl); corrs_unatt.append(cr)
-            scores.append(cl - cr); labels.append(1)
+            corrs_att.append(cl)
+            corrs_unatt.append(cr)
+            scores.append(cl - cr)
+            labels.append(1)
         else:
-            corrs_att.append(cr); corrs_unatt.append(cl)
-            scores.append(cr - cl); labels.append(0)  # cr - cl so it's > 0 when correct! Wait, if state is 'R' (0), score should be higher when correct? 
-            # Actually, standard AUROC expects higher score for positive class (1 = Left).
-            # So score = cl - cr is correct for BOTH.
-            # If state is R (0), we want score to be LOW (negative). 
-            # Wait, the previous script had a bug there:
-            # I did `scores.append(cl - cr)` for both. This is CORRECT! 1=Left (wants positive), 0=Right (wants negative).
+            corrs_att.append(cr)
+            corrs_unatt.append(cl)
+            scores.append(cr - cl)
+            labels.append(0)
             
-    # Fix the bug from phase 28.21 in scoring:
-    scores = []
-    for p, el, er, state in zip(preds, env_l_list, env_r_list, true_att_states):
-        cl = cross_corr(p, el)
-        cr = cross_corr(p, er)
-        scores.append(cl - cr)
-        
     mean_att = np.mean(corrs_att)
     preds_class = [1 if s > 0 else 0 for s in scores]
     auc = roc_auc_score(labels, scores) if len(np.unique(labels)) > 1 else np.nan
@@ -156,7 +148,7 @@ def load_aasd_subject(mat_path, b, a, sel_idx, audio_dir):
                 if epoch_val == str(epoch_idx) and t_str in ['179', '184', '254', '255']:
                     abs_lat = float(ev[1])
                     rel_lat_128 = abs_lat - epoch_start_lat_128
-                    idx_64 = max(0, int(rel_lat_128 / 2.0))
+                    idx_64 = max(0, int(rel_lat_128 / 2.0) - 4) # Hardware lag (-62ms -> 4 samples). Switch occurs 4 samples earlier in the shifted EEG array.
                     switch_points.append(('R' if t_str in ['179', '254'] else 'L', idx_64))
         switch_points.sort(key=lambda x: x[1])
         
@@ -257,9 +249,12 @@ def main():
     kul_path = '/kaggle/input/datasets/lowkieee/eeg-aad-conformer-seed1-checkpoints/checkpoints/seed_1/model_S1.pt'
     if os.path.exists(kul_path):
         ckpt = torch.load(kul_path, map_location=device, weights_only=False)
+        state_dict = ckpt['model_state_dict'] if 'model_state_dict' in ckpt else ckpt
         # Load weights (spatial_conv weight will naturally fail to load and remain randomly initialized because of shape mismatch [64, 1, 8, 1] vs [64, 1, 64, 1])
-        model.load_state_dict(ckpt['model_state_dict'] if 'model_state_dict' in ckpt else ckpt, strict=False)
-        print("[INFO] Loaded KUL weights. (spatial_conv initialized randomly for 8-ch)")
+        missing, unexpected = model.load_state_dict(state_dict, strict=False)
+        print(f"[INFO] Loaded KUL weights.")
+        print(f"  --> Missing keys: {len(missing)} (Expected: spatial_conv)")
+        print(f"  --> Unexpected keys: {len(unexpected)}")
         
     print("\n[INFO] Applying Transfer Learning (Freezing Deep Blocks)...")
     for name, param in model.named_parameters():
