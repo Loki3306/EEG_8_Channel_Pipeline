@@ -183,6 +183,8 @@ class ContextAwarePolicyEngine:
                 self.state = State.LOCKED
                 self.decision = candidate
                 self.last_switch_time = self.window_index
+                self.switch_history.append(self.window_index)
+                self.metrics['switches'] += 1
                 action = Action.SWITCH_LEFT if candidate == 1 else Action.SWITCH_RIGHT
                 if self.metrics['first_decision_time'] is None:
                     self.metrics['first_decision_time'] = self.window_index
@@ -212,12 +214,7 @@ class ContextAwarePolicyEngine:
             if self.time_in_state < self.config['minimum_lock_duration'] and self.state == State.LOCKED:
                 pass # Ignore fluctuations
             else:
-                if is_uncertain:
-                    self.state = State.UNCERTAIN
-                    self.decision = None
-                    action = Action.REJECT
-                    self.metrics['rejects'] += 1
-                elif candidate is not None and candidate != self.decision:
+                if candidate is not None and candidate != self.decision:
                     if self.consecutive_agreement_count >= active_consecutive:
                         if (self.window_index - self.last_switch_time) >= active_switch_gap:
                             self.state = State.SWITCHING
@@ -257,6 +254,7 @@ class ContextAwarePolicyEngine:
                 self.decision = candidate
                 self.last_switch_time = self.window_index
                 self.switch_history.append(self.window_index) # Treat recovery as a switch
+                self.metrics['switches'] += 1
                 action = Action.SWITCH_LEFT if candidate == 1 else Action.SWITCH_RIGHT
                 
         # Metrics Updates
