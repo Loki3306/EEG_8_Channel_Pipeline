@@ -122,14 +122,21 @@ def main():
         current_state = 'L'
         
     # Load audio
-    cache_path = f"/kaggle/working/results/phase25a5/audio_cache/{audio_marker}.npz"
-    if not os.path.exists(cache_path):
-        print(f"[FAIL] Missing {cache_path}")
-        sys.exit(1)
-        
-    audio_cache = np.load(cache_path)
-    env_l_1d = audio_cache['env_l']
-    env_r_1d = audio_cache['env_r']
+    cache_path = f"/kaggle/working/results/phase25a5/audio_cache/{int(audio_marker)}.npz"
+    if os.path.exists(cache_path):
+        audio_cache = np.load(cache_path)
+        env_l_1d = audio_cache['env_l']
+        env_r_1d = audio_cache['env_r']
+    else:
+        print(f"[INFO] Cache not found at {cache_path}. Extracting Gammatones dynamically...")
+        from data.extract_gammatone_envelopes import extract_true_gammatone_envelopes
+        audio_file = f"/kaggle/input/datasets/lokeshgile/aasd-audio/Stimuli Audio/mixed_{int(audio_marker):03d}.wav"
+        if not os.path.exists(audio_file):
+            print(f"[FAIL] Audio file {audio_file} not found.")
+            sys.exit(1)
+        env_l_28, env_r_28 = extract_true_gammatone_envelopes(audio_file, target_fs=64)
+        env_l_1d = norm_env(env_l_28).mean(axis=0)
+        env_r_1d = norm_env(env_r_28).mean(axis=0)
     
     win_len = int(2.0 * 64)
     stride = int(1.0 * 64)
