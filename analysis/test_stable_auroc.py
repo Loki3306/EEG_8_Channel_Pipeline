@@ -84,9 +84,9 @@ def main():
     model = AADConformer(in_channels=8).to(device)
     ckpt = torch.load('/kaggle/input/datasets/lowkieee/eeg-aad-conformer-seed1-checkpoints/checkpoints/seed_1/model_S1.pt', map_location=device)
     if 'model_state_dict' in ckpt:
-        model.load_state_dict(ckpt['model_state_dict'])
+        model.load_state_dict(ckpt['model_state_dict'], strict=False)
     else:
-        model.load_state_dict(ckpt)
+        model.load_state_dict(ckpt, strict=False)
     model.eval()
 
     eeg_dir = '/kaggle/input/datasets/lokeshgile/aasd-processed-eeg/Processed EEG'
