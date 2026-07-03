@@ -22,7 +22,7 @@ def seed_everything(seed=42):
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(seed)
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
+REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
