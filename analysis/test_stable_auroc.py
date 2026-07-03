@@ -205,8 +205,8 @@ def main():
             all_margins_stable.extend(np.array(margins)[stable_mask])
             all_gt_stable.extend(gt_B[stable_mask])
 
-    print(f"All AUROC: {compute_auroc(all_margins, all_gt):.4f}")
-    print(f"Stable AUROC: {compute_auroc(all_margins_stable, all_gt_stable):.4f}")
+    print(f"All AUROC: {compute_auroc(np.array(all_margins), np.array(all_gt)):.4f}")
+    print(f"Stable AUROC: {compute_auroc(np.array(all_margins_stable), np.array(all_gt_stable)):.4f}")
 
 if __name__ == "__main__":
     main()
