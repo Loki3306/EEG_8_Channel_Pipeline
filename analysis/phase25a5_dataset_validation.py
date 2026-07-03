@@ -219,10 +219,10 @@ def process_subject(mat_path, model, audio_cache, device, aasd_audio_dir):
         switch_events = []
         
         for ev_t, ev_lat in epoch_events:
-            if ev_t not in ['179', '184']:
+            if ev_t not in ['179', '184', '254', '255'] and audio_marker is None:
                 audio_marker = ev_t
                 trial_start_samples = ev_lat
-            else:
+            elif ev_t in ['179', '184']:
                 switch_events.append((ev_t, ev_lat))
                 
         if audio_marker is None:
@@ -408,6 +408,12 @@ def run_phase25a5(aasd_eeg_dir, aasd_audio_dir, checkpoint_path, out_dir):
         if len(s_m_B) > 0:
             subject_aurocs_B[subj] = compute_auroc(np.array(s_m_B), np.array(s_gt_B))
             
+    print(f"[INFO] Total processed trials across all subjects: {len(all_trajectories_B)}")
+    print(f"[INFO] Total windows evaluated (Hypothesis B): {len(m_all_B)}")
+    
+    if len(m_all_A) == 0:
+        print("[FAIL] 0 windows were collected! The AUROC computation will fall back to 0.50!")
+        
     m_all_A = np.array(m_all_A)
     gt_all_A = np.array(gt_all_A)
     auroc_A = compute_auroc(m_all_A, gt_all_A)
