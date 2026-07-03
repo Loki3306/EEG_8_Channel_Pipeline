@@ -316,7 +316,7 @@ def main():
         
     criterion = NegativePearsonLoss().to(device)
     optimizer = optim.AdamW(filter(lambda p: p.requires_grad, model.parameters()), lr=args.lr, weight_decay=args.weight_decay)
-    scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='max', factor=0.5, patience=3, verbose=True)
+    scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='max', factor=0.5, patience=3)
 
     history = {'train_auc': [], 'test_auc': [], 'train_pearson': [], 'test_pearson': []}
     
