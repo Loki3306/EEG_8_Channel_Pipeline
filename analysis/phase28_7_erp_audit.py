@@ -32,7 +32,7 @@ def extract_erp(mat_path):
         if ev_type.isdigit():
             val = int(ev_type)
             if 11 <= val <= 70:
-                lat = int(get_ev_attr(ev, 'latency', 1))
+                lat = int(get_ev_attr(ev, 'latency'))
                 audio_latencies.append(lat)
                 
     if not audio_latencies:
@@ -40,6 +40,8 @@ def extract_erp(mat_path):
         return
         
     print(f"Found {len(audio_latencies)} Audio Start Markers.")
+    print(f"First 3 latencies: {audio_latencies[:3]}")
+    print(f"EEG shape: {eeg_data.shape}, Max latency allowed: {eeg_data.shape[1]}")
     
     # Bandpass filter the EEG for ERPs (1-15 Hz is standard for AEPs)
     nyq = 0.5 * fs
