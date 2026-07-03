@@ -60,7 +60,7 @@ def generate_windows(trials, window_len=64, hop_len=8, transition_margin=32, mas
             env_l_w = env_l_full[start:end].clone()
             env_r_w = env_r_full[start:end].clone()
             
-            if current_state == 1:
+            if current_state == 'L':
                 X_att.append(env_l_w)
                 X_unatt.append(env_r_w)
             else:

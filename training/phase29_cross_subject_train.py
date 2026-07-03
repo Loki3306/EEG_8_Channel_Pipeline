@@ -215,9 +215,17 @@ def load_aasd_subject(mat_path, b, a, sel_idx, audio_dir):
         env_l, env_r = env_l[:min_len], env_r[:min_len]
         
         att, unatt = np.zeros_like(env_l), np.zeros_like(env_r)
-        if len(switch_points) == 0: switch_points = [('R', 0)]
         
-        current_state = switch_points[0][0]
+        if len(switch_points) == 0:
+            switch_points = [('R', 0)]
+            
+        # Determine the state BEFORE the first switch
+        if switch_points[0][1] > 0:
+            initial_state = 'R' if switch_points[0][0] == 'L' else 'L'
+        else:
+            initial_state = switch_points[0][0]
+            
+        current_state = initial_state
         prev_idx = 0
         for state, idx_64 in switch_points:
             if idx_64 > prev_idx:

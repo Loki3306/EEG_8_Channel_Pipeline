@@ -48,16 +48,23 @@ def generate_gt_state(t_array, raw_evs, target_speaker):
             else:
                 types.append('R' if ev_t in ['179', '254'] else 'L')
                 
-    if len(types) == 0:
+    if len(st_times) == 0:
         return gt
         
-    current_state = 1 if types[0] == 'R' else 0
+    # Infer initial state from the first switch
+    if st_times[0] > 0:
+        initial_state = 1 if types[0] == 'L' else 0
+    else:
+        initial_state = 1 if types[0] == 'R' else 0
+        
+    current_state = initial_state
     for i, t in enumerate(t_array):
         state = current_state
         for st, s_type in zip(st_times, types):
             if t >= st:
-                state = 1 if s_type == 'L' else 0
+                state = 1 if s_type == 'R' else 0
         gt[i] = state
+        
     return gt
 
 def main():
