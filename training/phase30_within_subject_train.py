@@ -233,11 +233,14 @@ def evaluate_model(model, loader, device):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--subject", type=str, default="S18", help="Target subject")
-    parser.add_argument("--checkpoint", type=str, default="", help="Path to KUL pretrained checkpoint")
-    parser.add_argument("--censor_margin", type=int, default=256, help="Samples to censor after switch (256=4s)")
-    parser.add_argument("--seed", type=int, default=42, help="Random seed")
-    parser.add_argument("--epochs", type=int, default=30, help="Training epochs")
+    parser.add_argument("--epochs", type=int, default=30)
+    parser.add_argument("--checkpoint", type=str, default="")
     parser.add_argument("--out_dir", type=str, default="results/phase30")
+    parser.add_argument("--censor_margin", type=int, default=256, help="Samples to censor after switch (256=4s)")
+    parser.add_argument("--freeze_encoder", action="store_true", help="Freeze spatial/temporal blocks and only train the head")
+    parser.add_argument("--lr", type=float, default=1e-3, help="Learning rate")
+    parser.add_argument("--weight_decay", type=float, default=1e-4, help="Weight decay for regularization")
+    parser.add_argument("--seed", type=int, default=42, help="Random seed")
     args = parser.parse_args()
 
     seed_everything(args.seed)
@@ -282,10 +285,9 @@ def main():
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     
     model = AADConformer(in_channels=8).to(device)
+    # Diagnostic Checkpoint Loading
     if args.checkpoint and os.path.exists(args.checkpoint):
         state_dict = torch.load(args.checkpoint, map_location=device)
-        
-        # Diagnostic Checkpoint Loading
         model_dict = model.state_dict()
         loaded_keys = []
         skipped_keys = []
@@ -304,10 +306,18 @@ def main():
             print(f"[DIAGNOSTIC] WARNING! Skipped {len(skipped_keys)} keys due to shape mismatch:")
             for k, s1, s2 in skipped_keys:
                 print(f"  --> {k}: Checkpoint shape {s1} != Model shape {s2}")
+                
+    # Encoder Freezing (Partial Fine-Tuning)
+    if args.freeze_encoder:
+        print("[INFO] Freezing Conformer encoder. Only training the final regression head.")
+        for name, param in model.named_parameters():
+            if 'head' not in name:
+                param.requires_grad = False
         
     criterion = NegativePearsonLoss().to(device)
-    optimizer = optim.AdamW(model.parameters(), lr=1e-3, weight_decay=1e-4)
-    
+    optimizer = optim.AdamW(filter(lambda p: p.requires_grad, model.parameters()), lr=args.lr, weight_decay=args.weight_decay)
+    scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='max', factor=0.5, patience=3, verbose=True)
+
     history = {'train_auc': [], 'test_auc': [], 'train_pearson': [], 'test_pearson': []}
     
     best_test_auc = 0.0
