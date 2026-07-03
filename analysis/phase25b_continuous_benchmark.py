@@ -217,6 +217,10 @@ def main():
             # Ground truth for Speaker B (Right = 1)
             gt_B = generate_gt_state(t_array, raw_evs, 'B')
             
+            switches_in_gt = np.sum(np.abs(np.diff(gt_B)) > 0)
+            if switches_in_gt > 0:
+                print(f"  [DEBUG] Trial {idx_ev} has {switches_in_gt} switches in gt_B!")
+            
             # Initialize Controller for this trial
             # Default baseline: InfiniteAccumulator
             engine = ContextAwarePolicyEngine(
