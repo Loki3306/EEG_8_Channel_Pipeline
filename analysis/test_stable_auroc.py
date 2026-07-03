@@ -11,7 +11,7 @@ import sys
 project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if project_root not in sys.path:
     sys.path.append(project_root)
-from models.conformer import AADConformer
+from models.aad_conformer import AADConformer
 
 def safe_corr_np(x, y, eps=1e-8):
     x_mean = x.mean(axis=1, keepdims=True)
