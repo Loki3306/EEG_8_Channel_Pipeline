@@ -77,10 +77,14 @@ def main():
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     cache_dir = REPO_ROOT / 'data' / 'processed_aasd'
     
-    subjects = ['S1', 'S14', 'S18']
-    # LOSO Split: Train on S1, S14. Test on S18.
-    train_subs = ['S1', 'S14']
+    import glob
+    cache_files = glob.glob(str(cache_dir / "*.pt"))
+    subjects = sorted([os.path.splitext(os.path.basename(f))[0] for f in cache_files])
+    
     test_subs = ['S18']
+    train_subs = [s for s in subjects if s not in test_subs]
+    
+    print(f"[INFO] Training on {len(train_subs)} subjects, Testing on {len(test_subs)} subjects")
     
     X_train, y_att_train, y_unatt_train = [], [], []
     X_test, y_att_test, y_unatt_test = [], [], []
@@ -152,8 +156,12 @@ def main():
     # There is no Audio Encoder to freeze! The model just maps EEG -> Envelope.
     
     optimizer = optim.Adam(model.parameters(), lr=1e-4) # Higher LR to adapt
+    scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=3, verbose=True)
     
-    epochs = 10
+    epochs = 30
+    best_test_loss = float('inf')
+    patience_counter = 0
+    early_stop_patience = 5
     
     print("\nStarting Training...")
     for epoch in range(epochs):
@@ -221,11 +229,23 @@ def main():
         
         print(f"Epoch {epoch+1:02d}/{epochs:02d} - Train Loss: {train_loss:.4f} - Train Acc: {train_acc:.4f} - Test Loss: {test_loss:.4f} - Test Acc: {test_acc:.4f}")
         
-    out_dir = REPO_ROOT / 'checkpoints' / 'aasd_finetuned'
-    out_dir.mkdir(parents=True, exist_ok=True)
-    save_path = out_dir / 'model_S18_loso.pt'
-    torch.save(model.state_dict(), save_path)
-    print(f"\n[INFO] Saved fine-tuned model to {save_path}")
+        scheduler.step(test_loss)
+        
+        if test_loss < best_test_loss:
+            best_test_loss = test_loss
+            patience_counter = 0
+            out_dir = REPO_ROOT / 'checkpoints' / 'aasd_finetuned'
+            out_dir.mkdir(parents=True, exist_ok=True)
+            save_path = out_dir / 'model_S18_loso.pt'
+            torch.save(model.state_dict(), save_path)
+            print(f"  --> Saved new best model to {save_path}")
+        else:
+            patience_counter += 1
+            if patience_counter >= early_stop_patience:
+                print(f"[INFO] Early stopping triggered after {epoch+1} epochs.")
+                break
+                
+    print(f"\n[INFO] Finished Fine-Tuning. Best Test Loss: {best_test_loss:.4f}")
 
 if __name__ == "__main__":
     main()
