@@ -52,14 +52,21 @@ def get_spatial_assignment(wav_path, env_a, env_b, target_fs=64):
     return 'a_is_left' if corr_a > corr_b else 'b_is_left'
 
 def load_aasd_subject_trials(sub_path, b, a, sel_idx, audio_dir, wav_dir):
-    mat = scipy.io.loadmat(sub_path)
-    data_all = mat['data']
-    events = mat['events']
-    audio_markers = mat['audio_markers'].flatten()
+    mat = scipy.io.loadmat(sub_path, squeeze_me=True, struct_as_record=False)
+    eeg_var = [k for k in mat.keys() if not k.startswith('__')][0]
+    data_all, events = mat[eeg_var].data, mat[eeg_var].event
     
     trials = []
-    for epoch_idx in range(1, data_all.shape[2] + 1):
-        audio_marker_val = int(audio_markers[epoch_idx - 1])
+    for epoch_idx in range(1, 61):
+        audio_marker_val = None
+        for ev in events:
+            if len(ev) >= 5:
+                t_str, epoch_val = str(ev[0]).strip(), str(ev[4]).strip()
+                if epoch_val == str(epoch_idx) and t_str.isdigit() and 11 <= int(t_str) <= 70:
+                    audio_marker_val = int(t_str)
+                    break
+        if audio_marker_val is None: continue
+        
         npz_path = os.path.join(audio_dir, f"{audio_marker_val}.npz")
         wav_path = os.path.join(wav_dir, f"mixed_{audio_marker_val - 10:03d}.wav")
         if not os.path.exists(npz_path): continue
