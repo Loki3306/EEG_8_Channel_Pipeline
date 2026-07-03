@@ -147,7 +147,7 @@ def run_inference(model, eeg_norm, env_l_1d, env_r_1d, win_sec, stride_sec, devi
     margins = corr_l - corr_r
     return np.array(times), margins
 
-def process_subject(mat_path, model, audio_cache, device):
+def process_subject(mat_path, model, audio_cache, device, aasd_audio_dir):
     subject_id = os.path.basename(os.path.dirname(mat_path))
     try:
         mat = scipy.io.loadmat(mat_path, squeeze_me=True, struct_as_record=False)
@@ -233,11 +233,17 @@ def process_subject(mat_path, model, audio_cache, device):
         except:
             continue
             
-        if marker_id not in audio_cache:
+        npz_path = os.path.join(aasd_audio_dir, f"{marker_id}.npz")
+        
+        if marker_id in audio_cache:
+            env_l_1d, env_r_1d = audio_cache[marker_id]
+        elif os.path.exists(npz_path):
+            data = np.load(npz_path)
+            env_l_1d = data['env_l']
+            env_r_1d = data['env_r']
+        else:
             continue
             
-        env_l_1d, env_r_1d = audio_cache[marker_id]
-        
         switch_times_sec = []
         for t, lat in switch_events:
             t_sec = (lat - trial_start_samples) / 128.0
@@ -343,7 +349,7 @@ def run_phase25a5(aasd_eeg_dir, aasd_audio_dir, checkpoint_path, out_dir):
         
     print(f"[INFO] Processing {len(mat_files)} subjects in parallel...")
     
-    def process_subject_wrapper(mat_path, audio_cache, checkpoint_path, idx, num_gpus):
+    def process_subject_wrapper(mat_path, audio_cache, checkpoint_path, idx, num_gpus, aasd_audio_dir):
         device_id = idx % num_gpus if num_gpus > 0 else 0
         device = torch.device(f'cuda:{device_id}' if num_gpus > 0 else 'cpu')
         
@@ -356,13 +362,13 @@ def run_phase25a5(aasd_eeg_dir, aasd_audio_dir, checkpoint_path, out_dir):
         model.to(device)
         model.eval()
         
-        return process_subject(mat_path, model, audio_cache, device)
+        return process_subject(mat_path, model, audio_cache, device, aasd_audio_dir)
 
     from joblib import Parallel, delayed
     n_workers = num_gpus * 4 if num_gpus > 0 else 4 # Maximize parallel workers per GPU
     
     results = Parallel(n_jobs=n_workers, backend="loky")(
-        delayed(process_subject_wrapper)(mat_files[i], audio_cache, checkpoint_path, i, num_gpus)
+        delayed(process_subject_wrapper)(mat_files[i], audio_cache, checkpoint_path, i, num_gpus, aasd_audio_dir)
         for i in range(len(mat_files))
     )
     
