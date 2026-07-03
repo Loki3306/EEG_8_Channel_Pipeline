@@ -20,34 +20,6 @@ def cross_corr(x, y):
     c = np.corrcoef(x, y)[0, 1]
     return c if not np.isnan(c) else 0.0
 
-def get_raw_field(ev, field_name):
-    # ABSOLUTELY NO ABSTRACTIONS OR FALLBACKS.
-    # We inspect EXACTLY what scipy.io gives us.
-    if hasattr(ev, field_name):
-        val = getattr(ev, field_name)
-    elif hasattr(ev, 'dtype') and field_name in ev.dtype.names:
-        val = ev[field_name]
-    elif isinstance(ev, np.void) and field_name in ev.dtype.names:
-        val = ev[field_name]
-    else:
-        # If it's a mat_struct array that got squeezed weirdly
-        try:
-            val = ev.__dict__[field_name]
-        except:
-            return None
-            
-    # scipy.io often wraps scalars in 1D arrays or nested arrays
-    if isinstance(val, np.ndarray):
-        if val.size == 1:
-            val = val.flat[0]
-        elif val.size == 0:
-            val = None
-            
-    # Sometimes it's a string, sometimes a number. Let's return as string if possible, or int/float
-    if isinstance(val, str):
-        return val.strip()
-    return val
-
 def main():
     print("==================================================")
     print("=== PHASE 28.19 FORENSIC GROUND-TRUTH VERIFIER ===")
@@ -73,59 +45,63 @@ def main():
     
     print("\n[Event Table Structure]")
     print(f"Type of events[0]: {type(events[0])}")
-    if hasattr(events[0], 'dtype'):
-        print(f"dtype names: {events[0].dtype.names}")
-    elif hasattr(events[0], '__dict__'):
-        print(f"__dict__ keys: {list(events[0].__dict__.keys())}")
+    
+    # We now know events[0] is an ndarray like ['19' 1 11 0 1]
+    # Let's print the first 20 to understand the mapping manually
+    print("\n[First 20 Events Raw Inspection]")
+    for i in range(min(20, len(events))):
+        print(f"Event {i:2d}: {events[i]}")
         
-    print("\nRaw inspection of events[0]:")
-    print(events[0])
+    # From the user's output: ['19' 1 11 0 1]
+    # Let's assume:
+    # [0] = type
+    # [1] = latency (samples relative to epoch start?)
+    # [2] = urevent?
+    # [3] = duration?
+    # [4] = epoch
+    
+    print("\n[Mapping Assumption]")
+    print("Assuming index 0 = type, index 1 = latency, index 4 = epoch")
     
     # 1. FIND TRIAL 1 AUDIO MARKER
     audio_marker_val = None
-    trial_start_latency = None
     
+    # We want Epoch 1. Let's find the audio marker for Epoch 1.
     for i, ev in enumerate(events):
-        t = get_raw_field(ev, 'type')
-        if t is not None:
-            t_str = str(t).strip()
-            if t_str.isdigit():
-                val = int(t_str)
-                if 11 <= val <= 70:
-                    lat = get_raw_field(ev, 'latency')
-                    print(f"\n[Audio Marker Found] Index {i}")
-                    print(f"├── Type: {t_str}")
-                    print(f"├── Raw Latency: {lat} (type: {type(lat)})")
-                    audio_marker_val = t_str
-                    trial_start_latency = float(lat)
-                    break
-                    
-    if trial_start_latency is None:
+        if len(ev) >= 5:
+            t_str = str(ev[0]).strip()
+            epoch_val = str(ev[4]).strip()
+            
+            if epoch_val == '1' and t_str.isdigit() and 11 <= int(t_str) <= 70:
+                lat = ev[1]
+                print(f"\n[Audio Marker Found] Index {i}")
+                print(f"├── Type: {t_str}")
+                print(f"├── Latency: {lat} (type: {type(lat)})")
+                print(f"├── Epoch: {epoch_val}")
+                audio_marker_val = t_str
+                break
+                
+    if audio_marker_val is None:
         print("CRITICAL ERROR: Could not find audio marker for Trial 1.")
         return
         
     # 2. FIND BUTTON EVENTS FOR TRIAL 1
-    # We look for 179, 184, 254, 255 that occur AFTER trial_start_latency
-    # and BEFORE the next audio marker (or trial_start_latency + 7680)
-    # Wait, the data matrix is (62, 7680, 60). 7680 samples = 60 seconds @ 128Hz.
-    print(f"\n[Button Events for Trial 1]")
-    print(f"├── Searching latencies between {trial_start_latency} and {trial_start_latency + 7680}")
+    print(f"\n[Button Events for Trial 1 (Epoch 1)]")
     
     trial_switches = []
     for ev in events:
-        t = get_raw_field(ev, 'type')
-        if t is not None:
-            t_str = str(t).strip()
-            if t_str in ['179', '184', '254', '255']:
-                lat = float(get_raw_field(ev, 'latency') or 0)
-                if trial_start_latency <= lat < trial_start_latency + 7680:
-                    rel_lat = lat - trial_start_latency
-                    rel_sec = rel_lat / 128.0
-                    print(f"├── Found {t_str} at absolute {lat:.1f} (relative {rel_lat:.1f} samples / {rel_sec:.2f}s)")
-                    trial_switches.append((t_str, rel_lat))
-                    
+        if len(ev) >= 5:
+            t_str = str(ev[0]).strip()
+            epoch_val = str(ev[4]).strip()
+            
+            if epoch_val == '1' and t_str in ['179', '184', '254', '255']:
+                lat = float(ev[1])
+                rel_sec = lat / 128.0
+                print(f"├── Found {t_str} at latency {lat:.1f} ({rel_sec:.2f}s)")
+                trial_switches.append((t_str, lat))
+                
     if len(trial_switches) == 0:
-        print("└── NO SWITCHES FOUND IN THIS WINDOW!")
+        print("└── NO SWITCHES FOUND IN THIS EPOCH!")
     
     # 3. LOAD AUDIO
     print(f"\n[Audio]")
@@ -145,13 +121,10 @@ def main():
     
     # 4. CACHE / TARGET RECONSTRUCTION
     print(f"\n[Cache]")
-    # We know data_all is (62, 7680, 60). Trial 1 is data_all[:, :, 0]
-    # But wait, did they align it perfectly so data_all[:, :, 0] matches the latencies?
-    # In EEGLAB, epoched data puts the epoch center at 0 latency usually, but let's assume it's pre-sliced.
+    # Trial 1 is data_all[:, :, 0]
     trial_eeg = data_all[:, :, 0]
     print(f"├── EEG window shape: {trial_eeg.shape}")
     
-    # Let's extract the correct channels and filter
     target_channels = ['T7', 'C2', 'FT8', 'P7', 'CPz', 'Fp1', 'TP8', 'C3']
     fallback_map = {'T7': 23, 'C2': 28, 'FT8': 22, 'P7': 41, 'CPz': 36, 'Fp1': 0, 'TP8': 40, 'C3': 25}
     sel_idx = [fallback_map[tc] for tc in target_channels]
@@ -164,7 +137,6 @@ def main():
     
     print(f"├── Processed EEG shape (1-8Hz, 64Hz, 8ch): {trial_eeg_8.shape}")
     
-    # Ensure lengths match
     min_len = min(trial_eeg_8.shape[1], len(env_l))
     trial_eeg_8 = trial_eeg_8[:, :min_len]
     env_l = env_l[:min_len]
