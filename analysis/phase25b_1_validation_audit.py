@@ -17,23 +17,31 @@ def get_ev_attr(e, attr_name, array_idx=0):
 
 def generate_gt_state(t_array, raw_evs, target_speaker):
     gt = np.zeros(len(t_array))
-    curr_speaker = target_speaker
-    ev_idx = 0
-    sorted_evs = sorted(raw_evs, key=lambda x: x[1])
-    
+    if len(raw_evs) == 0:
+        return gt
+        
+    st_times = []
+    types = []
+    for ev_t, ev_lat in raw_evs:
+        if ev_t in ['179', '184', '254', '255']:
+            st_times.append(ev_lat / 128.0)
+            if target_speaker == 'A':
+                types.append('L' if ev_t in ['179', '254'] else 'R')
+            else:
+                types.append('R' if ev_t in ['179', '254'] else 'L')
+                
+    if len(types) == 0:
+        return gt
+        
+    # If the first switch is to 'R' (meaning opposite of target), they must have been listening to target ('L') initially.
+    # In test_stable_auroc, 'L' -> 1, 'R' -> -1. Here we use 1 for True, 0 for False.
+    current_state = 1 if types[0] == 'R' else 0
     for i, t in enumerate(t_array):
-        while ev_idx < len(sorted_evs) and sorted_evs[ev_idx][1] <= (t * 64):
-            marker = sorted_evs[ev_idx][0]
-            if marker in ['179', '254']:
-                curr_speaker = 'A'
-            elif marker in ['184', '255']:
-                curr_speaker = 'B'
-            ev_idx += 1
-            
-        if curr_speaker == 'B':
-            gt[i] = 1
-        else:
-            gt[i] = 0
+        state = current_state
+        for st, s_type in zip(st_times, types):
+            if t >= st:
+                state = 1 if s_type == 'L' else 0
+        gt[i] = state
     return gt
 
 def main():
