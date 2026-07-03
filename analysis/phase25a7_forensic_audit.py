@@ -122,13 +122,16 @@ def main():
         current_state = 'L'
         
     # Load audio
-    cache_path = f"/kaggle/working/results/phase25a5/audio_cache/{int(audio_marker)}.npz"
+    cache_path_1 = f"/kaggle/working/results/phase25a5/audio_cache/{int(audio_marker)}.npz"
+    cache_path_2 = f"/kaggle/input/datasets/lokeshgile/aasd-audio-gammatones/{int(audio_marker)}.npz"
+    cache_path = cache_path_2 if os.path.exists(cache_path_2) else cache_path_1
+    
     if os.path.exists(cache_path):
         audio_cache = np.load(cache_path)
         env_l_1d = audio_cache['env_l']
         env_r_1d = audio_cache['env_r']
     else:
-        print(f"[INFO] Cache not found at {cache_path}. Extracting Gammatones dynamically...")
+        print(f"[INFO] Cache not found. Extracting Gammatones dynamically...")
         from data.extract_gammatone_envelopes import extract_true_gammatone_envelopes
         audio_file = f"/kaggle/input/datasets/lokeshgile/aasd-audio/Stimuli Audio/mixed_{int(audio_marker):03d}.wav"
         if not os.path.exists(audio_file):
