@@ -7,13 +7,14 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import Dataset, DataLoader
-from sklearn.metrics import roc_auc_score, balanced_accuracy_score
+from sklearn.metrics import roc_auc_score, balanced_accuracy_score, precision_recall_curve, auc, confusion_matrix
 import glob
 from pathlib import Path
 import time
 import random
 import argparse
-import torch.nn.functional as F
+import matplotlib.pyplot as plt
+import pandas as pd
 
 def seed_everything(seed=42):
     random.seed(seed)
@@ -21,32 +22,35 @@ def seed_everything(seed=42):
     torch.manual_seed(seed)
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(seed)
+        torch.backends.cudnn.deterministic = True
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-# Adjust path based on where it's executed
-if not os.path.exists('models') and os.path.exists('../models'):
-    sys.path.insert(0, '..')
+from models.aad_conformer import AADConformer
+from models.pearson_aad import NegativePearsonLoss
 
-from models.pearson_aad import PearsonAADModel, NegativePearsonLoss
+def pearson_corr(x, y, dim=-1):
+    x_centered = x - x.mean(dim=dim, keepdim=True)
+    y_centered = y - y.mean(dim=dim, keepdim=True)
+    cov = (x_centered * y_centered).sum(dim=dim)
+    var_x = (x_centered ** 2).sum(dim=dim)
+    var_y = (y_centered ** 2).sum(dim=dim)
+    return cov / torch.sqrt(var_x * var_y + 1e-8)
 
-class WindowedDataset(Dataset):
+class TrialDataset(Dataset):
     def __init__(self, trials, window_len=128, hop_len=64, censor_margin=256):
         self.windows = []
-        for trial in trials:
+        for trial_idx, trial in enumerate(trials):
             eeg = trial['eeg']
-            env_l = trial['env_l'].unsqueeze(0) # [1, T]
-            env_r = trial['env_r'].unsqueeze(0) # [1, T]
-            att = trial['att'].unsqueeze(0)     # [1, T]
-            unatt = trial['unatt'].unsqueeze(0) # [1, T]
+            att = trial['att'].unsqueeze(0)
+            unatt = trial['unatt'].unsqueeze(0)
             switch_points = trial.get('meta', {}).get('switch_points', [])
             
             for start in range(0, eeg.shape[1] - window_len + 1, hop_len):
                 end = start + window_len
                 
-                # CENSORING LOGIC: Drop window if it overlaps [s_idx, s_idx + censor_margin]
                 is_censored = False
                 for state, s_idx in switch_points:
                     if s_idx > 0:
@@ -61,21 +65,13 @@ class WindowedDataset(Dataset):
                 w_att = att[:, start:end]
                 w_unatt = unatt[:, start:end]
                 
-                # Removed window-level normalization for audio envelopes to preserve variance
-                
-                # Determine state for evaluation
-                mid_point = start + window_len // 2
-                current_state = switch_points[0][0]
-                for state, s_idx in switch_points:
-                    if mid_point >= s_idx: current_state = state
-                    
                 self.windows.append({
                     'eeg': w_eeg,
                     'att': w_att,
                     'unatt': w_unatt,
-                    'env_l': env_l[:, start:end],
-                    'env_r': env_r[:, start:end],
-                    'state': current_state
+                    'trial_idx': trial_idx,
+                    'start': start,
+                    'end': end
                 })
                 
     def __len__(self):
@@ -111,16 +107,16 @@ def load_aasd_subject_trials(mat_path, b, a, sel_idx, audio_dir):
                 if epoch_val == str(epoch_idx) and t_str in ['179', '184', '254', '255']:
                     abs_lat = float(ev[1])
                     rel_lat_128 = abs_lat - epoch_start_lat_128
-                    idx_64 = max(0, int(rel_lat_128 / 2.0) - 4) # Hardware lag (-62ms -> 4 samples)
+                    idx_64 = max(0, int(rel_lat_128 / 2.0) - 4)
                     switch_points.append(('R' if t_str in ['179', '254'] else 'L', idx_64))
         switch_points.sort(key=lambda x: x[1])
         
         trial_eeg = data_all[:, :, epoch_idx - 1]
-        trial_eeg = trial_eeg - trial_eeg.mean(axis=0, keepdims=True)
-        trial_eeg_filt = scipy.signal.filtfilt(b, a, trial_eeg, axis=1)
-        trial_eeg_8 = scipy.signal.resample_poly(trial_eeg_filt, 1, 2, axis=1)[sel_idx, 4:] # Hardware lag
         
-        # Global trial-level normalization (preserves spatial amplitude ratios)
+        # Trial-level global normalization to preserve spatial differences
+        trial_eeg = trial_eeg - trial_eeg.mean(axis=1, keepdims=True)
+        trial_eeg_filt = scipy.signal.filtfilt(b, a, trial_eeg, axis=1)
+        trial_eeg_8 = scipy.signal.resample_poly(trial_eeg_filt, 1, 2, axis=1)[sel_idx, 4:]
         trial_eeg_8 = trial_eeg_8 - trial_eeg_8.mean(axis=1, keepdims=True)
         trial_eeg_8 = trial_eeg_8 / (trial_eeg_8.std() + 1e-8)
         
@@ -159,69 +155,88 @@ def load_aasd_subject_trials(mat_path, b, a, sel_idx, audio_dir):
         })
     return trials
 
-def pearson_corr(x, y, dim=1):
-    x_centered = x - x.mean(dim=dim, keepdim=True)
-    y_centered = y - y.mean(dim=dim, keepdim=True)
-    cov = (x_centered * y_centered).sum(dim=dim)
-    var_x = (x_centered ** 2).sum(dim=dim)
-    var_y = (y_centered ** 2).sum(dim=dim)
-    return cov / torch.sqrt(var_x * var_y + 1e-8)
-
-def evaluate_model(model, val_loader, device):
+def evaluate_model(model, loader, device):
     model.eval()
     all_margins = []
-    all_labels = []
-    trial_preds = []
-    trial_labels = []
+    all_att_corr = []
+    all_unatt_corr = []
+    
+    trial_preds = {}
     
     with torch.no_grad():
-        for batch in val_loader:
+        for batch in loader:
             eeg = batch['eeg'].to(device)
             att = batch['att'].squeeze(1).to(device)
             unatt = batch['unatt'].squeeze(1).to(device)
-            states = batch['state']
+            trial_idx = batch['trial_idx'].numpy()
             
-            env_pred, _ = model(eeg, fs=64)
-            env_pred = env_pred.squeeze(1) # [B, T]
+            env_pred = model(eeg) # [B, T]
             
-            sim_att = pearson_corr(env_pred, att, dim=1)
-            sim_unatt = pearson_corr(env_pred, unatt, dim=1)
-            margin = (sim_att - sim_unatt).cpu().numpy()
+            sim_att = pearson_corr(env_pred, att, dim=-1).cpu().numpy()
+            sim_unatt = pearson_corr(env_pred, unatt, dim=-1).cpu().numpy()
+            margin = sim_att - sim_unatt
+            
+            all_margins.extend(margin)
+            all_att_corr.extend(sim_att)
+            all_unatt_corr.extend(sim_unatt)
             
             for i in range(len(margin)):
-                all_margins.append(margin[i])
-                all_labels.append(1) # We always mapped z_a to attended in forward pass
+                t_idx = trial_idx[i]
+                if t_idx not in trial_preds:
+                    trial_preds[t_idx] = []
+                trial_preds[t_idx].append(1 if margin[i] > 0 else 0)
                 
-                pred = 1 if margin[i] > 0 else 0
-                trial_preds.append(pred)
-                trial_labels.append(1)
-
-    auc = roc_auc_score(all_labels + [0]*len(all_labels), all_margins + [-m for m in all_margins])
-    bacc = balanced_accuracy_score(trial_labels + [0]*len(trial_labels), trial_preds + [1-p for p in trial_preds])
-    return auc, bacc, np.mean(all_margins)
+    # Window-level metrics
+    y_true = [1] * len(all_margins) + [0] * len(all_margins)
+    y_scores = list(all_margins) + [-m for m in all_margins]
+    
+    auc_val = roc_auc_score(y_true, y_scores)
+    precision, recall, _ = precision_recall_curve(y_true, y_scores)
+    auprc_val = auc(recall, precision)
+    
+    y_pred = [1 if s > 0 else 0 for s in y_scores]
+    bacc = balanced_accuracy_score(y_true, y_pred)
+    window_acc = np.mean([1 if m > 0 else 0 for m in all_margins])
+    
+    cm = confusion_matrix(y_true, y_pred)
+    
+    # Trial-level accuracy (majority vote)
+    trial_accs = []
+    for t_idx, preds in trial_preds.items():
+        trial_accs.append(1 if np.mean(preds) > 0.5 else 0)
+    trial_acc = np.mean(trial_accs) if trial_accs else 0.0
+    
+    return {
+        'mean_att': np.mean(all_att_corr),
+        'mean_unatt': np.mean(all_unatt_corr),
+        'mean_margin': np.mean(all_margins),
+        'auc': auc_val,
+        'auprc': auprc_val,
+        'bacc': bacc,
+        'window_acc': window_acc,
+        'trial_acc': trial_acc,
+        'margins': all_margins,
+        'cm': cm
+    }
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--subject", type=str, default="S18", help="Target subject for within-subject evaluation")
-    parser.add_argument("--split_mode", type=str, default="random", choices=["random", "chronological"], help="How to split trials")
+    parser.add_argument("--subject", type=str, default="S18", help="Target subject")
+    parser.add_argument("--checkpoint", type=str, default="", help="Path to KUL pretrained checkpoint")
     parser.add_argument("--censor_margin", type=int, default=256, help="Samples to censor after switch (256=4s)")
     parser.add_argument("--seed", type=int, default=42, help="Random seed")
     parser.add_argument("--epochs", type=int, default=30, help="Training epochs")
+    parser.add_argument("--out_dir", type=str, default="results/phase30")
     args = parser.parse_args()
 
     seed_everything(args.seed)
-    print("="*50)
-    print("=== PHASE 30.0 WITHIN-SUBJECT SANITY BENCHMARK ===")
-    print(f"=== SUBJECT: {args.subject} | SPLIT: {args.split_mode} | SEED: {args.seed} ===")
-    print(f"=== CENSOR MARGIN: {args.censor_margin} samples ({args.censor_margin/64:.1f}s) ===")
-    print("="*50 + "\n")
+    os.makedirs(args.out_dir, exist_ok=True)
     
     mat_path = glob.glob(f'/kaggle/input/datasets/lokeshgile/aasd-processed-eeg/Processed EEG/*/{args.subject}.mat')
     if not mat_path:
         mat_path = glob.glob(f'data/*/{args.subject}.mat')
-    
     if not mat_path:
-        print(f"ERROR: Could not find {args.subject}.mat. Please run on Kaggle.")
+        print(f"ERROR: Could not find {args.subject}.mat.")
         return
         
     mat_path = mat_path[0]
@@ -236,74 +251,141 @@ def main():
     channel_names = ['Fp1', 'Fp2', 'F7', 'F3', 'Fz', 'F4', 'F8', 'FC5', 'FC1', 'FC2', 'FC6', 'T7', 'C3', 'Cz', 'C4', 'T8', 'CP5', 'CP1', 'CP2', 'CP6', 'P7', 'P3', 'Pz', 'P4', 'P8', 'PO9', 'O1', 'Oz', 'O2', 'PO10', 'AF7', 'AF3', 'AF4', 'AF8', 'F5', 'F1', 'F2', 'F6', 'FT7', 'FC3', 'FC4', 'FT8', 'C5', 'C1', 'C2', 'C6', 'TP7', 'CP3', 'CPz', 'CP4', 'TP8', 'P5', 'P1', 'P2', 'P6', 'PO7', 'PO3', 'POz', 'PO4', 'PO8', 'O9', 'O10', 'Iz', 'Cz']
     sel_idx = [channel_names.index(tc) for tc in target_channels]
     
-    print(f"[INFO] Loading Subject {args.subject}...")
-    t0 = time.time()
     trials = load_aasd_subject_trials(mat_path, b, a, sel_idx, audio_dir)
-    print(f"[INFO] Loaded {len(trials)} trials in {time.time()-t0:.1f}s")
     
     if len(trials) == 0:
         print("ERROR: No trials loaded.")
         return
         
-    if args.split_mode == 'random':
-        random.shuffle(trials)
-        train_trials = trials[:40]
-        test_trials = trials[40:]
-    else: # chronological
-        train_trials = trials[:40]
-        test_trials = trials[40:]
-        
-    print(f"[INFO] Train Trials: {len(train_trials)} | Test Trials: {len(test_trials)}")
+    # Trial-level Chronological Split (80/20)
+    split_idx = int(len(trials) * 0.8)
+    train_trials = trials[:split_idx]
+    test_trials = trials[split_idx:]
     
-    train_ds = WindowedDataset(train_trials, censor_margin=args.censor_margin)
-    test_ds = WindowedDataset(test_trials, censor_margin=args.censor_margin)
+    train_ds = TrialDataset(train_trials, censor_margin=args.censor_margin)
+    test_ds = TrialDataset(test_trials, censor_margin=args.censor_margin)
     
     train_loader = DataLoader(train_ds, batch_size=64, shuffle=True)
     test_loader = DataLoader(test_ds, batch_size=64, shuffle=False)
-    print(f"[INFO] Train Windows: {len(train_ds)} | Test Windows: {len(test_ds)}")
     
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    print(f"[INFO] Using device: {device}")
     
-    # 1.3k Parameter PearsonAADModel with 1 subband
-    model = PearsonAADModel(num_subbands=1, rep_dim=64).to(device)
+    model = AADConformer(in_channels=8).to(device)
+    if args.checkpoint and os.path.exists(args.checkpoint):
+        state_dict = torch.load(args.checkpoint, map_location=device)
+        model.load_state_dict(state_dict, strict=False)
+        print(f"Loaded checkpoint: {args.checkpoint}")
+        
     criterion = NegativePearsonLoss().to(device)
     optimizer = optim.AdamW(model.parameters(), lr=1e-3, weight_decay=1e-4)
     
-    print("\n[INFO] Training...")
-    best_auc = 0.0
+    history = {'train_auc': [], 'test_auc': [], 'train_pearson': [], 'test_pearson': []}
+    
+    best_test_auc = 0.0
+    best_metrics = None
+    best_epoch = 0
     
     for epoch in range(1, args.epochs + 1):
         model.train()
-        train_loss = 0.0
-        t0 = time.time()
-        
         for batch in train_loader:
             eeg = batch['eeg'].to(device)
             att = batch['att'].squeeze(1).to(device)
             
             optimizer.zero_grad()
-            env_pred, _ = model(eeg, fs=64)
-            
-            loss = criterion(env_pred.squeeze(1), att)
+            env_pred = model(eeg)
+            loss = criterion(env_pred, att)
             loss.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
             optimizer.step()
             
-            train_loss += loss.item()
-            
-        train_loss /= len(train_loader)
+        train_metrics = evaluate_model(model, train_loader, device)
+        test_metrics = evaluate_model(model, test_loader, device)
         
-        auc, bacc, mean_margin = evaluate_model(model, test_loader, device)
+        history['train_auc'].append(train_metrics['auc'])
+        history['test_auc'].append(test_metrics['auc'])
+        history['train_pearson'].append(train_metrics['mean_att'])
+        history['test_pearson'].append(test_metrics['mean_att'])
         
-        new_best = ""
-        if auc > best_auc:
-            best_auc = auc
-            new_best = " [*]"
+        if test_metrics['auc'] >= best_test_auc:
+            best_test_auc = test_metrics['auc']
+            best_metrics = {'train': train_metrics, 'test': test_metrics}
+            best_epoch = epoch
             
-        print(f"Epoch {epoch:02d}/{args.epochs} | Loss: {train_loss:.4f} | Margin: {mean_margin:+.4f} | AUROC: {auc:.3f} | BAcc: {bacc:.3f} | Time: {time.time()-t0:.1f}s{new_best}")
+    # Produce Plots
+    plt.figure()
+    plt.plot(history['train_pearson'], label='Train Pearson')
+    plt.plot(history['test_pearson'], label='Test Pearson')
+    plt.legend()
+    plt.savefig(f"{args.out_dir}/pearson_curve.png")
+    plt.close()
+    
+    plt.figure()
+    plt.plot(history['train_auc'], label='Train AUROC')
+    plt.plot(history['test_auc'], label='Test AUROC')
+    plt.legend()
+    plt.savefig(f"{args.out_dir}/auroc_curve.png")
+    plt.close()
+    
+    plt.figure()
+    plt.bar(['Train Att', 'Train Unatt', 'Test Att', 'Test Unatt'], 
+            [best_metrics['train']['mean_att'], best_metrics['train']['mean_unatt'], 
+             best_metrics['test']['mean_att'], best_metrics['test']['mean_unatt']])
+    plt.savefig(f"{args.out_dir}/correlations.png")
+    plt.close()
+    
+    plt.figure()
+    m = np.array(best_metrics['test']['margins'])
+    plt.hist(m[m>0], bins=30, alpha=0.5, label='Correct (Margin>0)')
+    plt.hist(m[m<=0], bins=30, alpha=0.5, label='Incorrect (Margin<=0)')
+    plt.legend()
+    plt.savefig(f"{args.out_dir}/margin_dist.png")
+    plt.close()
 
-    print(f"\n[INFO] Training complete. Best Stable AUROC: {best_auc:.3f}")
+    # Save Confusion Matrix & Metrics
+    pd.DataFrame(best_metrics['test']['cm']).to_csv(f"{args.out_dir}/confusion_matrix.csv", index=False)
+    
+    metrics_df = pd.DataFrame([{
+        'Train Pearson': best_metrics['train']['mean_att'],
+        'Test Pearson': best_metrics['test']['mean_att'],
+        'Train AUROC': best_metrics['train']['auc'],
+        'Test AUROC': best_metrics['test']['auc'],
+        'Train BAcc': best_metrics['train']['bacc'],
+        'Test BAcc': best_metrics['test']['bacc'],
+        'Train AUPRC': best_metrics['train']['auprc'],
+        'Test AUPRC': best_metrics['test']['auprc']
+    }])
+    metrics_df.to_csv(f"{args.out_dir}/test_metrics.csv", index=False)
+
+    # Determine Conclusion
+    overfitting = "YES" if (best_metrics['train']['auc'] - best_metrics['test']['auc']) > 0.1 else "NO"
+    learning = "YES" if best_metrics['train']['auc'] > 0.55 else "NO"
+    validated = "YES" if (best_metrics['test']['auc'] > 0.55 and overfitting == "NO") else "NO"
+
+    # Stdout block
+    print("==================================================")
+    print("PHASE 30 RESULTS")
+    print("==================================================")
+    print(f"Subject             {args.subject}")
+    print(f"Train Trials        {len(train_trials)}")
+    print(f"Test Trials         {len(test_trials)}")
+    print(f"Training Windows    {len(train_ds)}")
+    print(f"Testing Windows     {len(test_ds)}")
+    print(f"Best Epoch          {best_epoch}")
+    print(f"Train Pearson       {best_metrics['train']['mean_att']:.4f}")
+    print(f"Test Pearson        {best_metrics['test']['mean_att']:.4f}")
+    print(f"Train AUROC         {best_metrics['train']['auc']:.4f}")
+    print(f"Test AUROC          {best_metrics['test']['auc']:.4f}")
+    print(f"Train Accuracy      {best_metrics['train']['trial_acc']:.4f}")
+    print(f"Test Accuracy       {best_metrics['test']['trial_acc']:.4f}")
+    print(f"Attended Corr       {best_metrics['test']['mean_att']:.4f}")
+    print(f"Unattended Corr     {best_metrics['test']['mean_unatt']:.4f}")
+    print(f"Generalization Gap  {best_metrics['train']['auc'] - best_metrics['test']['auc']:.4f}")
+    print("==================================================")
+    print("Conclusion:")
+    print(f"Learning:           {learning}")
+    print(f"Overfitting:        {overfitting}")
+    print(f"Pipeline validated: {validated}")
+    print("==================================================")
 
 if __name__ == "__main__":
     main()
