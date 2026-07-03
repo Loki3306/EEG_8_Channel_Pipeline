@@ -87,10 +87,17 @@ def extract_epoch_events(events, target_epoch):
     epoch_events = []
     for i in range(events.shape[0]):
         ev = events[i] if events.ndim > 1 else events
-        ep = int(ev[4] if events.ndim > 1 else getattr(ev, 'epoch', 0))
+        
+        if events.ndim > 1 and len(ev) >= 5:
+            ep = int(ev[4])
+            ev_t = str(ev[0]).strip()
+            ev_lat = float(ev[1])
+        else:
+            ep = int(getattr(ev, 'epoch', 0))
+            ev_t = str(getattr(ev, 'type', '')).strip()
+            ev_lat = float(getattr(ev, 'latency', 0))
+            
         if ep == target_epoch:
-            ev_t = str(ev[0] if events.ndim > 1 else getattr(ev, 'type', '')).strip()
-            ev_lat = float(ev[1] if events.ndim > 1 else getattr(ev, 'latency', 0))
             epoch_events.append((ev_t, ev_lat))
     return epoch_events
 
