@@ -203,7 +203,8 @@ def load_aasd_subject(mat_path, b, a, sel_idx, audio_dir):
         switch_points.sort(key=lambda x: x[1])
         
         trial_eeg = data_all[:, :, epoch_idx - 1]
-        trial_eeg = trial_eeg - trial_eeg.mean(axis=0, keepdims=True)
+        
+        # Removed CAR to preserve the official Mastoid referencing from AASD_processing.m
         trial_eeg_filt = scipy.signal.filtfilt(b, a, trial_eeg, axis=1)
         trial_eeg_8 = scipy.signal.resample_poly(trial_eeg_filt, 1, 2, axis=1)[sel_idx, 4:] # Hardware lag
         
