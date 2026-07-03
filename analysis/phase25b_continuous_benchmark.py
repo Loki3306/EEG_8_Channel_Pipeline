@@ -65,37 +65,40 @@ def compute_metrics(trace_df):
         'availability': len(avail) / len(trace_df) * 100 if len(trace_df) else 0,
     }
     
-    # Calculate Latencies
-    switches = (trace_df['ground_truth'] != trace_df['ground_truth'].shift(1)) & (trace_df.index > 0)
-    switch_points = trace_df[switches]
-    
+    # Calculate Latencies per trial
     latencies = []
     missed = 0
+    total_switches = 0
     
-    for _, sp in switch_points.iterrows():
-        ts = sp['timestamp_sec']
-        tgt = sp['ground_truth']
-        post_splice = trace_df[trace_df['timestamp_sec'] >= ts]
+    for trial_id, trial_df in trace_df.groupby('trial_id'):
+        switches = (trial_df['ground_truth'] != trial_df['ground_truth'].shift(1)) & (trial_df.index > trial_df.index[0])
+        switch_points = trial_df[switches]
+        total_switches += len(switch_points)
         
-        # Check if GT changes again before we lock
-        next_switches = post_splice[post_splice['ground_truth'] != tgt]
-        end_ts = next_switches.iloc[0]['timestamp_sec'] if not next_switches.empty else trace_df['timestamp_sec'].max()
-        
-        valid_period = post_splice[post_splice['timestamp_sec'] < end_ts]
-        lock = valid_period[valid_period['active_lock'] == tgt]
-        
-        if not lock.empty:
-            lat = lock.iloc[0]['timestamp_sec'] - ts
-            latencies.append(lat)
-        else:
-            missed += 1
+        for _, sp in switch_points.iterrows():
+            ts = sp['timestamp_sec']
+            tgt = sp['ground_truth']
+            post_splice = trial_df[trial_df['timestamp_sec'] >= ts]
             
+            # Check if GT changes again before we lock
+            next_switches = post_splice[post_splice['ground_truth'] != tgt]
+            end_ts = next_switches.iloc[0]['timestamp_sec'] if not next_switches.empty else trial_df['timestamp_sec'].max()
+            
+            valid_period = post_splice[post_splice['timestamp_sec'] < end_ts]
+            lock = valid_period[valid_period['active_lock'] == tgt]
+            
+            if not lock.empty:
+                lat = lock.iloc[0]['timestamp_sec'] - ts
+                latencies.append(lat)
+            else:
+                missed += 1
+                
     metrics['mean_switch_latency'] = np.mean(latencies) if latencies else np.nan
     metrics['missed_switches'] = missed
-    metrics['total_switches'] = len(switch_points)
+    metrics['total_switches'] = total_switches
     
     # False switches (locked to wrong stream)
-    # Count continuous wrong locks
+    # Count continuous wrong locks per trial
     trace_df['wrong_lock_block'] = (trace_df['active_lock'] != trace_df['ground_truth']) & trace_df['active_lock'].notna()
     trace_df['block_id'] = (trace_df['wrong_lock_block'] != trace_df['wrong_lock_block'].shift(1)).cumsum()
     false_switches = trace_df[trace_df['wrong_lock_block']]['block_id'].nunique()
@@ -270,6 +273,7 @@ def main():
                 continue
                 
             trace_df = pd.DataFrame(trace)
+            trace_df['trial_id'] = f"{subj}_{idx_ev}"
             trace_df['active_lock'] = trace_df['active_lock'].ffill()
             all_traces.append(trace_df)
             
