@@ -17,7 +17,7 @@ sys.path.insert(0, str(REPO_ROOT))
 from models.aad_conformer import AADConformer
 from training.train_conformer_loso import safe_corr_torch, custom_loss, safe_corr_np
 from training.phase29_cross_subject_train import WindowedDataset, load_aasd_subject
-from training.phase30_within_subject_train import NegativePearsonLoss, evaluate_trial_majority_vote, smart_load_checkpoint
+from training.phase30_within_subject_train import NegativePearsonLoss, smart_load_checkpoint
 
 def set_dropout(model, drop_rate=0.8):
     for name, module in model.named_modules():
