@@ -83,7 +83,10 @@ def main():
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     model = AADConformer(in_channels=8).to(device)
     ckpt = torch.load('/kaggle/input/datasets/lowkieee/eeg-aad-conformer-seed1-checkpoints/checkpoints/seed_1/model_S1.pt', map_location=device)
-    model.load_state_dict(ckpt['model_state_dict'])
+    if 'model_state_dict' in ckpt:
+        model.load_state_dict(ckpt['model_state_dict'])
+    else:
+        model.load_state_dict(ckpt)
     model.eval()
 
     eeg_dir = '/kaggle/input/datasets/lokeshgile/aasd-processed-eeg/Processed EEG'
