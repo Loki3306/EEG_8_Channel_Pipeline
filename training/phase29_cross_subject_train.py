@@ -54,14 +54,28 @@ def custom_loss(pred, target, mse_weight=0.5, corr_weight=0.5):
     return mse_weight * mse + corr_weight * corr_loss
 
 class WindowedDataset(Dataset):
-    def __init__(self, trials, window_len=128, hop_len=64):
+    def __init__(self, trials, window_len=128, hop_len=64, censor_margin=256):
         self.windows = []
         for trial in trials:
             eeg = trial['eeg']
             att = trial['att'][0]
             unatt = trial['unatt'][0]
+            switch_points = trial.get('meta', {}).get('switch_points', [])
             
             for start in range(0, eeg.shape[1] - window_len + 1, hop_len):
+                end = start + window_len
+                
+                # CENSORING LOGIC: Drop window if it overlaps [s_idx, s_idx + censor_margin]
+                is_censored = False
+                for state, s_idx in switch_points:
+                    if s_idx > 0:
+                        if (start < s_idx + censor_margin) and (end > s_idx):
+                            is_censored = True
+                            break
+                            
+                if is_censored:
+                    continue
+                    
                 w_eeg = eeg[:, start:start+window_len]
                 w_att = att[start:start+window_len]
                 
@@ -229,10 +243,16 @@ def load_aasd_subject(mat_path, b, a, sel_idx, audio_dir):
     return trials
 
 def main():
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--censor_margin", type=int, default=256, help="Samples to censor after switch (256=4s, 192=3s, 128=2s)")
+    args = parser.parse_args()
+
     seed_everything(42)
-    print("==================================================")
+    print("="*50)
     print("=== PHASE 29.0 CROSS-SUBJECT LOSO TRAINING =======")
-    print("==================================================\n")
+    print(f"=== CENSOR MARGIN: {args.censor_margin} samples ({args.censor_margin/64:.1f}s) ===")
+    print("="*50 + "\n")
     
     mat_files = glob.glob('/kaggle/input/datasets/lokeshgile/aasd-processed-eeg/Processed EEG/*/*.mat')
     mat_files.sort()
@@ -271,7 +291,7 @@ def main():
         train_trials.extend(load_aasd_subject(p, b, a, sel_idx, audio_dir))
     print(f"[INFO] Loaded {len(train_trials)} training trials in {time.time()-t0:.1f}s")
     
-    train_ds = WindowedDataset(train_trials)
+    train_ds = WindowedDataset(train_trials, window_len=128, hop_len=64, censor_margin=args.censor_margin)
     train_loader = DataLoader(train_ds, batch_size=64, shuffle=True)
     print(f"[INFO] Total Training Windows (2s): {len(train_ds)}")
     
