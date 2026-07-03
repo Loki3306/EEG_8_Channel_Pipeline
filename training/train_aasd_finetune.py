@@ -67,11 +67,9 @@ def chunk_aasd_data(eeg, audio_l, audio_r, raw_evs, window_sec=2.0, hop_sec=1.0,
         
     return chunks_eeg, chunks_att, chunks_unatt
 
-def contrastive_loss(pred_att, true_att, true_unatt, margin=0.1):
-    dist_att = 1.0 - torch.sum(pred_att * true_att, dim=-1) / (torch.norm(pred_att, dim=-1) * torch.norm(true_att, dim=-1) + 1e-8)
-    dist_unatt = 1.0 - torch.sum(pred_att * true_unatt, dim=-1) / (torch.norm(pred_att, dim=-1) * torch.norm(true_unatt, dim=-1) + 1e-8)
-    loss = torch.mean(torch.clamp(dist_att - dist_unatt + margin, min=0.0))
-    return loss
+def pearson_loss(pred_att, true_att):
+    cos_sim = torch.sum(pred_att * true_att, dim=-1) / (torch.norm(pred_att, dim=-1) * torch.norm(true_att, dim=-1) + 1e-8)
+    return -torch.mean(cos_sim)
 
 def main():
     print("[INFO] Starting Phase 28 Domain Adaptation: AASD Fine-Tuning")
@@ -161,6 +159,8 @@ def main():
     for epoch in range(epochs):
         model.train()
         train_loss = 0.0
+        train_correct = 0
+        train_total = 0
         
         for eeg, att, unatt in train_loader:
             eeg = eeg.to(device)
@@ -175,13 +175,21 @@ def main():
             att = att.squeeze(1)
             unatt = unatt.squeeze(1)
             
-            loss = contrastive_loss(out, att, unatt, margin=0.1)
+            loss = pearson_loss(out, att)
             loss.backward()
             optimizer.step()
             
             train_loss += loss.item() * eeg.size(0)
             
+            # Train Accuracy
+            with torch.no_grad():
+                dist_att = 1.0 - torch.sum(out * att, dim=-1) / (torch.norm(out, dim=-1) * torch.norm(att, dim=-1) + 1e-8)
+                dist_unatt = 1.0 - torch.sum(out * unatt, dim=-1) / (torch.norm(out, dim=-1) * torch.norm(unatt, dim=-1) + 1e-8)
+                train_correct += (dist_att < dist_unatt).sum().item()
+                train_total += eeg.size(0)
+            
         train_loss /= len(train_ds)
+        train_acc = train_correct / train_total
         
         # Eval
         model.eval()
@@ -199,7 +207,7 @@ def main():
                 att = att.squeeze(1)
                 unatt = unatt.squeeze(1)
                 
-                loss = contrastive_loss(out, att, unatt, margin=0.1)
+                loss = pearson_loss(out, att)
                 test_loss += loss.item() * eeg.size(0)
                 
                 # Accuracy
@@ -211,7 +219,7 @@ def main():
         test_loss /= len(test_ds)
         test_acc = correct / total
         
-        print(f"Epoch {epoch+1:02d}/{epochs:02d} - Train Loss: {train_loss:.4f} - Test Loss: {test_loss:.4f} - Test Acc: {test_acc:.4f}")
+        print(f"Epoch {epoch+1:02d}/{epochs:02d} - Train Loss: {train_loss:.4f} - Train Acc: {train_acc:.4f} - Test Loss: {test_loss:.4f} - Test Acc: {test_acc:.4f}")
         
     out_dir = REPO_ROOT / 'checkpoints' / 'aasd_finetuned'
     out_dir.mkdir(parents=True, exist_ok=True)
