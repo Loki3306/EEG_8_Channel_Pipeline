@@ -314,37 +314,7 @@ def main():
     best_metrics = None
     best_epoch = 0
     
-    # MINI OVERFIT TEST DIAGNOSTIC
-    print("\n[DIAGNOSTIC] RUNNING SINGLE-BATCH OVERFIT TEST (50 Epochs)")
-    overfit_batch = next(iter(train_loader))
-    
-    for epoch in range(1, 51):
-        model.train()
-        eeg = overfit_batch['eeg'].to(device)
-        att = overfit_batch['att'].squeeze(1).to(device)
         
-        optimizer.zero_grad()
-        env_pred = model(eeg)
-        
-        # Variance Diagnostic
-        pred_var = env_pred.var(dim=-1).mean().item()
-        
-        loss = criterion(env_pred, att)
-        loss.backward()
-        
-        # Gradient Diagnostic
-        spatial_grad = model.spatial_conv.weight.grad.norm().item() if model.spatial_conv.weight.grad is not None else 0.0
-        head_grad = model.head.weight.grad.norm().item() if model.head.weight.grad is not None else 0.0
-        
-        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
-        optimizer.step()
-        
-        if epoch % 10 == 0 or epoch == 1:
-            print(f"Overfit Epoch {epoch:02d} | Loss: {loss.item():.4f} | Pred Var: {pred_var:.6f} | Spatial Grad: {spatial_grad:.4f} | Head Grad: {head_grad:.4f}")
-            
-    print("[DIAGNOSTIC] Overfit test complete. Exiting diagnostic mode.\n")
-    sys.exit(0)
-    
     for epoch in range(1, args.epochs + 1):
         model.train()
         for batch in train_loader:
