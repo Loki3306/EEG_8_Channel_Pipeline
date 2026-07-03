@@ -265,15 +265,11 @@ def main():
         print(f"  --> Missing keys ({len(missing)}): {missing}")
         print(f"  --> Unexpected keys ({len(unexpected)})")
         
-    print("\n[INFO] Applying Transfer Learning (Freezing Deep Blocks)...")
+    print("\n[INFO] Applying Transfer Learning (Full Fine-Tuning)...")
     for name, param in model.named_parameters():
-        if 'spatial_conv' in name or 'spatial_norm' in name or 'head' in name:
-            param.requires_grad = True
-            print(f"  --> Training: {name}")
-        else:
-            param.requires_grad = False
+        param.requires_grad = True
             
-    optimizer = optim.Adam(filter(lambda p: p.requires_grad, model.parameters()), lr=1e-4)
+    optimizer = optim.Adam(model.parameters(), lr=1e-4)
     
     print("\n[INFO] Training...")
     epochs = 20
