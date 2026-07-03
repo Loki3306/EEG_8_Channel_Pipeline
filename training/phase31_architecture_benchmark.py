@@ -73,7 +73,7 @@ def run_benchmark():
     results = []
     
     print("\n--- 2. Commencing Benchmark ---")
-    epochs = 10
+    epochs = 50
     
     for name, model in models.items():
         print(f"\n==================================================")
