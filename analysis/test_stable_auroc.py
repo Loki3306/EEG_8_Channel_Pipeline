@@ -139,11 +139,8 @@ def main():
                 continue
                 
             audio_data = np.load(npz_path)
-            env_l_28 = audio_data['env_l']
-            env_r_28 = audio_data['env_r']
-            
-            env_l_1d = norm_env(env_l_28).mean(axis=0)
-            env_r_1d = norm_env(env_r_28).mean(axis=0)
+            env_l_1d = audio_data['env_l']
+            env_r_1d = audio_data['env_r']
 
             # Get trial events
             next_start_lat = trial_starts[idx_ev+1][2] if idx_ev+1 < len(trial_starts) else data_all.shape[1]
