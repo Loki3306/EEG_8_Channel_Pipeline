@@ -114,12 +114,24 @@ def main():
         data_all = eeg_obj.data
         events = eeg_obj.event
 
-        # Find boundaries
+        def get_ev_attr(e, attr_name, array_idx=0):
+            try:
+                if hasattr(e, attr_name):
+                    return getattr(e, attr_name)
+                if isinstance(e, np.ndarray):
+                    if e.size == 1 and hasattr(e.flat[0], attr_name):
+                        return getattr(e.flat[0], attr_name)
+                    return e[array_idx]
+            except:
+                pass
+            return ''
+
         trial_starts = []
         for i, ev in enumerate(events):
-            t_str = str(ev.type)
+            t_str = str(get_ev_attr(ev, 'type', 1))
             if t_str not in ['179', '184', '254', '255']:
-                trial_starts.append((i, t_str, ev.latency))
+                lat = float(get_ev_attr(ev, 'latency', 0))
+                trial_starts.append((i, t_str, lat))
 
         for idx_ev, (ev_idx, audio_marker, trial_start_lat) in enumerate(trial_starts):
             npz_path = os.path.join(audio_dir, f"{int(audio_marker)}.npz")
@@ -137,9 +149,11 @@ def main():
             next_start_lat = trial_starts[idx_ev+1][2] if idx_ev+1 < len(trial_starts) else data_all.shape[1]
             raw_evs = []
             for ev in events[ev_idx:]:
-                if ev.latency >= next_start_lat:
+                lat = float(get_ev_attr(ev, 'latency', 0))
+                if lat >= next_start_lat:
                     break
-                raw_evs.append((str(ev.type), ev.latency - trial_start_lat))
+                t_str = str(get_ev_attr(ev, 'type', 1))
+                raw_evs.append((t_str, lat - trial_start_lat))
 
             trial_data = data_all[:, int(trial_start_lat)-1:int(next_start_lat)-1]
             if len(trial_data.shape) == 3:
