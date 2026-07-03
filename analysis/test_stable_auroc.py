@@ -126,6 +126,14 @@ def main():
                 pass
             return ''
 
+        if len(data_all.shape) == 3:
+            data_all = data_all[:, :, 0]
+            
+        eeg_filt = signal.filtfilt(b, a, data_all, axis=1)
+        eeg_64 = signal.resample_poly(eeg_filt, 1, 2, axis=1)
+        eeg_8 = eeg_64[sel_idx, :]
+
+        # Find boundaries
         trial_starts = []
         for i, ev in enumerate(events):
             t_str = str(get_ev_attr(ev, 'type', 0)).strip()
@@ -147,6 +155,9 @@ def main():
 
             # Get trial events
             next_start_lat = trial_starts[idx_ev+1][2] if idx_ev+1 < len(trial_starts) else data_all.shape[1]
+            if next_start_lat - trial_start_lat < 128 * 10: # Skip trials < 10 seconds
+                continue
+                
             raw_evs = []
             for ev in events[ev_idx:]:
                 try:
@@ -158,21 +169,17 @@ def main():
                 except:
                     pass
 
-            trial_data = data_all[:, int(trial_start_lat)-1:int(next_start_lat)-1]
-            if len(trial_data.shape) == 3:
-                trial_data = trial_data[:, :, 0]
-                
-            eeg_filt = signal.filtfilt(b, a, trial_data, axis=1)
-            eeg_64 = signal.resample_poly(eeg_filt, 1, 2, axis=1)
-            eeg_8 = eeg_64[sel_idx, :]
+            start_64 = int(trial_start_lat // 2)
+            end_64 = int(next_start_lat // 2)
+            trial_eeg_8 = eeg_8[:, start_64:end_64]
 
             win_len = 128
             hop = 64
-            t_array = np.arange(0, min(eeg_8.shape[1], len(env_l_1d)) - win_len, hop) / 64.0 + 1.0
+            t_array = np.arange(0, min(trial_eeg_8.shape[1], len(env_l_1d)) - win_len, hop) / 64.0 + 1.0
             
             margins = []
-            for start in range(0, min(eeg_8.shape[1], len(env_l_1d)) - win_len, hop):
-                win_eeg = eeg_8[:, start:start+win_len]
+            for start in range(0, min(trial_eeg_8.shape[1], len(env_l_1d)) - win_len, hop):
+                win_eeg = trial_eeg_8[:, start:start+win_len]
                 win_eeg = (win_eeg - win_eeg.mean(axis=1, keepdims=True)) / (win_eeg.std(axis=1, keepdims=True) + 1e-8)
                 
                 win_l = env_l_1d[start:start+win_len]
