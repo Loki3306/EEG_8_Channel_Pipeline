@@ -76,8 +76,8 @@ def run_config(config_name, args, train_ds, test_trials, device):
             for t in test_trials:
                 eeg = t["eeg"].unsqueeze(0).to(device)
                 pred = model(eeg).squeeze(0).cpu().numpy()
-                wav_a = t["audio_a"].squeeze(0).cpu().numpy()
-                wav_b = t["audio_b"].squeeze(0).cpu().numpy()
+                wav_a = t["audio_att"].squeeze(0).cpu().numpy()
+                wav_b = t["audio_unatt"].squeeze(0).cpu().numpy()
                 att_corrs.append(safe_corr_np(pred, wav_a))
                 unatt_corrs.append(safe_corr_np(pred, wav_b))
 
