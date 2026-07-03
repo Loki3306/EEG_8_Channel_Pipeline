@@ -41,22 +41,22 @@ class EEGInception(nn.Module):
     def __init__(self, in_channels=8, scales=3, filters_per_scale=8, dropout_rate=0.25):
         super().__init__()
         
-        # Temporal kernels: e.g., 32, 16, 8 (for 64Hz: 0.5s, 0.25s, 0.125s)
-        kernel_sizes = [32, 16, 8][:scales]
+        # Temporal kernels: e.g., 31, 15, 7 (to preserve sequence length we need odd kernels)
+        kernel_sizes = [31, 15, 7][:scales]
         
         self.inception1 = InceptionBlock(1, filters_per_scale, kernel_sizes, in_channels)
         
         out_c1 = filters_per_scale * 2 * len(kernel_sizes)
         
         self.inception2 = nn.Sequential(
-            nn.Conv2d(out_c1, out_c1 // 2, (1, 8), padding=(0, 4), bias=False),
+            nn.Conv2d(out_c1, out_c1 // 2, (1, 7), padding=(0, 3), bias=False),
             nn.BatchNorm2d(out_c1 // 2),
             nn.ELU(),
             nn.Dropout(dropout_rate)
         )
         
         self.inception3 = nn.Sequential(
-            nn.Conv2d(out_c1 // 2, out_c1 // 4, (1, 4), padding=(0, 2), bias=False),
+            nn.Conv2d(out_c1 // 2, out_c1 // 4, (1, 3), padding=(0, 1), bias=False),
             nn.BatchNorm2d(out_c1 // 4),
             nn.ELU(),
             nn.Dropout(dropout_rate)
