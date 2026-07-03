@@ -33,14 +33,25 @@ def cross_corr(x, y):
     c = np.corrcoef(x, y)[0, 1]
     return c if not np.isnan(c) else 0.0
 
-def pearson_loss(pred, target):
-    pred = pred - pred.mean(dim=-1, keepdim=True)
-    target = target - target.mean(dim=-1, keepdim=True)
-    cov = (pred * target).sum(dim=-1)
-    var_pred = (pred ** 2).sum(dim=-1)
-    var_target = (target ** 2).sum(dim=-1)
-    corr = cov / torch.sqrt(var_pred * var_target + 1e-8)
-    return 1.0 - corr.mean()
+def safe_corr_torch(x, y, eps=1e-8):
+    x_mean = x.mean(dim=-1, keepdim=True)
+    y_mean = y.mean(dim=-1, keepdim=True)
+    x_centered = x - x_mean
+    y_centered = y - y_mean
+    
+    cov = (x_centered * y_centered).sum(dim=-1)
+    x_var = (x_centered ** 2).sum(dim=-1)
+    y_var = (y_centered ** 2).sum(dim=-1)
+    
+    corr = cov / (torch.sqrt(x_var * y_var) + eps)
+    return corr
+
+def custom_loss(pred, target, mse_weight=0.5, corr_weight=0.5):
+    mse = nn.functional.mse_loss(pred, target)
+    corr = safe_corr_torch(pred, target)
+    mean_corr = corr.mean()
+    corr_loss = 1.0 - mean_corr
+    return mse_weight * mse + corr_weight * corr_loss
 
 class WindowedDataset(Dataset):
     def __init__(self, trials, window_len=128, hop_len=64):
@@ -269,7 +280,7 @@ def main():
     for name, param in model.named_parameters():
         param.requires_grad = True
             
-    optimizer = optim.Adam(model.parameters(), lr=1e-4)
+    optimizer = optim.AdamW(model.parameters(), lr=1e-3, weight_decay=1e-4)
     
     print("\n[INFO] Training...")
     epochs = 20
@@ -286,8 +297,9 @@ def main():
             eeg_w, att_w = eeg_w.to(device), att_w.to(device)
             optimizer.zero_grad()
             pred, _ = model(eeg_w, return_features=True)
-            loss = pearson_loss(pred.squeeze(1), att_w)
+            loss = custom_loss(pred.squeeze(1), att_w, mse_weight=0.5, corr_weight=0.5)
             loss.backward()
+            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
             optimizer.step()
             train_loss += loss.item() * eeg_w.size(0)
             total += eeg_w.size(0)
