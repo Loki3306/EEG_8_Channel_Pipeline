@@ -156,7 +156,7 @@ def main():
     # There is no Audio Encoder to freeze! The model just maps EEG -> Envelope.
     
     optimizer = optim.Adam(model.parameters(), lr=1e-4) # Higher LR to adapt
-    scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=3, verbose=True)
+    scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=3)
     
     epochs = 30
     best_test_loss = float('inf')
