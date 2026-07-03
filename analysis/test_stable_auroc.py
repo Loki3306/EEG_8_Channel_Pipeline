@@ -7,7 +7,10 @@ import matplotlib.pyplot as plt
 from sklearn.metrics import roc_auc_score
 
 import sys
-sys.path.append('c:\\Users\\lokes\\OneDrive\\Documents\\GitHub\\EEG_Training_New')
+# Make it work regardless of where it is run from by adding the parent directory to sys.path
+project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if project_root not in sys.path:
+    sys.path.append(project_root)
 from models.conformer import AADConformer
 
 def safe_corr_np(x, y, eps=1e-8):
