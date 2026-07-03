@@ -182,7 +182,7 @@ def main():
             if is_switch:
                 tf_str = "True Positive" if active_lock == gt_B[i] else "False Positive"
                 
-            print(f"{i:<4} | {t_array[i]:<7.1f} | {int(gt_B[i]):<3} | {margin_B:<7.3f} | {res['confidence']:<5.2f} | {res['evidence']:<7.2f} | {res['decision']:<14} | {str(is_switch):<16} | {tf_str}")
+            print(f"{i:<4} | {t_array[i]:<7.1f} | {int(gt_B[i]):<3} | {margin_B:<7.3f} | {res['confidence']:<5.2f} | {res['evidence']:<7.2f} | {str(res['decision']):<14} | {str(is_switch):<16} | {tf_str}")
             
             trace.append({
                 'timestamp_sec': t_array[i],
