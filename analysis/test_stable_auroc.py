@@ -128,10 +128,13 @@ def main():
 
         trial_starts = []
         for i, ev in enumerate(events):
-            t_str = str(get_ev_attr(ev, 'type', 1))
-            if t_str not in ['179', '184', '254', '255']:
-                lat = float(get_ev_attr(ev, 'latency', 0))
-                trial_starts.append((i, t_str, lat))
+            t_str = str(get_ev_attr(ev, 'type', 0)).strip()
+            if t_str and t_str not in ['179', '184', '254', '255']:
+                try:
+                    lat = float(get_ev_attr(ev, 'latency', 1))
+                    trial_starts.append((i, t_str, lat))
+                except:
+                    pass
 
         for idx_ev, (ev_idx, audio_marker, trial_start_lat) in enumerate(trial_starts):
             npz_path = os.path.join(audio_dir, f"{int(audio_marker)}.npz")
@@ -146,11 +149,14 @@ def main():
             next_start_lat = trial_starts[idx_ev+1][2] if idx_ev+1 < len(trial_starts) else data_all.shape[1]
             raw_evs = []
             for ev in events[ev_idx:]:
-                lat = float(get_ev_attr(ev, 'latency', 0))
-                if lat >= next_start_lat:
-                    break
-                t_str = str(get_ev_attr(ev, 'type', 1))
-                raw_evs.append((t_str, lat - trial_start_lat))
+                try:
+                    lat = float(get_ev_attr(ev, 'latency', 1))
+                    if lat >= next_start_lat:
+                        break
+                    t_str = str(get_ev_attr(ev, 'type', 0)).strip()
+                    raw_evs.append((t_str, lat - trial_start_lat))
+                except:
+                    pass
 
             trial_data = data_all[:, int(trial_start_lat)-1:int(next_start_lat)-1]
             if len(trial_data.shape) == 3:
