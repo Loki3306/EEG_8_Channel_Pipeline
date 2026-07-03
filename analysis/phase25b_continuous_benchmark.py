@@ -259,6 +259,8 @@ def main():
                     # Since prob is for B (Right), SWITCH_LEFT means predicting B (1).
                     'active_lock': 1 if res['action'] == 'SWITCH_LEFT' else (0 if res['action'] == 'SWITCH_RIGHT' else None)
                 })
+            if not trace:
+                continue
                 
             trace_df = pd.DataFrame(trace)
             trace_df['active_lock'] = trace_df['active_lock'].ffill()
