@@ -171,8 +171,11 @@ def run_pairwise_softmax_no_norm():
     b, a = scipy.signal.butter(4, [1.0/64.0, 8.0/64.0], btype='band')
     sel_idx = [23, 28, 22, 41, 36, 0, 40, 25]
     audio_dir = '/kaggle/input/datasets/lokeshgile/aasd-audio-gammatones'
+    wav_dir = '/kaggle/input/datasets/lokeshgile/aasd-audio/Stimuli Audio'
     
-    trials = load_aasd_subject(sub_path, b, a, sel_idx, audio_dir)
+    # Load trials
+    print("\n--- 1. Loading Data for Phase 32D No-Norm Fix ---")
+    trials = load_aasd_subject_trials(sub_path, b, a, sel_idx, audio_dir, wav_dir)
     print(f"Loaded {len(trials)} trials from {os.path.basename(sub_path)}")
     
     # Split: 40 train, 10 test

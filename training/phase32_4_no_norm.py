@@ -50,7 +50,12 @@ def generate_windows(trials, window_len=64, hop_len=8, transition_margin=32, mas
                 
             # Determine center label
             mid_point = start + window_len // 2
-            current_state = switch_points[0][0]
+            if switch_points[0][1] > 0:
+                initial_state = 'R' if switch_points[0][0] == 'L' else 'L'
+            else:
+                initial_state = switch_points[0][0]
+                
+            current_state = initial_state
             for state, s_idx in switch_points:
                 if mid_point >= s_idx:
                     current_state = state
