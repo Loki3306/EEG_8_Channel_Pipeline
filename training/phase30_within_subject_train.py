@@ -230,6 +230,44 @@ def evaluate_model(model, loader, device):
         'cm': cm
     }
 
+def smart_load_checkpoint(model, checkpoint_path, device):
+    """
+    Loads a checkpoint, but if it is a 64-channel KUL checkpoint, it intelligently
+    extracts the exact 8 spatial filter weights corresponding to the AASD channels.
+    """
+    state_dict = torch.load(checkpoint_path, map_location=device)
+    model_dict = model.state_dict()
+    
+    # KUL to AASD channel mapping
+    # fallback_map = {'T7': 23, 'C2': 28, 'FT8': 22, 'P7': 41, 'CPz': 36, 'Fp1': 0, 'TP8': 40, 'C3': 25}
+    sel_idx = [23, 28, 22, 41, 36, 0, 40, 25]
+    
+    loaded_keys = []
+    skipped_keys = []
+    
+    for k, v in state_dict.items():
+        if k in model_dict:
+            if v.shape == model_dict[k].shape:
+                model_dict[k] = v
+                loaded_keys.append(k)
+            elif k == 'spatial_conv.weight' and v.shape[2] == 64 and model_dict[k].shape[2] == 8:
+                # [spatial_filters, 1, 64, 1] -> [spatial_filters, 1, 8, 1]
+                print(f"[SMART TRANSFER] Rescuing 64-channel KUL spatial filters for 8-channel AASD model...")
+                sliced_v = v[:, :, sel_idx, :]
+                model_dict[k] = sliced_v
+                loaded_keys.append(k)
+            else:
+                skipped_keys.append((k, v.shape, model_dict[k].shape))
+                
+    model.load_state_dict(model_dict)
+    print(f"Loaded checkpoint: {checkpoint_path}")
+    print(f"[DIAGNOSTIC] Successfully loaded {len(loaded_keys)} keys.")
+    if skipped_keys:
+        print(f"[DIAGNOSTIC] WARNING! Skipped {len(skipped_keys)} keys due to shape mismatch:")
+        for k, s1, s2 in skipped_keys:
+            print(f"  --> {k}: Checkpoint shape {s1} != Model shape {s2}")
+    return model
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--subject", type=str, default="S18", help="Target subject")
@@ -287,25 +325,7 @@ def main():
     model = AADConformer(in_channels=8).to(device)
     # Diagnostic Checkpoint Loading
     if args.checkpoint and os.path.exists(args.checkpoint):
-        state_dict = torch.load(args.checkpoint, map_location=device)
-        model_dict = model.state_dict()
-        loaded_keys = []
-        skipped_keys = []
-        for k, v in state_dict.items():
-            if k in model_dict:
-                if v.shape == model_dict[k].shape:
-                    model_dict[k] = v
-                    loaded_keys.append(k)
-                else:
-                    skipped_keys.append((k, v.shape, model_dict[k].shape))
-        
-        model.load_state_dict(model_dict)
-        print(f"Loaded checkpoint: {args.checkpoint}")
-        print(f"[DIAGNOSTIC] Successfully loaded {len(loaded_keys)} keys.")
-        if skipped_keys:
-            print(f"[DIAGNOSTIC] WARNING! Skipped {len(skipped_keys)} keys due to shape mismatch:")
-            for k, s1, s2 in skipped_keys:
-                print(f"  --> {k}: Checkpoint shape {s1} != Model shape {s2}")
+        model = smart_load_checkpoint(model, args.checkpoint, device)
                 
     # Encoder Freezing (Partial Fine-Tuning)
     if args.freeze_encoder:
