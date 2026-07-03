@@ -11,6 +11,14 @@ from sklearn.metrics import roc_auc_score, balanced_accuracy_score
 import glob
 from pathlib import Path
 import time
+import random
+
+def seed_everything(seed=42):
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed)
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
@@ -198,6 +206,7 @@ def load_aasd_subject(mat_path, b, a, sel_idx, audio_dir):
     return trials
 
 def main():
+    seed_everything(42)
     print("==================================================")
     print("=== PHASE 29.0 CROSS-SUBJECT LOSO TRAINING =======")
     print("==================================================\n")
@@ -253,8 +262,8 @@ def main():
         # Load weights (spatial_conv weight will naturally fail to load and remain randomly initialized because of shape mismatch [64, 1, 8, 1] vs [64, 1, 64, 1])
         missing, unexpected = model.load_state_dict(state_dict, strict=False)
         print(f"[INFO] Loaded KUL weights.")
-        print(f"  --> Missing keys: {len(missing)} (Expected: spatial_conv)")
-        print(f"  --> Unexpected keys: {len(unexpected)}")
+        print(f"  --> Missing keys ({len(missing)}): {missing}")
+        print(f"  --> Unexpected keys ({len(unexpected)})")
         
     print("\n[INFO] Applying Transfer Learning (Freezing Deep Blocks)...")
     for name, param in model.named_parameters():
@@ -268,6 +277,9 @@ def main():
     
     print("\n[INFO] Training...")
     epochs = 20
+    best_stable_auc = 0.0
+    os.makedirs('checkpoints', exist_ok=True)
+    
     for epoch in range(1, epochs + 1):
         model.train()
         train_loss = 0
@@ -290,10 +302,12 @@ def main():
         if epoch % 5 == 0:
             res = evaluate_audit(model, test_trials, device)
             print(f"   [TEST] Stable AUROC: {res['stable']['auc']:.3f} | Trans AUROC: {res['trans']['auc']:.3f}")
+            if res['stable']['auc'] > best_stable_auc:
+                best_stable_auc = res['stable']['auc']
+                torch.save(model.state_dict(), 'checkpoints/phase29_cross_subject_best.pth')
+                print(f"   [*] Saved new best model (Stable AUROC: {best_stable_auc:.3f})")
             
-    print("\n[INFO] Training complete. Saving model...")
-    os.makedirs('checkpoints', exist_ok=True)
-    torch.save(model.state_dict(), 'checkpoints/phase29_cross_subject_best.pth')
+    print(f"\n[INFO] Training complete. Best Stable AUROC: {best_stable_auc:.3f}")
 
 if __name__ == "__main__":
     main()
