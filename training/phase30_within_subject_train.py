@@ -178,8 +178,8 @@ def evaluate_model(model, val_loader, device):
     with torch.no_grad():
         for batch in val_loader:
             eeg = batch['eeg'].to(device)
-            att = batch['att'].to(device)
-            unatt = batch['unatt'].to(device)
+            att = batch['att'].squeeze(1).to(device)
+            unatt = batch['unatt'].squeeze(1).to(device)
             states = batch['state']
             
             env_pred, _ = model(eeg, fs=64)
@@ -281,7 +281,7 @@ def main():
         
         for batch in train_loader:
             eeg = batch['eeg'].to(device)
-            att = batch['att'].to(device)
+            att = batch['att'].squeeze(1).to(device)
             
             optimizer.zero_grad()
             env_pred, _ = model(eeg, fs=64)
