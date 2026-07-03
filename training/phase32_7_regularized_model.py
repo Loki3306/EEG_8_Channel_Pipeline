@@ -16,7 +16,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from models.contrastive_aad import ContrastiveMatchNet, pairwise_softmax_loss, AttentionPooling, ProjectionHead, EEGEncoder
+from models.contrastive_aad import ContrastiveMatchNet, AttentionPooling, ProjectionHead, EEGEncoder
 
 class ShallowAudioEncoder(nn.Module):
     def __init__(self, F2=16):
