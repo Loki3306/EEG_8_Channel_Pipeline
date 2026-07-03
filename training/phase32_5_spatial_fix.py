@@ -51,7 +51,7 @@ def get_spatial_assignment(wav_path, env_a, env_b, target_fs=64):
     
     return 'a_is_left' if corr_a > corr_b else 'b_is_left'
 
-def load_aasd_subject_trials(sub_path, b, a, sel_idx, audio_dir, wav_dir):
+def load_aasd_subject_trials(sub_path, b, a, audio_dir, wav_dir):
     mat = scipy.io.loadmat(sub_path, squeeze_me=True, struct_as_record=False)
     eeg_var = [k for k in mat.keys() if not k.startswith('__')][0]
     data_all, events = mat[eeg_var].data, mat[eeg_var].event
@@ -85,7 +85,7 @@ def load_aasd_subject_trials(sub_path, b, a, sel_idx, audio_dir, wav_dir):
         
         trial_eeg = data_all[:, :, epoch_idx - 1]
         trial_eeg_filt = scipy.signal.filtfilt(b, a, trial_eeg, axis=1)
-        trial_eeg_8 = scipy.signal.resample_poly(trial_eeg_filt, 1, 2, axis=1)[sel_idx, 4:]
+        trial_eeg_ds = scipy.signal.resample_poly(trial_eeg_filt, 1, 2, axis=1)[:, 4:]
         
         audio_data = np.load(npz_path)
         env_a, env_b = audio_data['env_l'][:-4], audio_data['env_r'][:-4]
@@ -96,9 +96,9 @@ def load_aasd_subject_trials(sub_path, b, a, sel_idx, audio_dir, wav_dir):
         else:
             env_l, env_r = env_b, env_a
             
-        min_len = min(trial_eeg_8.shape[1], len(env_l))
+        min_len = min(trial_eeg_ds.shape[1], len(env_l))
         trials.append({
-            'eeg': torch.from_numpy(trial_eeg_8[:, :min_len]).float(),
+            'eeg': torch.from_numpy(trial_eeg_ds[:, :min_len]).float(),
             'env_l': torch.from_numpy(env_l[:min_len]).float(),
             'env_r': torch.from_numpy(env_r[:min_len]).float(),
             'meta': {'switch_points': switch_points}
@@ -176,13 +176,12 @@ def run_pairwise_softmax_no_norm():
     sub_path = next((p for p in mat_files if 'S18' in p), mat_files[0])
     
     b, a = scipy.signal.butter(4, [1.0/64.0, 8.0/64.0], btype='band')
-    sel_idx = [23, 28, 22, 41, 36, 0, 40, 25]
     audio_dir = '/kaggle/input/datasets/lokeshgile/aasd-audio-gammatones'
     wav_dir = '/kaggle/input/datasets/lokeshgile/aasd-audio/Stimuli Audio'
     
     # Load trials
     print("\n--- 1. Loading Data for Phase 32D No-Norm Fix ---")
-    trials = load_aasd_subject_trials(sub_path, b, a, sel_idx, audio_dir, wav_dir)
+    trials = load_aasd_subject_trials(sub_path, b, a, audio_dir, wav_dir)
     print(f"Loaded {len(trials)} trials from {os.path.basename(sub_path)}")
     
     # Split: 40 train, 10 test
@@ -204,7 +203,10 @@ def run_pairwise_softmax_no_norm():
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print(f"Device: {device}")
     
-    model = ContrastiveMatchNet().to(device)
+    num_eeg_channels = trials[0]['eeg'].shape[0]
+    print(f"Using {num_eeg_channels} EEG channels.")
+    
+    model = ContrastiveMatchNet(eeg_channels=num_eeg_channels).to(device)
     optimizer = optim.AdamW(model.parameters(), lr=1e-3, weight_decay=1e-3)
     scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=150)
     

@@ -106,9 +106,9 @@ class AudioEncoder(nn.Module):
         return x
 
 class ContrastiveMatchNet(nn.Module):
-    def __init__(self):
+    def __init__(self, eeg_channels=8):
         super().__init__()
-        self.eeg_enc = EEGEncoder()
+        self.eeg_enc = EEGEncoder(in_channels=eeg_channels)
         self.aud_enc = AudioEncoder()
         
     def forward(self, eeg, audio_att, audio_unatt):
