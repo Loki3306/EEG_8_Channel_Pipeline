@@ -273,7 +273,7 @@ def main():
                 continue
                 
             trace_df = pd.DataFrame(trace)
-            trace_df['trial_id'] = f"{subj}_{idx_ev}"
+            trace_df['trial_id'] = f"{os.path.basename(mf)}_{idx_ev}"
             trace_df['active_lock'] = trace_df['active_lock'].ffill()
             all_traces.append(trace_df)
             
