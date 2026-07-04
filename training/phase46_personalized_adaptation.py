@@ -91,7 +91,7 @@ _global_kul_conformer = None
 def get_cached_kul_conformer():
     global _global_kul_conformer
     if _global_kul_conformer is None:
-        pretrained = AADConformer(channels=64, embed_dim=64).to('cpu')
+        pretrained = AADConformer(in_channels=64, embed_dim=64).to('cpu')
         ckpt_path = REPO_ROOT / 'conformer_checkpoints_seed1.zip'
         import zipfile, io
         with zipfile.ZipFile(ckpt_path, 'r') as z:
