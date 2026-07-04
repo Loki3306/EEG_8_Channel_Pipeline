@@ -251,9 +251,21 @@ def main():
         
         # Fine-Tune
         print(f"  -> [Stage 2] Calibrating on {calibration_trials} trials of {test_subject}...")
-        calib_optimizer = optim.AdamW(model.parameters(), lr=1e-4, weight_decay=1e-2) # Very small LR
+        
+        # Freeze Temporal Stem (we only want to adapt Spatial Anatomy & Decoder)
+        for param in model.temporal_conv.parameters():
+            param.requires_grad = False
+        for param in model.temporal_norm.parameters():
+            param.requires_grad = False
+            
+        calib_optimizer = optim.AdamW(filter(lambda p: p.requires_grad, model.parameters()), lr=1e-4, weight_decay=1e-2)
         
         model.train()
+        # CRITICAL: Freeze BatchNorm running stats during tiny-batch calibration!
+        for m in model.modules():
+            if isinstance(m, nn.BatchNorm2d) or isinstance(m, nn.BatchNorm1d):
+                m.eval()
+                
         calib_epochs = 5
         for epoch in range(1, calib_epochs + 1):
             epoch_loss = 0.0
