@@ -112,6 +112,13 @@ def get_cached_kul_conformer():
                     checkpoint = torch.load(io.BytesIO(f.read()), map_location='cpu', weights_only=False)
                     state_dict = checkpoint.get('model_state_dict', checkpoint)
                     
+        # Handle 64-channel to 8-channel mapping
+        spatial_keys = [k for k in state_dict.keys() if 'spatial_conv.weight' in k]
+        for sk in spatial_keys:
+            w = state_dict[sk]
+            if w.shape[2] == 64:
+                state_dict[sk] = w[:, :, PHYSICAL_8_CHANNELS, :]
+                
         new_state_dict = {k[7:] if k.startswith('module.') else k: v for k, v in state_dict.items()}
         pretrained.load_state_dict(new_state_dict, strict=False)
         _global_kul_conformer = pretrained
@@ -235,12 +242,13 @@ def precompute_subject_covariances(cache_dir, subject_ids, device):
     subj_covs = {}
     for subj in subject_ids:
         cached = torch.load(cache_dir / f"{subj}_processed.pt", weights_only=False)
-        calib_raw = cached['raw'][:CALIBRATION_TRIALS]
+        # Use all 40 standard training trials to form the global cross-subject prior
+        prior_raw = cached['raw'][:40]
         
         ZtZ_subj = np.zeros((64*(MAX_LAG+1), 64*(MAX_LAG+1)), dtype=np.float32)
         ZtY_subj = np.zeros(64*(MAX_LAG+1), dtype=np.float32)
         
-        for tr in calib_raw:
+        for tr in prior_raw:
             eeg_full = tr['eeg'].numpy()
             eeg = (eeg_full - eeg_full.mean(axis=1, keepdims=True)) / (eeg_full.std(axis=1, keepdims=True) + 1e-8)
             z_numpy = get_trial_z(model, eeg, device)
@@ -304,8 +312,17 @@ def run_unsupervised_continual_learning(cache_dir, subject_ids, device):
         print(f"   [Zero-Shot (Generalized)] AUROC: {zs_auroc:.4f}")
         
         # 3. Supervised Calibration (Initial Fitting Session)
-        # Adds the subject's 5 trials to the Generalized Prior
-        ZtZ_calib_only, ZtY_calib_only = subj_covs[subj]
+        ZtZ_calib_only = np.zeros_like(ZtZ_prior)
+        ZtY_calib_only = np.zeros_like(ZtY_prior)
+        for tr in calib_raw:
+            eeg_full = tr['eeg'].numpy()
+            eeg = (eeg_full - eeg_full.mean(axis=1, keepdims=True)) / (eeg_full.std(axis=1, keepdims=True) + 1e-8)
+            z_numpy = get_trial_z(model, eeg, device)
+            att, _ = build_ground_truth_envelope(tr)
+            ztz, zty = build_ridge_covariance(z_numpy, att)
+            ZtZ_calib_only += ztz
+            ZtY_calib_only += zty
+            
         ZtZ_fitted = ZtZ_prior + ZtZ_calib_only
         ZtY_fitted = ZtY_prior + ZtY_calib_only
         
