@@ -267,6 +267,15 @@ def run_loso_validation():
         model = NeuralRidgeDecoder(in_channels=C, lags=max_lag).to(device)
         model.load_analytical_weights(W_analytical)
         
+        # PRE-TRAINING EVALUATION (Pure Classical Ridge)
+        model.eval()
+        with torch.no_grad():
+            auroc_base, _, _, _ = run_test_suite(
+                model, subject_data[test_sub]['trials'], selected_channels, device, 
+                max_lag, hop_len, window_len, "NORMAL", 0.0
+            )
+        print(f"  -> PRE-TRAIN (Pure Ridge) AUROC: {auroc_base:.4f}")
+        
         dataset = TensorDataset(train_X_nn, train_Y_nn)
         dataloader = DataLoader(dataset, batch_size=4096, shuffle=True)
         
@@ -274,12 +283,17 @@ def run_loso_validation():
         model.train()
         
         for epoch in range(1, 16): 
+            epoch_loss = 0.0
             for bx, by in dataloader:
                 optimizer.zero_grad()
                 pred = model(bx)
                 loss = pearson_loss(pred, by)
                 loss.backward()
                 optimizer.step()
+                epoch_loss += loss.item()
+                
+            if epoch == 15:
+                print(f"  -> Final Neural Epoch Loss: {epoch_loss / len(dataloader):.4f}")
                 
         # 4. Falsification Testing
         model.eval()

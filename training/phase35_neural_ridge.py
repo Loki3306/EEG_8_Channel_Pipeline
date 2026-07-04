@@ -81,7 +81,7 @@ def safe_corr_torch(x, y, eps=1e-8):
     x_var = (x_centered ** 2).sum(dim=-1)
     y_var = (y_centered ** 2).sum(dim=-1)
     
-    corr = cov / (torch.sqrt(x_var * y_var) + eps)
+    corr = cov / torch.sqrt(x_var * y_var + eps)
     return corr
 
 def pearson_loss(pred, target):
