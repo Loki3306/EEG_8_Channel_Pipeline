@@ -229,16 +229,16 @@ def main():
     print(f"Device: {device}")
     
     # Kaggle vs Local Paths
-    if (Path('/kaggle/working').exists()):
-        cache_dir = Path('/kaggle/input/datasets/lokeshgile/aasd-processed-eeg/Processed EEG/S1').parent
-        subject_ids = [f'S{i}' for i in range(1, 19)]
-    else:
-        cache_dir = REPO_ROOT / 'processed_eeg'
-        subject_ids = [f'S{i}' for i in range(1, 19)]
-        
+    cache_dir = Path('/kaggle/working/eeg_cache') if Path('/kaggle/working').exists() else REPO_ROOT / 'processed_eeg'
+    
     if not cache_dir.exists():
-        print(f"Cache directory {cache_dir} not found. Ensure dataset is mounted.")
+        print(f"Cache directory {cache_dir} not found. Run Phase 41 first to generate cache.")
         return
+        
+    subject_ids = []
+    for pt_file in cache_dir.glob("*_processed.pt"):
+        subject_ids.append(pt_file.name.split('_')[0])
+    subject_ids.sort()
         
     run_native_eegnet(cache_dir, subject_ids, device)
 
