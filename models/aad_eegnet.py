@@ -8,7 +8,7 @@ class AAD_EEGNet(nn.Module):
     We use causal padding to ensure no future information leaks into the predictions,
     which is essential for simulating real-world online decoding.
     """
-    def __init__(self, in_channels=8, F1=8, D=2, F2=16, temporal_kernel=64, max_lag=24):
+    def __init__(self, in_channels=8, F1=32, D=2, F2=64, temporal_kernel=64, max_lag=24):
         super(AAD_EEGNet, self).__init__()
         
         self.F1 = F1
@@ -24,7 +24,7 @@ class AAD_EEGNet(nn.Module):
         self.spatial_conv = nn.Conv2d(F1, F1 * D, kernel_size=(in_channels, 1), groups=F1, bias=False)
         self.bn2 = nn.BatchNorm2d(F1 * D)
         self.elu = nn.ELU()
-        self.dropout1 = nn.Dropout(0.25)
+        self.dropout1 = nn.Dropout(0.0)
         
         # Block 2: Separable Conv
         # Depthwise
@@ -32,7 +32,7 @@ class AAD_EEGNet(nn.Module):
         # Pointwise
         self.separable_point = nn.Conv2d(F1 * D, F2, kernel_size=(1, 1), bias=False)
         self.bn3 = nn.BatchNorm2d(F2)
-        self.dropout2 = nn.Dropout(0.25)
+        self.dropout2 = nn.Dropout(0.0)
         
         # Decoder: Map F2 features to 1D scalar (envelope prediction)
         # We use a 1D Conv as a causal ridge decoder equivalent.

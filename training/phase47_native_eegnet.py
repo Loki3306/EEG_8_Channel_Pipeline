@@ -182,13 +182,16 @@ def run_native_eegnet(cache_dir, subject_ids, device):
         train_loader = torch.utils.data.DataLoader(train_ds, batch_size=BATCH_SIZE, shuffle=True, num_workers=0)
         
         model = AAD_EEGNet(in_channels=8, max_lag=MAX_LAG).to(device)
-        optimizer = torch.optim.AdamW(model.parameters(), lr=LR, weight_decay=WEIGHT_DECAY)
+        optimizer = torch.optim.AdamW(model.parameters(), lr=LR, weight_decay=0.0)
         scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=EPOCHS)
+        
+        mse_criterion = torch.nn.MSELoss()
         
         model.train()
         print("   Training Model...")
         for epoch in range(EPOCHS):
             epoch_loss = 0.0
+            epoch_corr = 0.0
             for X, y in train_loader:
                 X = X.to(device)
                 y = y.to(device)
@@ -200,17 +203,20 @@ def run_native_eegnet(cache_dir, subject_ids, device):
                 y_aligned = y[:, MAX_LAG:]
                 pred_aligned = pred[:, MAX_LAG:]
                 
-                # Loss is 1 - Pearson Correlation
-                corr = safe_corr_torch(pred_aligned, y_aligned)
-                loss = (1.0 - corr).mean()
+                # Loss is MSE + 0.1 * (1 - Pearson Correlation)
+                corr = safe_corr_torch(pred_aligned, y_aligned).mean()
+                mse = mse_criterion(pred_aligned, y_aligned)
+                loss = mse + 0.1 * (1.0 - corr)
                 
                 loss.backward()
                 optimizer.step()
                 epoch_loss += loss.item()
+                epoch_corr += corr.item()
                 
             scheduler.step()
             if (epoch + 1) % 5 == 0 or epoch == EPOCHS - 1:
-                print(f"      Epoch {epoch+1:02d}/{EPOCHS} | Loss: {epoch_loss/len(train_loader):.4f}")
+                avg_corr = epoch_corr / len(train_loader)
+                print(f"      Epoch {epoch+1:02d}/{EPOCHS} | Loss: {epoch_loss/len(train_loader):.4f} | Corr: {avg_corr:.4f}")
                 
         # Evaluate Zero-Shot on Test Subject
         model.eval()
