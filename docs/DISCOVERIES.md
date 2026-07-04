@@ -130,3 +130,7 @@
 ### D-22: Internal vs Output Events
 - **Discovery**: Phase 17.2 metrics counted internal controller transitions (every 46.875ms). Phase 17.3 revealed these don't represent what a user hears — many "switches" are sub-second internal oscillations that never reach the audio output. True UX metrics require an Output State Machine that collapses to 1-second stable states.
 - **Source**: Phase 17.3 analysis output
+
+## Transfer Learning Constraints (Phase 39)
+**Zero-shot transfer across datasets hits a hard ceiling.**
+Even with precise neuroanatomical matching of 8 physical channels between BioSemi (KUL) and Neuroscan (AASD), a frozen latent backbone (trained on KUL) achieves only ~57.5% AUROC on AASD. Furthermore, attempting to bridge this gap by fine-tuning the latents via a \ResidualLatentAdapter\ provides almost negligible improvement (57.3% -> 57.5%). This strongly implies that the true hardware bottleneck is the *spatial filtering layer*, not the temporal processing layer. To achieve cross-dataset transfer, spatial adaptation is required, not just latent adaptation.
