@@ -358,7 +358,7 @@ def run_unsupervised_continual_learning(cache_dir, subject_ids, device):
             z_numpy = get_trial_z(model, eeg, device)
             att, _ = build_ground_truth_envelope(tr)
             
-            calib_X.append(torch.from_numpy(eeg).float().unsqueeze(0).to(device)[:, PHYSICAL_8_CHANNELS, :])
+            calib_X.append(torch.from_numpy(eeg).float().unsqueeze(0).to(device))
             calib_Y.append(torch.from_numpy(att).float().unsqueeze(0).to(device))
             
             ztz, zty = build_ridge_covariance(z_numpy, att)
