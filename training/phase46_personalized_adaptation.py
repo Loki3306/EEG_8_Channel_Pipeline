@@ -43,13 +43,38 @@ def safe_pearson(x, y):
         return 0.0
     return np.corrcoef(x, y)[0, 1]
 
+def safe_corr_torch(x, y):
+    vx = x - torch.mean(x)
+    vy = y - torch.mean(y)
+    cost = torch.sum(vx * vy)
+    denom = torch.sqrt(torch.sum(vx ** 2) * torch.sum(vy ** 2))
+    if denom < 1e-8:
+        return torch.tensor(0.0, device=x.device)
+    return cost / denom
+
 class NeuralRidgeHybrid(nn.Module):
     def __init__(self, pretrained_conformer, selected_channels, embed_dim=64, max_lag=24):
         super().__init__()
         self.selected_channels = selected_channels
         self.max_lag = max_lag
+        
+        # Frozen Backbone
         self.backbone = pretrained_conformer
+        for p in self.backbone.parameters():
+            p.requires_grad = False
+            
         self.ridge_decoder = nn.Conv1d(embed_dim, 1, kernel_size=max_lag + 1, bias=False)
+        for p in self.ridge_decoder.parameters():
+            p.requires_grad = False
+            
+        self.residual_adapter = nn.Sequential(
+            nn.Conv1d(embed_dim, embed_dim, kernel_size=1),
+            nn.SiLU(),
+            nn.Conv1d(embed_dim, embed_dim, kernel_size=1)
+        )
+        nn.init.zeros_(self.residual_adapter[-1].weight)
+        nn.init.zeros_(self.residual_adapter[-1].bias)
+        self.alpha = nn.Parameter(torch.tensor(0.0))
 
     def extract_features(self, x):
         T = x.size(-1)
@@ -82,8 +107,16 @@ class NeuralRidgeHybrid(nn.Module):
 
     def forward(self, x):
         x_8ch = x[:, self.selected_channels, :]
-        z = self.extract_features(x_8ch)
-        z_lagged = self._build_lagged_tensor(z)
+        if self.training:
+            z = self.extract_features(x_8ch)
+        else:
+            with torch.no_grad():
+                z = self.extract_features(x_8ch)
+                
+        z_res = self.residual_adapter(z)
+        z_combined = z + self.alpha * z_res
+        
+        z_lagged = self._build_lagged_tensor(z_combined)
         out = self.ridge_decoder(z_lagged)
         return out.squeeze(1)
 
@@ -314,28 +347,91 @@ def run_unsupervised_continual_learning(cache_dir, subject_ids, device):
         # 3. Supervised Calibration (Initial Fitting Session)
         ZtZ_calib_only = np.zeros_like(ZtZ_prior)
         ZtY_calib_only = np.zeros_like(ZtY_prior)
+        
+        # Prepare tensors for backprop
+        calib_X = []
+        calib_Y = []
+        
         for tr in calib_raw:
             eeg_full = tr['eeg'].numpy()
             eeg = (eeg_full - eeg_full.mean(axis=1, keepdims=True)) / (eeg_full.std(axis=1, keepdims=True) + 1e-8)
             z_numpy = get_trial_z(model, eeg, device)
             att, _ = build_ground_truth_envelope(tr)
+            
+            calib_X.append(torch.from_numpy(eeg).float().unsqueeze(0).to(device)[:, PHYSICAL_8_CHANNELS, :])
+            calib_Y.append(torch.from_numpy(att).float().unsqueeze(0).to(device))
+            
             ztz, zty = build_ridge_covariance(z_numpy, att)
             ZtZ_calib_only += ztz
             ZtY_calib_only += zty
             
         # The Generalized Prior is built from 680 trials (17 subjects * 40).
-        # If we just add it to the 5 Calibration trials, it completely washes out personalization.
-        # We scale it down to act as a weak prior equivalent to ~15 trials.
         PRIOR_WEIGHT = 15.0 / (17.0 * 40.0)
-        
         ZtZ_fitted = (ZtZ_prior * PRIOR_WEIGHT) + ZtZ_calib_only
         ZtY_fitted = (ZtY_prior * PRIOR_WEIGHT) + ZtY_calib_only
         
         W_fitted = solve_ridge(ZtZ_fitted, ZtY_fitted, LAMBDA_RIDGE)
         model.load_analytical_weights(W_fitted)
         
+        # Fine-tune the Residual Adapter using backprop (Spatial Calibration)
+        model.train()
+        optimizer = torch.optim.AdamW([
+            {'params': model.residual_adapter.parameters(), 'lr': 1e-3},
+            {'params': [model.alpha], 'lr': 1e-2}
+        ], weight_decay=1e-2)
+        
+        for epoch in range(10):
+            for x, y in zip(calib_X, calib_Y):
+                optimizer.zero_grad()
+                pred = model(x)
+                
+                # Align Y for temporal convolution delay
+                y_aligned = y[:, MAX_LAG:]
+                pred_aligned = pred
+                
+                loss = 1.0 - safe_corr_torch(pred_aligned.squeeze(), y_aligned.squeeze()).mean()
+                if not torch.isnan(loss):
+                    loss.backward()
+                    optimizer.step()
+                    
+        model.eval()
+        
+        # Re-extract latents after spatial adapter tuning for the online RLS baseline
+        ZtZ_fitted = np.zeros_like(ZtZ_prior)
+        ZtY_fitted = np.zeros_like(ZtY_prior)
+        for tr in calib_raw:
+            eeg_full = tr['eeg'].numpy()
+            eeg = (eeg_full - eeg_full.mean(axis=1, keepdims=True)) / (eeg_full.std(axis=1, keepdims=True) + 1e-8)
+            with torch.no_grad():
+                z = model.extract_features(torch.from_numpy(eeg).float().unsqueeze(0).to(device)[:, PHYSICAL_8_CHANNELS, :])
+                z_res = model.residual_adapter(z)
+                z_combined = z + model.alpha * z_res
+                z_numpy = z_combined.squeeze(0).cpu().numpy()
+                
+            att, _ = build_ground_truth_envelope(tr)
+            ztz, zty = build_ridge_covariance(z_numpy, att)
+            ZtZ_fitted += ztz
+            ZtY_fitted += zty
+            
+        ZtZ_fitted += (ZtZ_prior * PRIOR_WEIGHT)
+        ZtY_fitted += (ZtY_prior * PRIOR_WEIGHT)
+        
+        W_fitted = solve_ridge(ZtZ_fitted, ZtY_fitted, LAMBDA_RIDGE)
+        model.load_analytical_weights(W_fitted)
+        
+        # Cache evaluation latents using the fine-tuned spatial adapter
         calib_sa, calib_su = [], []
-        for (tr, eeg, z_numpy) in eval_cached_z:
+        eval_cached_z = []
+        for tr in eval_raw:
+            eeg_full = tr['eeg'].numpy()
+            eeg = (eeg_full - eeg_full.mean(axis=1, keepdims=True)) / (eeg_full.std(axis=1, keepdims=True) + 1e-8)
+            with torch.no_grad():
+                z = model.extract_features(torch.from_numpy(eeg).float().unsqueeze(0).to(device)[:, PHYSICAL_8_CHANNELS, :])
+                z_res = model.residual_adapter(z)
+                z_combined = z + model.alpha * z_res
+                z_numpy = z_combined.squeeze(0).cpu().numpy()
+            eval_cached_z.append((tr, eeg, z_numpy))
+            
             sa, su, _, _, _ = simulate_trial_unsupervised(model, tr, device, z_cached=z_numpy)
             calib_sa.extend(sa)
             calib_su.extend(su)
