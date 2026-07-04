@@ -41,7 +41,7 @@ class HybridTransferDecoder(nn.Module):
         self.max_lag = max_lag
         
         # We need a temporal Conv1d (Ridge)
-        self.ridge_decoder = nn.Conv1d(embed_dim, 1, kernel_size=max_lag, bias=False)
+        self.ridge_decoder = nn.Conv1d(embed_dim, 1, kernel_size=max_lag + 1, bias=False)
         
         # A tiny residual adapter for fast fine-tuning on the latent space
         self.residual_adapter = nn.Sequential(
@@ -77,11 +77,14 @@ class HybridTransferDecoder(nn.Module):
         return x # [B, 64, T]
 
     def _build_lagged_tensor(self, x):
-        return F.pad(x, (self.max_lag - 1, 0))
+        return F.pad(x, (self.max_lag, 0))
 
     def load_analytical_weights(self, W):
+        W_reshaped = W.reshape(64, self.max_lag + 1) # [Channels, Lags]
+        # Reverse the lag dimension for PyTorch causal convolution
+        W_pytorch = np.flip(W_reshaped, axis=1).copy()
         with torch.no_grad():
-            self.ridge_decoder.weight.copy_(torch.from_numpy(W).float().unsqueeze(0).unsqueeze(0))
+            self.ridge_decoder.weight.copy_(torch.from_numpy(W_pytorch).float().unsqueeze(0))
 
     def forward(self, x):
         # x: [B, 62, T] -> Downselect to 8 physical channels
