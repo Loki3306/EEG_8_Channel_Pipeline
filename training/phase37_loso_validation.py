@@ -104,8 +104,20 @@ def run_test_suite(model, test_trials, selected_channels, device, max_lag, hop_l
             att_w = att[start:end]
             unatt_w = unatt[start:end]
             
-            c_a = np.corrcoef(pred_w, att_w)[0, 1]
-            c_u = np.corrcoef(pred_w, unatt_w)[0, 1]
+            # Use safe Pearson correlation to prevent RuntimeWarning when variance is 0
+            var_pred = np.var(pred_w)
+            var_att = np.var(att_w)
+            var_unatt = np.var(unatt_w)
+            
+            if var_pred > 1e-8 and var_att > 1e-8:
+                c_a = np.corrcoef(pred_w, att_w)[0, 1]
+            else:
+                c_a = np.nan
+                
+            if var_pred > 1e-8 and var_unatt > 1e-8:
+                c_u = np.corrcoef(pred_w, unatt_w)[0, 1]
+            else:
+                c_u = np.nan
             
             if not np.isnan(c_a) and not np.isnan(c_u):
                 sim_att.append(c_a)
