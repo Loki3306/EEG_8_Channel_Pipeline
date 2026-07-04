@@ -26,6 +26,7 @@ class NativeAASDConformer(nn.Module):
     def __init__(self, channels=8, embed_dim=64, max_lag=24):
         super().__init__()
         self.max_lag = max_lag
+        self.selected_channels = [0, 2, 5, 13, 23, 31, 41, 49]
         self.backbone = AADConformer(in_channels=channels, embed_dim=embed_dim)
         
         # Neural Ridge Decoder
@@ -41,8 +42,11 @@ class NativeAASDConformer(nn.Module):
         return F.pad(x, (self.max_lag, 0))
         
     def forward(self, x):
+        # Slice to 8 physical channels
+        x_8ch = x[:, self.selected_channels, :]
+        
         # AADConformer returns (B, embed_dim, T) by default
-        z = self.backbone(x)
+        z = self.backbone(x_8ch)
         z_lagged = self._build_lagged_tensor(z)
         out = self.ridge_decoder(z_lagged)
         return out.squeeze(1)
