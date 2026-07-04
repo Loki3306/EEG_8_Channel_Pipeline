@@ -91,14 +91,27 @@ _global_kul_conformer = None
 def get_cached_kul_conformer():
     global _global_kul_conformer
     if _global_kul_conformer is None:
-        pretrained = AADConformer(in_channels=64, embed_dim=64).to('cpu')
-        ckpt_path = REPO_ROOT / 'conformer_checkpoints_seed1.zip'
-        import zipfile, io
-        with zipfile.ZipFile(ckpt_path, 'r') as z:
-            pt_files = [f for f in z.namelist() if f.endswith('.pt')]
-            pt_files.sort()
-            with z.open(pt_files[-1]) as f:
-                state_dict = torch.load(io.BytesIO(f.read()), map_location='cpu', weights_only=False)
+        pretrained = AADConformer(in_channels=8).to('cpu')
+        
+        kaggle_ckpt = Path('/kaggle/input/datasets/lowkieee/eeg-aad-conformer-seed1-checkpoints/checkpoints/seed_1/model_S1.pt')
+        local_ckpt = REPO_ROOT / 'conformer_loso_results' / 'checkpoints' / 'seed_123' / 'model_S1.pt'
+        
+        if kaggle_ckpt.exists():
+            checkpoint = torch.load(kaggle_ckpt, map_location='cpu', weights_only=False)
+            state_dict = checkpoint.get('model_state_dict', checkpoint)
+        elif local_ckpt.exists():
+            checkpoint = torch.load(local_ckpt, map_location='cpu', weights_only=False)
+            state_dict = checkpoint.get('model_state_dict', checkpoint)
+        else:
+            ckpt_path = REPO_ROOT / 'conformer_checkpoints_seed1.zip'
+            import zipfile, io
+            with zipfile.ZipFile(ckpt_path, 'r') as z:
+                pt_files = [f for f in z.namelist() if f.endswith('.pt')]
+                pt_files.sort()
+                with z.open(pt_files[-1]) as f:
+                    checkpoint = torch.load(io.BytesIO(f.read()), map_location='cpu', weights_only=False)
+                    state_dict = checkpoint.get('model_state_dict', checkpoint)
+                    
         new_state_dict = {k[7:] if k.startswith('module.') else k: v for k, v in state_dict.items()}
         pretrained.load_state_dict(new_state_dict, strict=False)
         _global_kul_conformer = pretrained
