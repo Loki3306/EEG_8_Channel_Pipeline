@@ -358,10 +358,14 @@ def run_transfer_learning():
     
     # 3. Personalized Fine-Tuning
     # We fine-tune ONLY the Residual Adapter (to slightly adjust the latents to the new subject's skull)
-    train_X_nn = torch.stack([trial['eeg'] for trial in train_trials])
+    train_X_nn = []
     train_Y_nn = []
     
     for trial in train_trials:
+        eeg_full = trial['eeg'].numpy()
+        eeg_full = (eeg_full - eeg_full.mean(axis=1, keepdims=True)) / (eeg_full.std(axis=1, keepdims=True) + 1e-8)
+        train_X_nn.append(torch.from_numpy(eeg_full).float())
+        
         env_l = trial['env_l'].numpy()
         env_r = trial['env_r'].numpy()
         switch_points = trial['meta']['switch_points']
@@ -391,6 +395,7 @@ def run_transfer_learning():
         train_Y_nn.append(torch.from_numpy(att).float())
         
     train_Y_nn = torch.stack(train_Y_nn)
+    train_X_nn = torch.stack(train_X_nn)
     
     dataset = TensorDataset(train_X_nn, train_Y_nn)
     dataloader = DataLoader(dataset, batch_size=4, shuffle=True)
