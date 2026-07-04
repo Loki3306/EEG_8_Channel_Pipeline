@@ -229,7 +229,10 @@ def run_transfer_learning():
     checkpoint = torch.load(ckpt_path, map_location=device, weights_only=True)
     
     # Handle DataParallel prefix if necessary
-    state_dict = checkpoint['model_state_dict']
+    if 'model_state_dict' in checkpoint:
+        state_dict = checkpoint['model_state_dict']
+    else:
+        state_dict = checkpoint
     new_state_dict = {}
     for k, v in state_dict.items():
         name = k[7:] if k.startswith('module.') else k
