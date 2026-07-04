@@ -423,7 +423,7 @@ def run_layerwise_study():
             auroc, acc, _, _ = run_test_suite(model, test_trials, device, max_lag, hop_len, window_len, "NORMAL")
             print(f"   Test AUROC: {auroc:.4f}")
             results.append((config_name, auroc))
-        all_subject_results[config_name].append(auroc)
+            all_subject_results[config_name].append(auroc)
         
     print('\n=======================================================')
     print(' SUMMARY: OVERALL RESULTS (18 SUBJECTS)')
