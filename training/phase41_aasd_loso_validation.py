@@ -295,11 +295,14 @@ def run_loso_validation():
         # Build Train Set (17 Subjects)
         train_data = []
         
+        # Calculate Analytical Ridge on Train Subjects
         print("  -> Computing Universal Analytical Ridge (Train Subjects Only)...")
         temp_model = LayerwiseAdaptationModel(load_clean_backbone(), PHYSICAL_8_CHANNELS, embed_dim=64, max_lag=max_lag).to(device)
         temp_model.eval()
         
-        Z_train_list, Y_train_list = [], []
+        num_features = 64 * (max_lag + 1)
+        ZtZ = np.zeros((num_features, num_features), dtype=np.float32)
+        ZtY = np.zeros(num_features, dtype=np.float32)
         
         for sid in subject_ids:
             if sid != test_subject:
@@ -311,18 +314,18 @@ def run_loso_validation():
                         eeg_tensor = x.unsqueeze(0).to(device)
                         eeg_8ch = eeg_tensor[:, PHYSICAL_8_CHANNELS, :]
                         z = temp_model.extract_features(eeg_8ch).squeeze(0).cpu().numpy()
-                        Z = build_lagged_matrix(z, max_lag)
-                        Z_train_list.append(Z)
-                        Y_train_list.append(y.numpy())
+                        Z = build_lagged_matrix(z, max_lag).astype(np.float32)
+                        y_aligned = y.numpy()[max_lag:].astype(np.float32)
+                        
+                        ZtZ += Z.T @ Z
+                        ZtY += Z.T @ y_aligned
                 
                 del cached
                 
-        Z_train = np.vstack(Z_train_list)
-        Y_train = np.concatenate(Y_train_list)
         lambda_reg = 1e4
-        I = np.eye(Z_train.shape[1])
-        W_analytical = np.linalg.inv(Z_train.T @ Z_train + lambda_reg * I) @ (Z_train.T @ Y_train)
-        del Z_train_list, Y_train_list, Z_train, Y_train, temp_model
+        I = np.eye(num_features, dtype=np.float32)
+        W_analytical = np.linalg.inv(ZtZ + lambda_reg * I) @ ZtY
+        del ZtZ, ZtY, temp_model
         gc.collect()
         
         # Custom collate because variable lengths
