@@ -240,7 +240,7 @@ def run_layerwise_study():
     window_len = 64 * 5
     hop_len = 64 * 1
     
-    target_subject = 'S18'
+    target_subject = 'S1'
     target_path = next(p for p in mat_files if target_subject in os.path.basename(p))
     
     print(f"\n--- 1. Loading AASD Dataset ({target_subject}) ---")
