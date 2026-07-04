@@ -42,6 +42,8 @@ class HybridTransferDecoder(nn.Module):
         
         # We need a temporal Conv1d (Ridge)
         self.ridge_decoder = nn.Conv1d(embed_dim, 1, kernel_size=max_lag + 1, bias=False)
+        for param in self.ridge_decoder.parameters():
+            param.requires_grad = False
         
         # A tiny residual adapter for fast fine-tuning on the latent space
         self.residual_adapter = nn.Sequential(
@@ -51,6 +53,7 @@ class HybridTransferDecoder(nn.Module):
         )
         nn.init.zeros_(self.residual_adapter[-1].weight)
         nn.init.zeros_(self.residual_adapter[-1].bias)
+        self.alpha = nn.Parameter(torch.tensor(0.0))
 
     def extract_features(self, x):
         # x is [B, 8, T]
@@ -94,7 +97,7 @@ class HybridTransferDecoder(nn.Module):
             z = self.extract_features(x_8ch)
             
         z_residual = self.residual_adapter(z)
-        z_combined = z + z_residual
+        z_combined = z + self.alpha * z_residual
         
         z_lagged = self._build_lagged_tensor(z_combined)
         out = self.ridge_decoder(z_lagged)
