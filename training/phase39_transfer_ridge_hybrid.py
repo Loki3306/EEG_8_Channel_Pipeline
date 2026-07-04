@@ -272,11 +272,10 @@ def run_transfer_learning():
     
     # ---------------------------------------------------------
     # HARDWARE CONSTRAINT: 8 PHYSICAL CHANNELS
-    # TODO: Replace these 8 indices with the actual AASD channel 
-    # indices that correspond to the KUL physical montage 
-    # (e.g. Fz, Cz, Pz, Mastoids, etc.)
+    # Using specific neuroscan indices mapped to KUL spatial montage
+    # Fp1(0), Fp2(2), F7(5), F8(13), T7(23), T8(31), P7(41), P8(49)
     # ---------------------------------------------------------
-    PHYSICAL_8_CHANNELS = [0, 1, 2, 3, 4, 5, 6, 7] 
+    PHYSICAL_8_CHANNELS = [0, 2, 5, 13, 23, 31, 41, 49]
     
     # 2. Extract Latents and Build Covariance Matrix
     model = HybridTransferDecoder(pretrained_conformer, selected_channels=PHYSICAL_8_CHANNELS, embed_dim=64, max_lag=max_lag).to(device)
