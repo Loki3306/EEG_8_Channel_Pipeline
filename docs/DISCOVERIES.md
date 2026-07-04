@@ -134,3 +134,11 @@
 ## Transfer Learning Constraints (Phase 39)
 **Latent adaptation alone provides negligible gains for zero-shot transfer.**
 Even with precise neuroanatomical matching of 8 physical channels between BioSemi (KUL) and Neuroscan (AASD), a completely frozen backbone (trained on KUL) achieves ~57.3% AUROC on AASD. Attempting to bridge the remaining cross-dataset gap by fine-tuning the latents via a `ResidualLatentAdapter` provides almost negligible improvement (57.3% -> 57.5%). Under the evaluated architecture, latent adaptation alone produces negligible gains, suggesting adaptation earlier in the network—including the spatial frontend—may be more promising. However, alternative hypotheses (such as a weak adapter architecture or optimization choices) remain untested.
+
+## Representation Collapse (Phase 40)
+**Fine-tuning early layers in a frozen deep network causes representation collapse.**
+Attempting to fine-tune the spatial frontend dropped performance from 57.30% to 55.94%, and fine-tuning the first Conformer block dropped it to 54.45%. This is because altering the early layers drastically shifts the input distributions fed into the downstream frozen layers, which then collapse. The spatial bottleneck hypothesis must be discarded unless full-network joint fine-tuning is used.
+
+## Projection Adapter (Phase 40)
+**Unfreezing the final layer before a frozen task decoder optimally aligns latent representations.**
+Instead of unfreezing early layers, unfreezing the `PROJECTION` layer (the final transposed convolution before the Ridge Decoder) improved AUROC from 57.30% to 59.06%. This provides a highly localized affine adapter that perfectly translates the Conformer's output space into the manifold expected by the frozen Ridge Decoder without disrupting deep features.

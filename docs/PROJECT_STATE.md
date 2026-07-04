@@ -1,12 +1,13 @@
 # PROJECT STATE
 
 ## Current Phase:
-Phase 39: Transfer Learning to AASD
+Phase 40: Layer-Wise Adaptation Study
 
 ## Current Best Model:
-Neural Ridge Hybrid (Frozen KUL Conformer Backbone + Trainable Ridge Decoder + Residual Latent Adapter)
+Neural Ridge Hybrid (Zero-shot KUL Conformer backbone with PROJECTION adaptation)
 
 ## Current Best Result:
+* Phase 40 (PROJECTION Adaptation): **59.06% AUROC**.
 * Phase 39 (Zero-Shot Transfer + Neural Ridge, 8 channels, 5s window): **57.48% AUROC**. 
 * Falsification tests passed (Shuffle Audio: 51.3%, Noise: 44.3%).
 * Best Historical (KUL): 75.8% AUROC (Phase 28 Conformer, 30s window).
