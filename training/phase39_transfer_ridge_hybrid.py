@@ -238,7 +238,7 @@ def run_transfer_learning():
         name = k[7:] if k.startswith('module.') else k
         new_state_dict[name] = v
         
-    pretrained_conformer.load_state_dict(new_state_dict)
+    pretrained_conformer.load_state_dict(new_state_dict, strict=False)
     pretrained_conformer.eval()
     print(f"Loaded Pretrained KUL Conformer (8-Channel, 64-Dim Latent)")
     
