@@ -285,18 +285,25 @@ def run_loso_validation():
     
     results = {cfg[0]: [] for cfg in configs}
     
-    print("\n--- 3. Running LOSO Cross-Validation ---")
+    print("\n--- 3. Running Within-Subject Validation ---")
     
-    for test_idx, test_subject in enumerate(subject_ids):
+    for test_idx, subject_id in enumerate(subject_ids):
         print(f"\n==========================================")
-        print(f" LOSO FOLD {test_idx+1}/{len(subject_ids)}: Test Subject {test_subject}")
+        print(f" SUBJECT {test_idx+1}/{len(subject_ids)}: {subject_id}")
         print(f"==========================================")
         
-        # Build Train Set (17 Subjects)
-        train_data = []
+        cached = torch.load(cache_dir / f"{subject_id}_processed.pt", weights_only=False)
+        all_trials_X = cached['X']
+        all_trials_Y = cached['Y']
+        raw_trials = cached['raw']
         
-        # Calculate Analytical Ridge on Train Subjects
-        print("  -> Computing Universal Analytical Ridge (Train Subjects Only)...")
+        # 40 Train, 20 Test
+        train_X, test_X = all_trials_X[:40], all_trials_X[40:]
+        train_Y, test_Y = all_trials_Y[:40], all_trials_Y[40:]
+        test_raw = raw_trials[40:]
+        
+        # Calculate Analytical Ridge on Train Trials (Within-Subject)
+        print("  -> Computing Within-Subject Analytical Ridge (40 trials)...")
         temp_model = LayerwiseAdaptationModel(load_clean_backbone(), PHYSICAL_8_CHANNELS, embed_dim=64, max_lag=max_lag).to(device)
         temp_model.eval()
         
@@ -304,31 +311,23 @@ def run_loso_validation():
         ZtZ = np.zeros((num_features, num_features), dtype=np.float32)
         ZtY = np.zeros(num_features, dtype=np.float32)
         
-        for sid in subject_ids:
-            if sid != test_subject:
-                cached = torch.load(cache_dir / f"{sid}_processed.pt", weights_only=False)
-                train_data.extend(list(zip(cached['X'], cached['Y'])))
+        with torch.no_grad():
+            for x, y in zip(train_X, train_Y):
+                eeg_tensor = x.unsqueeze(0).to(device)
+                eeg_8ch = eeg_tensor[:, PHYSICAL_8_CHANNELS, :]
+                z = temp_model.extract_features(eeg_8ch).squeeze(0).cpu().numpy()
+                Z = build_lagged_matrix(z, max_lag).astype(np.float32)
+                y_aligned = y.numpy()[max_lag:].astype(np.float32)
                 
-                with torch.no_grad():
-                    for x, y in zip(cached['X'], cached['Y']):
-                        eeg_tensor = x.unsqueeze(0).to(device)
-                        eeg_8ch = eeg_tensor[:, PHYSICAL_8_CHANNELS, :]
-                        z = temp_model.extract_features(eeg_8ch).squeeze(0).cpu().numpy()
-                        Z = build_lagged_matrix(z, max_lag).astype(np.float32)
-                        y_aligned = y.numpy()[max_lag:].astype(np.float32)
-                        
-                        ZtZ += Z.T @ Z
-                        ZtY += Z.T @ y_aligned
-                
-                del cached
+                ZtZ += Z.T @ Z
+                ZtY += Z.T @ y_aligned
                 
         lambda_reg = 1e4
         I = np.eye(num_features, dtype=np.float32)
         W_analytical = np.linalg.inv(ZtZ + lambda_reg * I) @ ZtY
         del ZtZ, ZtY, temp_model
-        gc.collect()
         
-        # Custom collate because variable lengths
+        # Build Train Loader
         def collate_fn(batch):
             max_len = max(x.size(1) for x, y in batch)
             x_padded = torch.zeros(len(batch), batch[0][0].size(0), max_len)
@@ -338,11 +337,8 @@ def run_loso_validation():
                 y_padded[i, :y.size(0)] = y
             return x_padded, y_padded
             
+        train_data = list(zip(train_X, train_Y))
         train_loader = DataLoader(train_data, batch_size=4, shuffle=True, collate_fn=collate_fn)
-        
-        # Load test subject raw trials for run_test_suite
-        test_cached = torch.load(cache_dir / f"{test_subject}_processed.pt", weights_only=False)
-        test_trials = test_cached['raw']
         
         for config_name, layers_to_unfreeze in configs:
             model = LayerwiseAdaptationModel(load_clean_backbone(), PHYSICAL_8_CHANNELS, embed_dim=64, max_lag=max_lag).to(device)
@@ -363,8 +359,7 @@ def run_loso_validation():
             if trainable_params > 0:
                 optimizer = optim.AdamW(filter(lambda p: p.requires_grad, model.parameters()), lr=1e-4, weight_decay=1e-2)
                 
-                # Training Loop
-                for epoch in range(1, 11): # 10 epochs is enough given 17x more data
+                for epoch in range(1, 11): 
                     model.eval()
                     for target_layer in layers_to_unfreeze:
                         parts = target_layer.split('.')
@@ -375,7 +370,7 @@ def run_loso_validation():
                         mod.train()
                         
                     epoch_loss = 0.0
-                    for batch_idx, (bx, by) in enumerate(train_loader):
+                    for bx, by in train_loader:
                         bx, by = bx.to(device), by.to(device)
                         optimizer.zero_grad()
                         pred = model(bx)
@@ -385,12 +380,15 @@ def run_loso_validation():
                         epoch_loss += loss.item()
                 
             model.eval()
-            auroc = run_test_suite(model, test_trials, device, max_lag, hop_len, window_len)
+            auroc = run_test_suite(model, test_raw, device, max_lag, hop_len, window_len)
             results[config_name].append(auroc)
             print(f"   [{config_name:<15}] AUROC: {auroc:.4f}")
             
+        del cached, train_data, train_loader, all_trials_X, all_trials_Y, raw_trials
+        gc.collect()
+            
     print("\n=======================================================")
-    print(" SUMMARY: CROSS-SUBJECT LOSO ADAPTATION ")
+    print(" SUMMARY: WITHIN-SUBJECT ADAPTATION (18 SUBJECTS) ")
     print("=======================================================")
     
     print(f"{'Subject':<10} | {'ZERO_SHOT':<12} | {'LATENT':<12} | {'PROJECTION':<12}")
