@@ -240,188 +240,199 @@ def run_layerwise_study():
     window_len = 64 * 5
     hop_len = 64 * 1
     
-    target_subject = 'S1'
-    target_path = next(p for p in mat_files if target_subject in os.path.basename(p))
-    
-    print(f"\n--- 1. Loading AASD Dataset ({target_subject}) ---")
-    trials = load_aasd_subject_trials(target_path, b, a, audio_dir, wav_dir)
-    train_trials = trials[:40]
-    test_trials = trials[40:]
-    
-    PHYSICAL_8_CHANNELS = [0, 2, 5, 13, 23, 31, 41, 49]
-    
-    print("\n--- 2. Initializing Analytical Ridge Vector ---")
-    temp_model = LayerwiseAdaptationModel(load_clean_backbone(), PHYSICAL_8_CHANNELS, embed_dim=64, max_lag=max_lag).to(device)
-    temp_model.eval()
-    
-    Z_train_list, Y_train_list = [], []
-    with torch.no_grad():
-        for trial in train_trials:
-            eeg = trial['eeg'].numpy()
-            env_l = trial['env_l'].numpy()
-            env_r = trial['env_r'].numpy()
-            switch_points = trial['meta']['switch_points']
-            
-            eeg = (eeg - eeg.mean(axis=1, keepdims=True)) / (eeg.std(axis=1, keepdims=True) + 1e-8)
-            env_l = (env_l - env_l.mean()) / (env_l.std() + 1e-8)
-            env_r = (env_r - env_r.mean()) / (env_r.std() + 1e-8)
-            
-            eeg_tensor = torch.from_numpy(eeg).float().unsqueeze(0).to(device)
-            eeg_8ch = eeg_tensor[:, PHYSICAL_8_CHANNELS, :]
-            z = temp_model.extract_features(eeg_8ch).squeeze(0).cpu().numpy()
-            Z = build_lagged_matrix(z, max_lag)
-            
-            att = np.zeros(eeg.shape[1], dtype=np.float32)
-            if len(switch_points) == 0: switch_points = [('R', 0)]
-                
-            initial_state = 'R' if (switch_points[0][1] > 0 and switch_points[0][0] == 'L') else switch_points[0][0]
-            if switch_points[0][1] > 0:
-                initial_state = 'R' if switch_points[0][0] == 'L' else 'L'
-                
-            current_state = initial_state
-            prev_idx = 0
-            for state, idx_64 in switch_points:
-                if idx_64 > prev_idx:
-                    if current_state == 'L': att[prev_idx:idx_64] = env_l[prev_idx:idx_64]
-                    else: att[prev_idx:idx_64] = env_r[prev_idx:idx_64]
-                prev_idx, current_state = idx_64, state
-                
-            if current_state == 'L': att[prev_idx:] = env_l[prev_idx:]
-            else: att[prev_idx:] = env_r[prev_idx:]
-                
-            Y = att[max_lag:]
-            Z_train_list.append(Z)
-            Y_train_list.append(Y)
-            
-    Z_mat = np.vstack(Z_train_list)
-    Y_mat = np.concatenate(Y_train_list)
-    
-    Z_tensor = torch.from_numpy(Z_mat).float().to(device)
-    Y_tensor = torch.from_numpy(Y_mat).float().to(device)
-    
-    cov_Z = (Z_tensor.T @ Z_tensor).cpu().numpy()
-    cov_ZY = (Z_tensor.T @ Y_tensor).cpu().numpy()
-    
-    alpha_ridge = 10000.0
-    ridge_matrix = cov_Z + alpha_ridge * np.eye(cov_Z.shape[0])
-    W_analytical = np.linalg.solve(ridge_matrix, cov_ZY)
-    
-    # Prepare Dataloader for Fine-Tuning
-    train_X_nn = []
-    train_Y_nn = []
-    
-    for trial in train_trials:
-        eeg_full = trial['eeg'].numpy()
-        eeg_full = (eeg_full - eeg_full.mean(axis=1, keepdims=True)) / (eeg_full.std(axis=1, keepdims=True) + 1e-8)
-        train_X_nn.append(torch.from_numpy(eeg_full).float())
-        
-        env_l = trial['env_l'].numpy()
-        env_r = trial['env_r'].numpy()
-        switch_points = trial['meta']['switch_points']
-        
-        env_l = (env_l - env_l.mean()) / (env_l.std() + 1e-8)
-        env_r = (env_r - env_r.mean()) / (env_r.std() + 1e-8)
-        
-        att = np.zeros(len(env_l), dtype=np.float32)
-        if len(switch_points) == 0: switch_points = [('R', 0)]
-            
-        initial_state = 'R' if (switch_points[0][1] > 0 and switch_points[0][0] == 'L') else switch_points[0][0]
-        if switch_points[0][1] > 0:
-            initial_state = 'R' if switch_points[0][0] == 'L' else 'L'
-            
-        current_state = initial_state
-        prev_idx = 0
-        for state, idx_64 in switch_points:
-            idx_64 = min(idx_64, len(env_l))
-            if idx_64 > prev_idx:
-                if current_state == 'L': att[prev_idx:idx_64] = env_l[prev_idx:idx_64]
-                else: att[prev_idx:idx_64] = env_r[prev_idx:idx_64]
-            prev_idx, current_state = idx_64, state
-            
-        if current_state == 'L': att[prev_idx:] = env_l[prev_idx:]
-        else: att[prev_idx:] = env_r[prev_idx:]
-            
-        train_Y_nn.append(torch.from_numpy(att).float())
-        
-    train_Y_nn = torch.stack(train_Y_nn)
-    train_X_nn = torch.stack(train_X_nn)
-    
-    dataset = TensorDataset(train_X_nn, train_Y_nn)
-    dataloader = DataLoader(dataset, batch_size=4, shuffle=True)
-    
-    # ---------------------------------------------------------
-    # DEFINING CONFIGURATIONS
-    # ---------------------------------------------------------
+
     configs = [
         ("ZERO_SHOT", []),
         ("LATENT_ONLY", ["residual_adapter"]),
         ("PROJECTION_ONLY", ["backbone.upsample"]),
         ("HYBRID", ["residual_adapter", "backbone.upsample"])
     ]
+    all_subject_results = {cfg[0]: [] for cfg in configs}
     
-    results = []
+    for target_path in sorted(mat_files):
+        target_subject = os.path.basename(target_path).split('.')[0].upper()
     
-    print("\n--- 3. Running Configurations ---")
+        print(f"\n--- 1. Loading AASD Dataset ({target_subject}) ---")
+        trials = load_aasd_subject_trials(target_path, b, a, audio_dir, wav_dir)
+        train_trials = trials[:40]
+        test_trials = trials[40:]
     
-    for config_name, layers_to_unfreeze in configs:
-        print(f"\n>> Training Config: {config_name}")
-        model = LayerwiseAdaptationModel(load_clean_backbone(), PHYSICAL_8_CHANNELS, embed_dim=64, max_lag=max_lag).to(device)
-        model.load_analytical_weights(W_analytical)
-        
-        # Freeze everything first
-        for param in model.parameters():
-            param.requires_grad = False
+        PHYSICAL_8_CHANNELS = [0, 2, 5, 13, 23, 31, 41, 49]
+    
+        print("\n--- 2. Initializing Analytical Ridge Vector ---")
+        temp_model = LayerwiseAdaptationModel(load_clean_backbone(), PHYSICAL_8_CHANNELS, embed_dim=64, max_lag=max_lag).to(device)
+        temp_model.eval()
+    
+        Z_train_list, Y_train_list = [], []
+        with torch.no_grad():
+            for trial in train_trials:
+                eeg = trial['eeg'].numpy()
+                env_l = trial['env_l'].numpy()
+                env_r = trial['env_r'].numpy()
+                switch_points = trial['meta']['switch_points']
             
-        # Unfreeze target layers
-        for name, param in model.named_parameters():
-            for target_layer in layers_to_unfreeze:
-                if name.startswith(target_layer):
-                    param.requires_grad = True
+                eeg = (eeg - eeg.mean(axis=1, keepdims=True)) / (eeg.std(axis=1, keepdims=True) + 1e-8)
+                env_l = (env_l - env_l.mean()) / (env_l.std() + 1e-8)
+                env_r = (env_r - env_r.mean()) / (env_r.std() + 1e-8)
+            
+                eeg_tensor = torch.from_numpy(eeg).float().unsqueeze(0).to(device)
+                eeg_8ch = eeg_tensor[:, PHYSICAL_8_CHANNELS, :]
+                z = temp_model.extract_features(eeg_8ch).squeeze(0).cpu().numpy()
+                Z = build_lagged_matrix(z, max_lag)
+            
+                att = np.zeros(eeg.shape[1], dtype=np.float32)
+                if len(switch_points) == 0: switch_points = [('R', 0)]
+                
+                initial_state = 'R' if (switch_points[0][1] > 0 and switch_points[0][0] == 'L') else switch_points[0][0]
+                if switch_points[0][1] > 0:
+                    initial_state = 'R' if switch_points[0][0] == 'L' else 'L'
+                
+                current_state = initial_state
+                prev_idx = 0
+                for state, idx_64 in switch_points:
+                    if idx_64 > prev_idx:
+                        if current_state == 'L': att[prev_idx:idx_64] = env_l[prev_idx:idx_64]
+                        else: att[prev_idx:idx_64] = env_r[prev_idx:idx_64]
+                    prev_idx, current_state = idx_64, state
+                
+                if current_state == 'L': att[prev_idx:] = env_l[prev_idx:]
+                else: att[prev_idx:] = env_r[prev_idx:]
+                
+                Y = att[max_lag:]
+                Z_train_list.append(Z)
+                Y_train_list.append(Y)
+            
+        Z_mat = np.vstack(Z_train_list)
+        Y_mat = np.concatenate(Y_train_list)
+    
+        Z_tensor = torch.from_numpy(Z_mat).float().to(device)
+        Y_tensor = torch.from_numpy(Y_mat).float().to(device)
+    
+        cov_Z = (Z_tensor.T @ Z_tensor).cpu().numpy()
+        cov_ZY = (Z_tensor.T @ Y_tensor).cpu().numpy()
+    
+        alpha_ridge = 10000.0
+        ridge_matrix = cov_Z + alpha_ridge * np.eye(cov_Z.shape[0])
+        W_analytical = np.linalg.solve(ridge_matrix, cov_ZY)
+    
+        # Prepare Dataloader for Fine-Tuning
+        train_X_nn = []
+        train_Y_nn = []
+    
+        for trial in train_trials:
+            eeg_full = trial['eeg'].numpy()
+            eeg_full = (eeg_full - eeg_full.mean(axis=1, keepdims=True)) / (eeg_full.std(axis=1, keepdims=True) + 1e-8)
+            train_X_nn.append(torch.from_numpy(eeg_full).float())
+        
+            env_l = trial['env_l'].numpy()
+            env_r = trial['env_r'].numpy()
+            switch_points = trial['meta']['switch_points']
+        
+            env_l = (env_l - env_l.mean()) / (env_l.std() + 1e-8)
+            env_r = (env_r - env_r.mean()) / (env_r.std() + 1e-8)
+        
+            att = np.zeros(len(env_l), dtype=np.float32)
+            if len(switch_points) == 0: switch_points = [('R', 0)]
+            
+            initial_state = 'R' if (switch_points[0][1] > 0 and switch_points[0][0] == 'L') else switch_points[0][0]
+            if switch_points[0][1] > 0:
+                initial_state = 'R' if switch_points[0][0] == 'L' else 'L'
+            
+            current_state = initial_state
+            prev_idx = 0
+            for state, idx_64 in switch_points:
+                idx_64 = min(idx_64, len(env_l))
+                if idx_64 > prev_idx:
+                    if current_state == 'L': att[prev_idx:idx_64] = env_l[prev_idx:idx_64]
+                    else: att[prev_idx:idx_64] = env_r[prev_idx:idx_64]
+                prev_idx, current_state = idx_64, state
+            
+            if current_state == 'L': att[prev_idx:] = env_l[prev_idx:]
+            else: att[prev_idx:] = env_r[prev_idx:]
+            
+            train_Y_nn.append(torch.from_numpy(att).float())
+        
+        train_Y_nn = torch.stack(train_Y_nn)
+        train_X_nn = torch.stack(train_X_nn)
+    
+        dataset = TensorDataset(train_X_nn, train_Y_nn)
+        dataloader = DataLoader(dataset, batch_size=4, shuffle=True)
+    
+        # ---------------------------------------------------------
+        # DEFINING CONFIGURATIONS
+        # ---------------------------------------------------------
+    
+        results = []
+    
+        print("\n--- 3. Running Configurations ---")
+    
+        for config_name, layers_to_unfreeze in configs:
+            print(f"\n>> Training Config: {config_name}")
+            model = LayerwiseAdaptationModel(load_clean_backbone(), PHYSICAL_8_CHANNELS, embed_dim=64, max_lag=max_lag).to(device)
+            model.load_analytical_weights(W_analytical)
+        
+            # Freeze everything first
+            for param in model.parameters():
+                param.requires_grad = False
+            
+            # Unfreeze target layers
+            for name, param in model.named_parameters():
+                for target_layer in layers_to_unfreeze:
+                    if name.startswith(target_layer):
+                        param.requires_grad = True
                         
-        trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
-        print(f"   Trainable Parameters: {trainable_params}")
+            trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+            print(f"   Trainable Parameters: {trainable_params}")
         
-        if trainable_params > 0:
-            optimizer = optim.AdamW(filter(lambda p: p.requires_grad, model.parameters()), lr=1e-4, weight_decay=1e-2)
+            if trainable_params > 0:
+                optimizer = optim.AdamW(filter(lambda p: p.requires_grad, model.parameters()), lr=1e-4, weight_decay=1e-2)
             
-            # Put entire model in eval mode first to freeze BatchNorms/Dropouts of frozen layers
-            model.eval()
-            for target_layer in layers_to_unfreeze:
-                parts = target_layer.split('.')
-                mod = model
-                for p in parts:
-                    if p.isdigit():
-                        mod = mod[int(p)]
-                    else:
-                        mod = getattr(mod, p)
-                mod.train()
+                # Put entire model in eval mode first to freeze BatchNorms/Dropouts of frozen layers
+                model.eval()
+                for target_layer in layers_to_unfreeze:
+                    parts = target_layer.split('.')
+                    mod = model
+                    for p in parts:
+                        if p.isdigit():
+                            mod = mod[int(p)]
+                        else:
+                            mod = getattr(mod, p)
+                    mod.train()
 
-            for epoch in range(1, 26): 
-                epoch_loss = 0.0
-                for batch_idx, (bx, by) in enumerate(dataloader):
-                    bx, by = bx.to(device), by.to(device)
-                    optimizer.zero_grad()
-                    pred = model(bx)
-                    loss = pearson_loss(pred, by)
-                    loss.backward()
+                for epoch in range(1, 26): 
+                    epoch_loss = 0.0
+                    for batch_idx, (bx, by) in enumerate(dataloader):
+                        bx, by = bx.to(device), by.to(device)
+                        optimizer.zero_grad()
+                        pred = model(bx)
+                        loss = pearson_loss(pred, by)
+                        loss.backward()
                     
-                    # Gradient Verification (First batch of first epoch only)
-                    if epoch == 1 and batch_idx == 0:
-                        print(f"   [Grad Check] {config_name}:")
-                        for name, param in model.named_parameters():
-                            if param.requires_grad and param.grad is not None:
-                                print(f"      - {name}: {param.grad.norm().item():.4e}")
+                        # Gradient Verification (First batch of first epoch only)
+                        if epoch == 1 and batch_idx == 0:
+                            print(f"   [Grad Check] {config_name}:")
+                            for name, param in model.named_parameters():
+                                if param.requires_grad and param.grad is not None:
+                                    print(f"      - {name}: {param.grad.norm().item():.4e}")
                                 
-                    optimizer.step()
-                    epoch_loss += loss.item()
-            print(f"   Final Train Loss: {epoch_loss / len(dataloader):.4f}")
+                        optimizer.step()
+                        epoch_loss += loss.item()
+                print(f"   Final Train Loss: {epoch_loss / len(dataloader):.4f}")
             
-        model.eval()
-        auroc, acc, _, _ = run_test_suite(model, test_trials, device, max_lag, hop_len, window_len, "NORMAL")
-        print(f"   Test AUROC: {auroc:.4f}")
-        results.append((config_name, auroc))
+            model.eval()
+            auroc, acc, _, _ = run_test_suite(model, test_trials, device, max_lag, hop_len, window_len, "NORMAL")
+            print(f"   Test AUROC: {auroc:.4f}")
+            results.append((config_name, auroc))
+        all_subject_results[config_name].append(auroc)
         
-    print("\n=======================================================")
+    print('\n=======================================================')
+    print(' SUMMARY: OVERALL RESULTS (18 SUBJECTS)')
+    print('=======================================================')
+    for config_name in [cfg[0] for cfg in configs]:
+        auroc_list = all_subject_results[config_name]
+        import numpy as np
+        print(f'{config_name:<20} | Mean AUROC: {np.mean(auroc_list):.4f} +/- {np.std(auroc_list):.4f}')
+
     print(" SUMMARY: LAYER-WISE ADAPTATION SENSITIVITY")
     print("=======================================================")
     for config_name, auroc in results:
