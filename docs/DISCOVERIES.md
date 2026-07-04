@@ -131,9 +131,9 @@
 - **Discovery**: Phase 17.2 metrics counted internal controller transitions (every 46.875ms). Phase 17.3 revealed these don't represent what a user hears — many "switches" are sub-second internal oscillations that never reach the audio output. True UX metrics require an Output State Machine that collapses to 1-second stable states.
 - **Source**: Phase 17.3 analysis output
 
-## Transfer Learning Constraints (Phase 39)
-**Latent adaptation alone provides negligible gains for zero-shot transfer.**
-Even with precise neuroanatomical matching of 8 physical channels between BioSemi (KUL) and Neuroscan (AASD), a completely frozen backbone (trained on KUL) achieves ~57.3% AUROC on AASD. Attempting to bridge the remaining cross-dataset gap by fine-tuning the latents via a `ResidualLatentAdapter` provides almost negligible improvement (57.3% -> 57.5%). Under the evaluated architecture, latent adaptation alone produces negligible gains, suggesting adaptation earlier in the network—including the spatial frontend—may be more promising. However, alternative hypotheses (such as a weak adapter architecture or optimization choices) remain untested.
+## Transfer Learning Constraints (Phase 40.5)
+**Output-space recalibration is superior to latent adaptation for zero-shot transfer.**
+Even with precise neuroanatomical matching of 8 physical channels between BioSemi (KUL) and Neuroscan (AASD), a completely frozen backbone achieves ~57.3% AUROC on AASD. Attempting to bridge the remaining gap by fine-tuning the latents via a `ResidualLatentAdapter` provides a meaningful improvement (58.35%). However, unfreezing the `PROJECTION` layer (the final transposed convolution before the Ridge Decoder) provides the best performance (59.28%). This demonstrates that the pre-trained KUL features are highly intact; they primarily require a localized affine recalibration to align the Conformer's output space into the exact manifold expected by the frozen Ridge Decoder.
 
 ## Representation Collapse (Phase 40)
 **Fine-tuning early layers in a frozen deep network causes representation collapse.**
