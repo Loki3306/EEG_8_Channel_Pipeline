@@ -29,27 +29,30 @@ class NativeAASDConformer(nn.Module):
         self.selected_channels = [0, 2, 5, 13, 23, 31, 41, 49]
         self.backbone = AADConformer(in_channels=channels, embed_dim=embed_dim)
         
-        # Neural Ridge Decoder
-        self.ridge_decoder = nn.Conv1d(
+        # Replace the default 1x1 head with a lagged temporal head
+        self.backbone.head = nn.Conv1d(
             in_channels=embed_dim,
             out_channels=1,
             kernel_size=max_lag + 1,
-            padding=0,
+            padding=max_lag, # padding on both sides
             bias=False
         )
-        
-    def _build_lagged_tensor(self, x):
-        return F.pad(x, (self.max_lag, 0))
         
     def forward(self, x):
         # Slice to 8 physical channels
         x_8ch = x[:, self.selected_channels, :]
         
-        # AADConformer returns (B, embed_dim, T) by default
-        z = self.backbone(x_8ch)
-        z_lagged = self._build_lagged_tensor(z)
-        out = self.ridge_decoder(z_lagged)
-        return out.squeeze(1)
+        # The backbone applies the lagged head.
+        # Output length is T + 2*max_lag - (max_lag + 1) + 1 = T + max_lag
+        out_padded = self.backbone(x_8ch)
+        
+        # Slice off the end to make it strictly causal
+        if self.max_lag > 0:
+            out = out_padded[:, :-self.max_lag]
+        else:
+            out = out_padded
+            
+        return out
 
 def run_test_suite(model, test_trials, device, max_lag, hop_len, window_len):
     sim_att, sim_unatt = [], []
