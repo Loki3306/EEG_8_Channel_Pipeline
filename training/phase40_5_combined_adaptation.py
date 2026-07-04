@@ -222,15 +222,7 @@ def run_layerwise_study():
     print(f"Loaded Pretrained KUL Conformer (8-Channel, 64-Dim Latent)")
     
     data_root = '/kaggle/input/datasets/lokeshgile/aasd-processed-eeg/Processed EEG'
-    mat_files = []
-    for root, dirs, files in os.walk(data_root):
-        for file in files:
-            if file.endswith('.mat') and not file.startswith('._'):
-                mat_files.append(os.path.join(root, file))
-                
-    if not mat_files:
-        print("ERROR: No .mat files found. Please run on Kaggle.")
-        return
+    mat_files = [f"{data_root}/S{i}/S{i}.mat" for i in range(1, 19)]
         
     b, a = scipy.signal.butter(4, [1.0/64.0, 8.0/64.0], btype='band')
     audio_dir = '/kaggle/input/datasets/lokeshgile/aasd-audio-gammatones'
@@ -249,7 +241,7 @@ def run_layerwise_study():
     ]
     all_subject_results = {cfg[0]: [] for cfg in configs}
     
-    for target_path in sorted(mat_files):
+    for target_path in mat_files:
         target_subject = os.path.basename(target_path).split('.')[0].upper()
     
         print(f"\n--- 1. Loading AASD Dataset ({target_subject}) ---")
