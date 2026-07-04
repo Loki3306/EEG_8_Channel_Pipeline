@@ -209,100 +209,34 @@ def run_loso_validation():
         
     b, a = scipy.signal.butter(4, [1.0/64.0, 8.0/64.0], btype='band')
     
-    # Preload all subjects
-    print("Loading all subjects into memory...")
-    all_subjects_data = {}
+    # Pre-process and cache all subjects to disk to avoid Out-Of-Memory (OOM)
+    cache_dir = Path('/kaggle/working/eeg_cache')
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    
+    print("Pre-processing and caching subjects to disk...")
+    subject_ids = []
+    
+    import gc
     for mat_file in mat_files:
         subj_id = os.path.basename(mat_file).split('.')[0]
-        all_subjects_data[subj_id] = load_aasd_subject_trials(mat_file, b, a, audio_dir, wav_dir)
-        print(f"  Loaded {subj_id}: {len(all_subjects_data[subj_id])} trials")
+        subject_ids.append(subj_id)
         
-    PHYSICAL_8_CHANNELS = [0, 2, 5, 13, 23, 31, 41, 49]
-    max_lag = 24
-    window_len = 64 * 5
-    hop_len = 64 * 1
-    
-    # Prepare PyTorch datasets and also keep raw trials for W_analytical
-    subject_pytorch_datasets = {}
-    for subj_id, trials in all_subjects_data.items():
-        X_tensors, Y_tensors = [], []
-        for trial in trials:
-            eeg = trial['eeg'].numpy()
-            env_l = trial['env_l'].numpy()
-            env_r = trial['env_r'].numpy()
-            switch_points = trial['meta']['switch_points']
+        cache_path = cache_dir / f"{subj_id}_processed.pt"
+        if not cache_path.exists():
+            print(f"  Processing {subj_id} from .mat...")
+            trials = load_aasd_subject_trials(mat_file, b, a, audio_dir, wav_dir)
             
-            eeg = (eeg - eeg.mean(axis=1, keepdims=True)) / (eeg.std(axis=1, keepdims=True) + 1e-8)
-            env_l = (env_l - env_l.mean()) / (env_l.std() + 1e-8)
-            env_r = (env_r - env_r.mean()) / (env_r.std() + 1e-8)
-            
-            att = np.zeros(eeg.shape[1], dtype=np.float32)
-            if len(switch_points) == 0: switch_points = [('R', 0)]
-            if switch_points[0][1] > 0:
-                current_state = 'R' if switch_points[0][0] == 'L' else 'L'
-            else:
-                current_state = switch_points[0][0]
-            
-            prev_idx = 0
-            for state, idx_64 in switch_points:
-                idx_64 = min(idx_64, eeg.shape[1])
-                if idx_64 > prev_idx:
-                    if current_state == 'L': att[prev_idx:idx_64] = env_l[prev_idx:idx_64]
-                    else: att[prev_idx:idx_64] = env_r[prev_idx:idx_64]
-                prev_idx, current_state = idx_64, state
-            if current_state == 'L': att[prev_idx:] = env_l[prev_idx:]
-            else: att[prev_idx:] = env_r[prev_idx:]
-            
-            X_tensors.append(torch.from_numpy(eeg).float())
-            Y_tensors.append(torch.from_numpy(att).float())
-            
-        subject_pytorch_datasets[subj_id] = list(zip(X_tensors, Y_tensors))
-
-    configs = [
-        ("ZERO_SHOT", []),
-        ("LATENT_ONLY", ["residual_adapter"]),
-        ("PROJECTION_ONLY", ["backbone.upsample"])
-    ]
-    
-    results = {cfg[0]: [] for cfg in configs}
-    subject_ids = list(all_subjects_data.keys())
-    
-    print("\n--- 3. Running LOSO Cross-Validation ---")
-    
-    for test_idx, test_subject in enumerate(subject_ids):
-        print(f"\n==========================================")
-        print(f" LOSO FOLD {test_idx+1}/{len(subject_ids)}: Test Subject {test_subject}")
-        print(f"==========================================")
-        
-        # Build Train Set (17 Subjects)
-        train_data = []
-        train_trials = []
-        for sid, dataset in subject_pytorch_datasets.items():
-            if sid != test_subject:
-                train_data.extend(dataset)
-                train_trials.extend(all_subjects_data[sid])
-                
-        # Calculate Analytical Ridge on Train Subjects
-        print("  -> Computing Universal Analytical Ridge (Train Subjects Only)...")
-        temp_model = LayerwiseAdaptationModel(load_clean_backbone(), PHYSICAL_8_CHANNELS, embed_dim=64, max_lag=max_lag).to(device)
-        temp_model.eval()
-        
-        Z_train_list, Y_train_list = [], []
-        with torch.no_grad():
-            for trial in train_trials:
+            X_tensors, Y_tensors, raw_trials = [], [], []
+            for trial in trials:
                 eeg = trial['eeg'].numpy()
                 env_l = trial['env_l'].numpy()
                 env_r = trial['env_r'].numpy()
                 switch_points = trial['meta']['switch_points']
                 
+                # Normalize
                 eeg = (eeg - eeg.mean(axis=1, keepdims=True)) / (eeg.std(axis=1, keepdims=True) + 1e-8)
                 env_l = (env_l - env_l.mean()) / (env_l.std() + 1e-8)
                 env_r = (env_r - env_r.mean()) / (env_r.std() + 1e-8)
-                
-                eeg_tensor = torch.from_numpy(eeg).float().unsqueeze(0).to(device)
-                eeg_8ch = eeg_tensor[:, PHYSICAL_8_CHANNELS, :]
-                z = temp_model.extract_features(eeg_8ch).squeeze(0).cpu().numpy()
-                Z = build_lagged_matrix(z, max_lag)
                 
                 att = np.zeros(eeg.shape[1], dtype=np.float32)
                 if len(switch_points) == 0: switch_points = [('R', 0)]
@@ -310,7 +244,7 @@ def run_loso_validation():
                     current_state = 'R' if switch_points[0][0] == 'L' else 'L'
                 else:
                     current_state = switch_points[0][0]
-                    
+                
                 prev_idx = 0
                 for state, idx_64 in switch_points:
                     idx_64 = min(idx_64, eeg.shape[1])
@@ -321,8 +255,67 @@ def run_loso_validation():
                 if current_state == 'L': att[prev_idx:] = env_l[prev_idx:]
                 else: att[prev_idx:] = env_r[prev_idx:]
                 
-                Z_train_list.append(Z)
-                Y_train_list.append(att)
+                X_tensors.append(torch.from_numpy(eeg).float())
+                Y_tensors.append(torch.from_numpy(att).float())
+                
+                # We need raw trial data for evaluation testing
+                raw_trials.append({
+                    'eeg': torch.from_numpy(eeg_full := trial['eeg'].numpy()), 
+                    'env_l': torch.from_numpy(trial['env_l'].numpy()),
+                    'env_r': torch.from_numpy(trial['env_r'].numpy()),
+                    'meta': trial['meta']
+                })
+                
+            torch.save({'X': X_tensors, 'Y': Y_tensors, 'raw': raw_trials}, cache_path)
+            del trials, X_tensors, Y_tensors, raw_trials
+            gc.collect()
+        else:
+            print(f"  Found cached {subj_id}")
+            
+    PHYSICAL_8_CHANNELS = [0, 2, 5, 13, 23, 31, 41, 49]
+    max_lag = 24
+    window_len = 64 * 5
+    hop_len = 64 * 1
+    
+    configs = [
+        ("ZERO_SHOT", []),
+        ("LATENT_ONLY", ["residual_adapter"]),
+        ("PROJECTION_ONLY", ["backbone.upsample"])
+    ]
+    
+    results = {cfg[0]: [] for cfg in configs}
+    
+    print("\n--- 3. Running LOSO Cross-Validation ---")
+    
+    for test_idx, test_subject in enumerate(subject_ids):
+        print(f"\n==========================================")
+        print(f" LOSO FOLD {test_idx+1}/{len(subject_ids)}: Test Subject {test_subject}")
+        print(f"==========================================")
+        
+        # Build Train Set (17 Subjects)
+        train_data = []
+        
+        print("  -> Computing Universal Analytical Ridge (Train Subjects Only)...")
+        temp_model = LayerwiseAdaptationModel(load_clean_backbone(), PHYSICAL_8_CHANNELS, embed_dim=64, max_lag=max_lag).to(device)
+        temp_model.eval()
+        
+        Z_train_list, Y_train_list = [], []
+        
+        for sid in subject_ids:
+            if sid != test_subject:
+                cached = torch.load(cache_dir / f"{sid}_processed.pt", weights_only=False)
+                train_data.extend(list(zip(cached['X'], cached['Y'])))
+                
+                with torch.no_grad():
+                    for x, y in zip(cached['X'], cached['Y']):
+                        eeg_tensor = x.unsqueeze(0).to(device)
+                        eeg_8ch = eeg_tensor[:, PHYSICAL_8_CHANNELS, :]
+                        z = temp_model.extract_features(eeg_8ch).squeeze(0).cpu().numpy()
+                        Z = build_lagged_matrix(z, max_lag)
+                        Z_train_list.append(Z)
+                        Y_train_list.append(y.numpy())
+                
+                del cached
                 
         Z_train = np.vstack(Z_train_list)
         Y_train = np.concatenate(Y_train_list)
@@ -330,9 +323,9 @@ def run_loso_validation():
         I = np.eye(Z_train.shape[1])
         W_analytical = np.linalg.inv(Z_train.T @ Z_train + lambda_reg * I) @ (Z_train.T @ Y_train)
         del Z_train_list, Y_train_list, Z_train, Y_train, temp_model
+        gc.collect()
         
         # Custom collate because variable lengths
-
         def collate_fn(batch):
             max_len = max(x.size(1) for x, y in batch)
             x_padded = torch.zeros(len(batch), batch[0][0].size(0), max_len)
@@ -343,7 +336,10 @@ def run_loso_validation():
             return x_padded, y_padded
             
         train_loader = DataLoader(train_data, batch_size=4, shuffle=True, collate_fn=collate_fn)
-        test_trials = all_subjects_data[test_subject]
+        
+        # Load test subject raw trials for run_test_suite
+        test_cached = torch.load(cache_dir / f"{test_subject}_processed.pt", weights_only=False)
+        test_trials = test_cached['raw']
         
         for config_name, layers_to_unfreeze in configs:
             model = LayerwiseAdaptationModel(load_clean_backbone(), PHYSICAL_8_CHANNELS, embed_dim=64, max_lag=max_lag).to(device)
