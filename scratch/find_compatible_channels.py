@@ -50,7 +50,7 @@ def main():
         kul_labels = ['Cz', 'POz', 'P3', 'P4', 'O1', 'Fp1', 'O2', 'Pz'] # Educated guess for those indices
         
     print("\n--- 2. Searching for AASD MAT Files ---")
-    aasd_path = '/kaggle/input/datasets/lokeshgile/aasd-processed-eeg/Processed EEG/S18_Processed.mat'
+    aasd_path = '/kaggle/input/datasets/lokeshgile/aasd-processed-eeg/Processed EEG/S18/S18.mat'
     if not os.path.exists(aasd_path):
         print(f"ERROR: Could not find {aasd_path}")
         return
