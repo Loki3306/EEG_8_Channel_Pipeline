@@ -35,37 +35,37 @@ def audit_aasd():
             mat_data = scipy.io.loadmat(mat_file, simplify_cells=True)
             subject_name = os.path.basename(mat_file)
             
-            eeg_data = None
-            if 'data' in mat_data:
-                eeg_data = mat_data['data'].get('eeg', None)
+            eeg_var = [k for k in mat_data.keys() if not k.startswith('__')][0]
             
-            if eeg_data is None:
-                print(f"  {subject_name}: Could not find 'eeg' field in 'data' struct.")
+            # Since simplify_cells=True, mat_data[eeg_var] is a dict
+            eeg_struct = mat_data[eeg_var]
+            
+            if 'data' not in eeg_struct:
+                print(f"  {subject_name}: Could not find 'data' field in struct {eeg_var}.")
                 continue
                 
-            # If it's a MATLAB cell array, in python it comes out as a list/array of arrays
-            if isinstance(eeg_data, np.ndarray) and eeg_data.dtype == object:
-                # Array of trials
-                num_trials = len(eeg_data)
-                subject_samples = 0
-                for trial in eeg_data:
-                    if hasattr(trial, 'shape'):
-                        subject_samples += trial.shape[0] # Assuming (T, C)
+            eeg_data = eeg_struct['data']
+            
+            if not isinstance(eeg_data, np.ndarray):
+                print(f"  {subject_name}: 'data' is not a numpy array.")
+                continue
                 
-            elif isinstance(eeg_data, list):
-                num_trials = len(eeg_data)
-                subject_samples = 0
-                for trial in eeg_data:
-                    if hasattr(trial, 'shape'):
-                        subject_samples += trial.shape[0]
+            if eeg_data.ndim == 3:
+                # Shape is usually (Channels, Time, Trials) in EEGLAB
+                num_trials = eeg_data.shape[2]
+                subject_samples = eeg_data.shape[1] * num_trials
+                # The data in AASD is stored at 128 Hz before resampling in the script, wait!
+                # Actually, in the preprocessing script it says downsample to 64Hz.
+                # Let's just calculate based on actual samples.
+                # In phase32_5_spatial_fix.py, they did `resample_poly(trial_eeg, 1, 2, axis=1)` meaning original fs is 128Hz!
+                actual_fs = 128
             else:
-                # Maybe shape is (T, C, Trials)?
                 print(f"  {subject_name}: Unexpected EEG shape {eeg_data.shape}")
                 continue
                 
-            subject_seconds = subject_samples / fs
+            subject_seconds = subject_samples / actual_fs
             
-            print(f"  {subject_name:<10}: {num_trials:>3} trials, {subject_samples:>8} samples ({subject_seconds:>8.2f} sec)")
+            print(f"  {subject_name:<10}: {num_trials:>3} trials, {subject_samples:>8} samples ({subject_seconds:>8.2f} sec) [Orig Fs={actual_fs}Hz]")
             
             total_trials += num_trials
             total_samples += subject_samples
