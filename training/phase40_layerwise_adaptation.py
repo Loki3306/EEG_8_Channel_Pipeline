@@ -401,15 +401,38 @@ def run_layerwise_study():
         
         if trainable_params > 0:
             optimizer = optim.AdamW(filter(lambda p: p.requires_grad, model.parameters()), lr=1e-4, weight_decay=1e-2)
-            model.train()
+            
+            # Put entire model in eval mode first to freeze BatchNorms/Dropouts of frozen layers
+            model.eval()
+            if config_name == "LATENT_ADAPTER":
+                model.residual_adapter.train()
+            else:
+                for target_layer in layers_to_unfreeze:
+                    parts = target_layer.split('.')
+                    mod = model
+                    for p in parts:
+                        if p.isdigit():
+                            mod = mod[int(p)]
+                        else:
+                            mod = getattr(mod, p)
+                    mod.train()
+
             for epoch in range(1, 26): 
                 epoch_loss = 0.0
-                for bx, by in dataloader:
+                for batch_idx, (bx, by) in enumerate(dataloader):
                     bx, by = bx.to(device), by.to(device)
                     optimizer.zero_grad()
                     pred = model(bx)
                     loss = pearson_loss(pred, by)
                     loss.backward()
+                    
+                    # Gradient Verification (First batch of first epoch only)
+                    if epoch == 1 and batch_idx == 0:
+                        print(f"   [Grad Check] {config_name}:")
+                        for name, param in model.named_parameters():
+                            if param.requires_grad and param.grad is not None:
+                                print(f"      - {name}: {param.grad.norm().item():.4e}")
+                                
                     optimizer.step()
                     epoch_loss += loss.item()
             print(f"   Final Train Loss: {epoch_loss / len(dataloader):.4f}")
