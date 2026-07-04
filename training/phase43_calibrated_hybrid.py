@@ -72,7 +72,7 @@ class ShallowNeuralRidge(nn.Module):
         out_padded = self.ridge_decoder(x_s)
         
         if self.max_lag > 0:
-            out = out_padded[:, :-self.max_lag]
+            out = out_padded[:, :, :-self.max_lag]
         else:
             out = out_padded
             
