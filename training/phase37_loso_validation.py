@@ -87,14 +87,22 @@ def run_test_suite(model, test_trials, selected_channels, device, max_lag, hop_l
                 att = np.concatenate([att[-offset_samples:], np.zeros(-offset_samples)])
                 unatt = np.concatenate([unatt[-offset_samples:], np.zeros(-offset_samples)])
                 
-        for start in range(0, eeg.shape[1] - window_len + 1, hop_len):
+        starts = list(range(0, eeg.shape[1] - window_len + 1, hop_len))
+        if not starts:
+            continue
+            
+        eeg_windows = [eeg[:, s:s+window_len] for s in starts]
+        eeg_batch = torch.from_numpy(np.stack(eeg_windows)).to(device)
+        
+        with torch.no_grad():
+            preds = model(eeg_batch).squeeze(1).cpu().numpy()
+            
+        for idx, start in enumerate(starts):
             end = start + window_len
             
-            eeg_w = torch.from_numpy(eeg[:, start:end]).unsqueeze(0).to(device)
+            pred_w = preds[idx]
             att_w = att[start:end]
             unatt_w = unatt[start:end]
-            
-            pred_w = model(eeg_w).squeeze().cpu().numpy()
             
             c_a = np.corrcoef(pred_w, att_w)[0, 1]
             c_u = np.corrcoef(pred_w, unatt_w)[0, 1]
@@ -248,8 +256,8 @@ def run_loso_validation():
                 train_X_nn.append(data['X_nn'])
                 train_Y_nn.append(data['Y_nn'])
                 
-        train_X_nn = torch.cat(train_X_nn, dim=0)
-        train_Y_nn = torch.cat(train_Y_nn, dim=0)
+        train_X_nn = torch.cat(train_X_nn, dim=0).to(device)
+        train_Y_nn = torch.cat(train_Y_nn, dim=0).to(device)
         
         # 2. Solve Analytical Ridge
         ridge_matrix = train_cov_X + alpha_ridge * np.eye(train_cov_X.shape[0])
@@ -260,14 +268,13 @@ def run_loso_validation():
         model.load_analytical_weights(W_analytical)
         
         dataset = TensorDataset(train_X_nn, train_Y_nn)
-        dataloader = DataLoader(dataset, batch_size=512, shuffle=True)
+        dataloader = DataLoader(dataset, batch_size=4096, shuffle=True)
         
         optimizer = optim.AdamW(filter(lambda p: p.requires_grad, model.parameters()), lr=1e-3, weight_decay=1e-2)
         model.train()
         
-        for epoch in range(1, 16): # 15 epochs is plenty for a 17x larger dataset
+        for epoch in range(1, 16): 
             for bx, by in dataloader:
-                bx, by = bx.to(device), by.to(device)
                 optimizer.zero_grad()
                 pred = model(bx)
                 loss = pearson_loss(pred, by)
