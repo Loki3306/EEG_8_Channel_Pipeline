@@ -215,10 +215,12 @@ def main():
         print("ERROR: Cache directory not found! Run Phase 41 first to generate cache.")
         return
         
-    subject_ids = []
+    all_subject_ids = []
     for pt_file in cache_dir.glob("*_processed.pt"):
-        subject_ids.append(pt_file.name.split('_')[0])
-    subject_ids.sort()
+        all_subject_ids.append(pt_file.name.split('_')[0])
+    all_subject_ids.sort()
+    
+    test_subject_ids = ['S1']
     
     PHYSICAL_8_CHANNELS = [0, 2, 5, 13, 23, 31, 41, 49]
     max_lag = 24
@@ -227,19 +229,19 @@ def main():
     calibration_trials = 5
     lambda_val = 1000.0 # Prior Regularization Strength
     
-    print(f"Found {len(subject_ids)} subjects. Beginning Cross-Subject LOSO Evaluation...\n")
+    print(f"Found {len(all_subject_ids)} subjects. Beginning Cross-Subject LOSO Evaluation...\n")
     
     all_auroc_stage1 = []
     all_auroc_stage2 = []
     
-    for test_subject in subject_ids:
+    for test_subject in test_subject_ids:
         print(f"==========================================")
         print(f" LOSO FOLD: Test Subject {test_subject}")
         print(f"==========================================")
         
         # Build Cross-Subject Train Data
         train_data = []
-        for sid in subject_ids:
+        for sid in all_subject_ids:
             if sid != test_subject:
                 cached = torch.load(cache_dir / f"{sid}_processed.pt", weights_only=False)
                 train_data.extend(list(zip(cached['X'], cached['Y'])))
@@ -341,7 +343,7 @@ def main():
     print("=======================================================")
     print(f"{'Subject':<10} | {'Zero-Shot':<12} | {'Calibrated':<12} | {'Diff':<12}")
     print("-" * 55)
-    for sid, a1, a2 in zip(subject_ids, all_auroc_stage1, all_auroc_stage2):
+    for sid, a1, a2 in zip(test_subject_ids, all_auroc_stage1, all_auroc_stage2):
         print(f"{sid:<10} | {a1:.4f}       | {a2:.4f}       | {a2-a1:+.4f}")
     print("-" * 55)
     print(f"{'MEAN':<10} | {np.mean(all_auroc_stage1):.4f}       | {np.mean(all_auroc_stage2):.4f}       | {np.mean(all_auroc_stage2)-np.mean(all_auroc_stage1):+.4f}")
