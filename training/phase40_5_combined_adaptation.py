@@ -430,7 +430,6 @@ def run_layerwise_study():
     print('=======================================================')
     for config_name in [cfg[0] for cfg in configs]:
         auroc_list = all_subject_results[config_name]
-        import numpy as np
         print(f'{config_name:<20} | Mean AUROC: {np.mean(auroc_list):.4f} +/- {np.std(auroc_list):.4f}')
 
     print(" SUMMARY: LAYER-WISE ADAPTATION SENSITIVITY")
