@@ -19,10 +19,10 @@ AASD (Auditory Attention Switching Dataset).
 - **AASD Labels Corrupted:** False. Triggers are mathematically perfectly aligned.
 - **Conformer is SOTA on AASD Switch Data:** False. High latent inertia prevents rapid switching without architectural modifications (Ridge adaptation).
 - **MatchNet outperforms Regression:** False. MatchNet memorizes the training data heavily.
-- **Fine-Tuning Latents is highly effective for cross-dataset transfer:** False. The `ResidualLatentAdapter` barely improved the analytical zero-shot baseline (0.5730 -> 0.5748), implying that the spatial filters (which were frozen) are the true bottleneck across hardware caps.
+- **Fine-Tuning Latents is highly effective for cross-dataset transfer:** False. The `ResidualLatentAdapter` barely improved the analytical zero-shot baseline (0.5730 -> 0.5748). Under the evaluated architecture, latent adaptation alone produces negligible gains, suggesting adaptation earlier in the network—including the spatial frontend—may be more promising.
 
 ## Open Questions:
-- Since zero-shot cross-dataset transfer hits a ceiling around 57.5% due to hardware differences, do we need to train a cross-dataset spatial adapter (rather than latent adapter)?
+- Which layer of the network suffers the most from domain shift during cross-dataset transfer? (Requires Layer-wise adaptation study).
 - What is the biological threshold of latency in Auditory Attention Switching?
 
 ## Blockers:
