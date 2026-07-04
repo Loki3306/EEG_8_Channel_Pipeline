@@ -163,7 +163,7 @@ def train_transfer_learning():
     dataloader = DataLoader(dataset, batch_size=128, shuffle=True)
     
     # Path to the uploaded KUL checkpoint on Kaggle
-    kul_checkpoint_path = '/kaggle/input/kul-pretrained-weights/model_S1.pt'
+    kul_checkpoint_path = '/kaggle/input/datasets/lowkieee/eeg-aad-conformer-seed1-checkpoints/checkpoints/seed_123/model_S1.pt'
     
     model = load_pretrained_conformer(kul_checkpoint_path, in_channels=num_eeg_channels, device=device)
     
@@ -176,8 +176,8 @@ def train_transfer_learning():
     for epoch in range(1, 41):
         total_loss = 0.0
         for batch_eeg, batch_att in dataloader:
-            # AADConformer expects [B, 1, C, T]
-            batch_eeg = batch_eeg.unsqueeze(1).to(device)
+            # AADConformer expects [B, C, T]
+            batch_eeg = batch_eeg.to(device)
             batch_att = batch_att.to(device)
             
             optimizer.zero_grad()
@@ -243,8 +243,8 @@ def train_transfer_learning():
                 att_w = att[start:end].clone()
                 unatt_w = unatt[start:end].clone()
                 
-                # Predict (expecting [1, 1, C, T])
-                pred_w = model(eeg_w.unsqueeze(0).unsqueeze(0).to(device)).squeeze().cpu()
+                # Predict (expecting [B, C, T])
+                pred_w = model(eeg_w.unsqueeze(0).to(device)).squeeze().cpu()
                 
                 # Pearson corr
                 corr_att = np.corrcoef(pred_w.numpy(), att_w.numpy())[0, 1]
