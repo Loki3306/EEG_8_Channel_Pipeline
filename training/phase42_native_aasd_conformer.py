@@ -26,7 +26,7 @@ class NativeAASDConformer(nn.Module):
     def __init__(self, channels=8, embed_dim=64, max_lag=24):
         super().__init__()
         self.max_lag = max_lag
-        self.backbone = AADConformer(channels=channels, embed_dim=embed_dim)
+        self.backbone = AADConformer(in_channels=channels, embed_dim=embed_dim)
         
         # Neural Ridge Decoder
         self.ridge_decoder = nn.Conv1d(
