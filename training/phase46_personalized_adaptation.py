@@ -385,9 +385,9 @@ def run_unsupervised_continual_learning(cache_dir, subject_ids, device):
                 optimizer.zero_grad()
                 pred = model(x)
                 
-                # Align Y for temporal convolution delay
+                # Align Y for temporal convolution delay and skip initial padded frames
                 y_aligned = y[:, MAX_LAG:]
-                pred_aligned = pred
+                pred_aligned = pred[:, MAX_LAG:]
                 
                 loss = 1.0 - safe_corr_torch(pred_aligned.squeeze(), y_aligned.squeeze()).mean()
                 if not torch.isnan(loss):
