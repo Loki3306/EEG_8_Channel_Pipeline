@@ -366,7 +366,7 @@ def run_layerwise_study():
         ("SPATIAL_STEM", ["backbone.spatial_conv", "backbone.spatial_norm"]),
         ("TEMPORAL_STEM", ["backbone.temporal_conv", "backbone.temporal_norm"]),
         ("FIRST_BLOCK", ["backbone.conformer_blocks.0"]),
-        ("MIDDLE_BLOCKS", ["backbone.conformer_blocks.1", "backbone.conformer_blocks.2"]),
+        ("SECOND_BLOCK", ["backbone.conformer_blocks.1"]),
         ("PROJECTION", ["backbone.upsample"])
     ]
     
