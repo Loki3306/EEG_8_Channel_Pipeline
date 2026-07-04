@@ -91,8 +91,8 @@ def run_classical_test_suite(W, test_trials, max_lag, hop_len, window_len, suite
         X_trial = build_lagged_matrix(eeg, max_lag)
         
         device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-        X_tensor = torch.from_numpy(X_trial).to(device)
-        W_tensor = torch.from_numpy(W).to(device)
+        X_tensor = torch.from_numpy(X_trial).float().to(device)
+        W_tensor = torch.from_numpy(W).float().to(device)
         
         pred_full = np.concatenate([np.zeros(max_lag), (X_tensor @ W_tensor).cpu().numpy()])
                 
@@ -213,8 +213,8 @@ def run_generalized_loso():
         
         # Maximize GPU utilization for heavy covariance computation
         device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-        X_tensor = torch.from_numpy(X_mat).to(device)
-        Y_tensor = torch.from_numpy(Y_mat).to(device)
+        X_tensor = torch.from_numpy(X_mat).float().to(device)
+        Y_tensor = torch.from_numpy(Y_mat).float().to(device)
         
         cov_X = (X_tensor.T @ X_tensor).cpu().numpy()
         cov_XY = (X_tensor.T @ Y_tensor).cpu().numpy()
