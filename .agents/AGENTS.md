@@ -89,3 +89,16 @@ Every implementation must conclude by printing the following log. If a stage was
 ## SAFE CODING PRACTICES
 
 When utilizing external classes, objects, or modules, always verify the available attributes and methods before invoking them. Do not assume the existence of functions (e.g., `load_subject()`) or class attributes (e.g., `AADConformer.transformer`) without confirming their definition in the source file. This prevents `AttributeError` and runtime failures.
+
+---
+
+## SCIENTIFIC MEMORY AND REPOSITORY TRUTH
+
+1. **Repository is the Source of Truth:** Do not infer anything from previous chat history. The conversation should never become the memory. The repository is the single source of truth.
+2. **Canonical Initialization:** Every new task must begin by reading the canonical repository state. Before proposing any implementations, read:
+   - `docs/PROJECT_STATE.md`
+   - `docs/DISCOVERIES.md`
+   - `docs/FAILED_HYPOTHESES.md`
+3. **Explicitly Allow Contradiction:** Any previous conclusion may be wrong. If repository evidence contradicts previous discussion, discard the previous discussion immediately. Never defend earlier conclusions.
+4. **Justify Conclusions:** Force every conclusion to follow: FACT -> Evidence -> Inference -> Confidence. Never say "I think... therefore it is true."
+5. **Research Checklist:** Every debugging session must start by answering: What failed? What was measured? Could metric/preprocessing/evaluation/implementation be wrong? What evidence rules each out?
