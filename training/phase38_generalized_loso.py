@@ -7,6 +7,7 @@ import scipy.signal
 from sklearn.metrics import roc_auc_score
 import time
 from pathlib import Path
+import torch
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
@@ -86,10 +87,14 @@ def run_classical_test_suite(W, test_trials, max_lag, hop_len, window_len, suite
                 att = np.concatenate([att[-offset_samples:], np.zeros(-offset_samples)])
                 unatt = np.concatenate([unatt[-offset_samples:], np.zeros(-offset_samples)])
                 
-        # Build predictions globally for speed
+        # Build predictions globally for speed using GPU
         X_trial = build_lagged_matrix(eeg, max_lag)
-        # Pad beginning with zeros to align with original EEG indices
-        pred_full = np.concatenate([np.zeros(max_lag), X_trial @ W])
+        
+        device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        X_tensor = torch.from_numpy(X_trial).to(device)
+        W_tensor = torch.from_numpy(W).to(device)
+        
+        pred_full = np.concatenate([np.zeros(max_lag), (X_tensor @ W_tensor).cpu().numpy()])
                 
         for start in range(0, eeg.shape[1] - window_len + 1, hop_len):
             end = start + window_len
@@ -206,8 +211,13 @@ def run_generalized_loso():
         X_mat = np.vstack(X_train_list)
         Y_mat = np.concatenate(Y_train_list)
         
-        cov_X = X_mat.T @ X_mat
-        cov_XY = X_mat.T @ Y_mat
+        # Maximize GPU utilization for heavy covariance computation
+        device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        X_tensor = torch.from_numpy(X_mat).to(device)
+        Y_tensor = torch.from_numpy(Y_mat).to(device)
+        
+        cov_X = (X_tensor.T @ X_tensor).cpu().numpy()
+        cov_XY = (X_tensor.T @ Y_tensor).cpu().numpy()
         
         subject_data[sub_id] = {
             'cov_X': cov_X,
