@@ -323,8 +323,13 @@ def run_unsupervised_continual_learning(cache_dir, subject_ids, device):
             ZtZ_calib_only += ztz
             ZtY_calib_only += zty
             
-        ZtZ_fitted = ZtZ_prior + ZtZ_calib_only
-        ZtY_fitted = ZtY_prior + ZtY_calib_only
+        # The Generalized Prior is built from 680 trials (17 subjects * 40).
+        # If we just add it to the 5 Calibration trials, it completely washes out personalization.
+        # We scale it down to act as a weak prior equivalent to ~15 trials.
+        PRIOR_WEIGHT = 15.0 / (17.0 * 40.0)
+        
+        ZtZ_fitted = (ZtZ_prior * PRIOR_WEIGHT) + ZtZ_calib_only
+        ZtY_fitted = (ZtY_prior * PRIOR_WEIGHT) + ZtY_calib_only
         
         W_fitted = solve_ridge(ZtZ_fitted, ZtY_fitted, LAMBDA_RIDGE)
         model.load_analytical_weights(W_fitted)
@@ -420,10 +425,10 @@ def run_unsupervised_continual_learning(cache_dir, subject_ids, device):
         all_sim_results.append({'Subject': subj, 'Condition': 'Calibration_Only', 'Updates_Accepted': 0, '5_min_AUROC': calib_auroc, '15_min_AUROC': calib_auroc, '30_min_AUROC': calib_auroc, 'Final_AUROC': calib_auroc})
             
     df = pd.DataFrame(all_sim_results)
-    print("\n=======================================================")
+    print("=======================================================")
     print(" SUMMARY: PHASE 46 V3 RESULTS                          ")
     print("=======================================================")
-    summary = df.groupby('Condition').mean()[['Updates_Accepted', '5_min_AUROC', '15_min_AUROC', '30_min_AUROC', 'Final_AUROC']]
+    summary = df.groupby('Condition')[['Updates_Accepted', '5_min_AUROC', '15_min_AUROC', '30_min_AUROC', 'Final_AUROC']].mean()
     print(summary)
     
     df.to_csv("phase46_v3_unsupervised_online_report.csv", index=False)
