@@ -226,6 +226,8 @@ def main():
                 val_auc = 0.5
             best_val = max(best_val, val_auc)
             
+            print(f"    Epoch {epoch+1}/{EPOCHS} - Val AUROC: {val_auc:.4f} (Best: {best_val:.4f})")
+            
         print(f"  Fold {fold+1} Best AUROC: {best_val:.4f}")
         fold_aurocs.append(best_val)
         
