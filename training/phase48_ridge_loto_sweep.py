@@ -15,8 +15,8 @@ warnings.filterwarnings('ignore')
 # -------------------------------------------------------------------------
 SR = 128
 LAG_SAMPLES = 103  # ~800ms
-WINDOW_LENS = {'1.0s': int(1.0 * SR), '1.5s': int(1.5 * SR), '2.0s': int(2.0 * SR), '2.5s': int(2.5 * SR)}
-HOP_LEN = int(0.25 * SR)  # More fine-grained hopping
+WINDOW_LENS = {'0.5s': int(0.5 * SR), '0.75s': int(0.75 * SR), '1.0s': int(1.0 * SR)}
+HOP_LEN = int(0.125 * SR)  # More fine-grained hopping
 
 def build_ground_truth_envelope(trial, swap_triggers=False, delay_samples=0):
     eeg_full = trial['eeg'].numpy()
@@ -213,16 +213,16 @@ def main():
                 mean_auc = np.mean(fold_results[k])
                 print(f"  {k} Window: {mean_auc:.4f}")
                 
-            # Track best based on 2.0s window
-            if np.mean(fold_results['2.0s']) > best_auroc:
-                best_auroc = np.mean(fold_results['2.0s'])
+            # Track best based on 1.0s window
+            if np.mean(fold_results['1.0s']) > best_auroc:
+                best_auroc = np.mean(fold_results['1.0s'])
                 best_config = (swap, delay_ms)
                 
     print("\n=======================================================")
     print(f" BEST CONFIGURATION FOUND: ")
     print(f" Swap Triggers: {best_config[0]}")
     print(f" Cognitive Delay: {best_config[1]}ms")
-    print(f" Best 2.0s AUROC: {best_auroc:.4f}")
+    print(f" Best 1.0s AUROC: {best_auroc:.4f}")
     print("=======================================================")
 
 if __name__ == "__main__":

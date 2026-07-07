@@ -8,7 +8,7 @@ import scipy.io.wavfile as wav
 from pathlib import Path
 
 def extract_broadband_envelope(audio_data, sr=16000, target_sr=128):
-    """Extracts the speech envelope using Hilbert + Power Compression."""
+    """Extracts the speech envelope using a 28-band filterbank + Hilbert + Power Compression."""
     # 1. Safe Audio Normalization
     if np.issubdtype(audio_data.dtype, np.integer):
         audio = audio_data.astype(np.float32)
@@ -16,22 +16,43 @@ def extract_broadband_envelope(audio_data, sr=16000, target_sr=128):
     else:
         audio = audio_data.astype(np.float32)
         
-    # 2. Hilbert Envelope
-    analytic = scipy.signal.hilbert(audio)
-    env = np.abs(analytic)
+    # 2. 28-Band Logarithmic Filterbank (150 Hz to 4000 Hz)
+    num_bands = 28
+    edges = np.logspace(np.log10(150), np.log10(4000), num_bands + 1)
     
-    # 3. Power-law compression (Standard in KUL/DTU AAD pipelines)
-    env = np.power(env, 0.6)
+    broadband_env = np.zeros_like(audio)
     
-    # 4. Downsample BEFORE filtering (avoids numerical instability)
-    # resample_poly reduces the ratio using GCD (target_sr up, sr down)
-    env_ds = scipy.signal.resample_poly(env, target_sr, sr, axis=0)
+    # Compute next fast FFT length to massively speed up scipy.signal.hilbert
+    import scipy.fft
+    N = len(audio)
+    fast_N = scipy.fft.next_fast_len(N)
     
-    # 5. Low-pass filter at 8 Hz on the 128Hz signal (stable!)
+    for i in range(num_bands):
+        low = edges[i]
+        high = edges[i+1]
+        
+        # Bandpass filter for the current frequency band
+        b, a = scipy.signal.butter(2, [low, high], btype='bandpass', fs=sr)
+        band_audio = scipy.signal.filtfilt(b, a, audio)
+        
+        # Extract envelope for this specific band
+        analytic = scipy.signal.hilbert(band_audio, N=fast_N)[:N]
+        band_env = np.abs(analytic)
+        
+        # Power-law compression
+        band_env = np.power(band_env, 0.6)
+        
+        # Sum across all bands
+        broadband_env += band_env
+        
+    # 3. Downsample BEFORE filtering
+    env_ds = scipy.signal.resample_poly(broadband_env, target_sr, sr, axis=0)
+    
+    # 4. Low-pass filter at 8 Hz on the 128Hz signal (stable!)
     b_env, a_env = scipy.signal.butter(3, 8.0 / (target_sr / 2.0), btype='low')
     env_filt = scipy.signal.filtfilt(b_env, a_env, env_ds, axis=0)
     
-    # 6. Normalize Envelope (Z-score)
+    # 5. Normalize Envelope (Z-score)
     env_norm = (env_filt - np.mean(env_filt)) / (np.std(env_filt) + 1e-8)
     return env_norm
 
