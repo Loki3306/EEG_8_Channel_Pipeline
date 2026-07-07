@@ -114,23 +114,20 @@ class AASDSequenceDataset(Dataset):
         t_idx, seq_start = self.sequences[idx]
         tr = self.trials[t_idx]
         
-        win_eeg, win_a, win_b, win_labels = [], [], [], []
+        # 1. Grab the 10-second master sequences
+        eeg_seq = tr['eeg'][:, seq_start:seq_start + SEQ_SAMPLES] # (60, 1280)
+        a_seq = tr['env_l'][seq_start:seq_start + SEQ_SAMPLES]    # (1280,)
+        b_seq = tr['env_r'][seq_start:seq_start + SEQ_SAMPLES]    # (1280,)
+        att_seq = tr['att'][seq_start:seq_start + SEQ_SAMPLES]    # (1280,)
         
-        for w in range(NUM_WINDOWS):
-            win_start = seq_start + w * HOP_SAMPLES
-            win_end = win_start + WIN_SAMPLES
-            
-            att_spk = get_attended_speaker_at_time(win_start + WIN_SAMPLES//2, tr['sp'])
-            
-            win_eeg.append(tr['eeg'][:, win_start:win_end])
-            win_a.append(tr['env_l'][win_start:win_end])
-            win_b.append(tr['env_r'][win_start:win_end])
-            win_labels.append(1.0 if att_spk == 'L' else 0.0)
-            
-        e = torch.from_numpy(np.stack(win_eeg)).float()
-        a = torch.from_numpy(np.stack(win_a)).float()
-        b = torch.from_numpy(np.stack(win_b)).float()
-        y = torch.from_numpy(np.array(win_labels)).float()
+        # 2. Vectorized sliding window extraction (Instant C-level slicing!)
+        # eeg_seq.unfold -> (60, 17, 256) -> permute -> (17, 60, 256)
+        e = eeg_seq.unfold(-1, WIN_SAMPLES, HOP_SAMPLES).permute(1, 0, 2)
+        a = a_seq.unfold(-1, WIN_SAMPLES, HOP_SAMPLES) # (17, 256)
+        b = b_seq.unfold(-1, WIN_SAMPLES, HOP_SAMPLES) # (17, 256)
+        
+        # 3. Label is the center sample of each 2.0s window
+        y = att_seq.unfold(-1, WIN_SAMPLES, HOP_SAMPLES)[:, WIN_SAMPLES//2] # (17,)
         
         return e, a, b, y
 
@@ -170,7 +167,18 @@ def main():
             
             # Discard trials that are too short to form a single sequence
             if eeg.shape[1] >= SEQ_SAMPLES:
-                all_trials.append({'eeg': eeg, 'env_l': env_l, 'env_r': env_r, 'sp': sp})
+                # Precompute label array at sample level to avoid Python loops later
+                att_array = np.zeros(eeg.shape[1], dtype=np.float32)
+                for i in range(eeg.shape[1]):
+                    att_array[i] = 1.0 if get_attended_speaker_at_time(i, sp) == 'L' else 0.0
+                
+                # Store as PyTorch tensors in RAM (fast dataloader access)
+                all_trials.append({
+                    'eeg': torch.from_numpy(eeg).float(), 
+                    'env_l': torch.from_numpy(env_l).float(), 
+                    'env_r': torch.from_numpy(env_r).float(), 
+                    'att': torch.from_numpy(att_array)
+                })
                 trial_groups.append(subj_idx)
     
     print(f"Total Valid Trials Loaded: {len(all_trials)}")
@@ -190,8 +198,8 @@ def main():
         test_ds = AASDSequenceDataset(test_trials)
         
         # Using num_workers=2 helps fetch sequences in parallel so GPU doesn't starve
-        train_loader = DataLoader(train_ds, batch_size=BATCH_SIZE, shuffle=True, num_workers=2, pin_memory=True)
-        test_loader = DataLoader(test_ds, batch_size=BATCH_SIZE, shuffle=False, num_workers=2, pin_memory=True)
+        train_loader = DataLoader(train_ds, batch_size=BATCH_SIZE, shuffle=True, num_workers=4, pin_memory=True)
+        test_loader = DataLoader(test_ds, batch_size=BATCH_SIZE, shuffle=False, num_workers=4, pin_memory=True)
         
         print(f"Fold {fold+1}: Training on {len(train_ds)} sequences, Testing on {len(test_ds)} sequences...")
         
