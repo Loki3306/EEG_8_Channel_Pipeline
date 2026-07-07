@@ -144,15 +144,11 @@ if __name__ == "__main__":
         subj_id = os.path.basename(mat_file).split('.')[0]
         cache_path = cache_dir / f"{subj_id}_processed.pt"
         
-        if not cache_path.exists():
-            print(f"  Processing {subj_id}...")
-            try:
-                trials = load_trials_from_raw(mat_file, wav_dir)
-                torch.save({'raw': trials}, cache_path)
-                print(f"    -> Saved {subj_id}_processed.pt (extracted {len(trials)} trials)")
-            except Exception as e:
-                print(f"    -> ERROR processing {subj_id}: {e}")
-        else:
-            print(f"  {subj_id} already cached.")
-    
-    print("\nDone! You can now run Phase 47.")
+        # Force rebuild
+        print(f"  Processing {subj_id} (Forcing Rebuild)...")
+        try:
+            trials = load_trials_from_raw(mat_file, wav_dir)
+            torch.save({'raw': trials}, cache_path)
+            print(f"    -> Saved {subj_id}_processed.pt (extracted {len(trials)} trials)")
+        except Exception as e:
+            print(f"    -> ERROR processing {subj_id}: {e}")
