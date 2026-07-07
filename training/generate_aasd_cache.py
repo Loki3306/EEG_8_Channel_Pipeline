@@ -138,15 +138,24 @@ if __name__ == "__main__":
     
     print(f"Generating PRISTINE cache directly from WAV files in {cache_dir}...")
     
-    for mat_file in mat_files:
+    from joblib import Parallel, delayed
+    
+    def process_subject(mat_file):
         subj_id = os.path.basename(mat_file).split('.')[0]
         cache_path = cache_dir / f"{subj_id}_processed.pt"
         
-        # Force rebuild
-        print(f"  Processing {subj_id} (Forcing Rebuild)...")
+        if cache_path.exists():
+            print(f"  [SKIPPED] {subj_id} is already cached!")
+            return
+            
+        print(f"  [STARTING] {subj_id}...")
         try:
             trials = load_trials_from_raw(mat_file, wav_dir)
             torch.save({'raw': trials}, cache_path)
-            print(f"    -> Saved {subj_id}_processed.pt (extracted {len(trials)} trials)")
+            print(f"  [SUCCESS] {subj_id} saved ({len(trials)} trials)")
         except Exception as e:
-            print(f"    -> ERROR processing {subj_id}: {e}")
+            print(f"  [ERROR] processing {subj_id}: {e}")
+            
+    # Process using all available CPU cores! (Kaggle has 4 cores)
+    Parallel(n_jobs=-1)(delayed(process_subject)(mat_file) for mat_file in mat_files)
+
