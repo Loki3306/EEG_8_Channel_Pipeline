@@ -15,8 +15,8 @@ warnings.filterwarnings('ignore')
 # -------------------------------------------------------------------------
 SR = 128
 LAG_SAMPLES = 103  # ~800ms
-WINDOW_LENS = {'2.5s': int(2.5 * SR), '5.0s': int(5.0 * SR), '10.0s': int(10.0 * SR)}
-HOP_LEN = int(1.0 * SR)
+WINDOW_LENS = {'1.0s': int(1.0 * SR), '1.5s': int(1.5 * SR), '2.0s': int(2.0 * SR), '2.5s': int(2.5 * SR)}
+HOP_LEN = int(0.25 * SR)  # More fine-grained hopping
 
 def build_ground_truth_envelope(trial, swap_triggers=False, delay_samples=0):
     eeg_full = trial['eeg'].numpy()
@@ -61,8 +61,6 @@ def build_ground_truth_envelope(trial, swap_triggers=False, delay_samples=0):
         unatt[prev_idx:] = env_l[prev_idx:]
         
     # Align to network output (clip end)
-    # The EEG matrix X[t] uses EEG[t : t+103]. So X[t] predicts Audio[t].
-    # Thus we just drop the last LAG_SAMPLES-1 from the envelope.
     att = att[:-(LAG_SAMPLES - 1)]
     unatt = unatt[:-(LAG_SAMPLES - 1)]
     return att, unatt
@@ -76,15 +74,13 @@ def build_lagged_eeg(eeg_data):
     C, T = eeg_data.shape
     new_T = T - LAG_SAMPLES + 1
     
-    # We use stride tricks for zero-copy memory efficiency
     shape = (new_T, C, LAG_SAMPLES)
     strides = (eeg_data.strides[1], eeg_data.strides[0], eeg_data.strides[1])
     X = np.lib.stride_tricks.as_strided(eeg_data, shape=shape, strides=strides)
     
-    # Flatten spatial and lag dimensions
     return X.reshape(new_T, -1)
 
-def compute_trial_auroc(pred, att, unatt):
+def compute_trial_auroc(pred, att, unatt, switch_points, delay_samples):
     results = {}
     for win_name, win_len in WINDOW_LENS.items():
         num_windows = (len(pred) - win_len) // HOP_LEN + 1
@@ -97,6 +93,19 @@ def compute_trial_auroc(pred, att, unatt):
             start = i * HOP_LEN
             end = start + win_len
             
+            # EXCLUDE windows that overlap the Cognitive Gap!
+            # The gap is from raw_idx to raw_idx + delay_samples.
+            overlap = False
+            for _, raw_idx in switch_points:
+                gap_start = raw_idx
+                gap_end = raw_idx + delay_samples
+                if max(start, gap_start) < min(end, gap_end):
+                    overlap = True
+                    break
+                    
+            if overlap:
+                continue
+            
             p = pred[start:end]
             a = att[start:end]
             u = unatt[start:end]
@@ -108,6 +117,10 @@ def compute_trial_auroc(pred, att, unatt):
                 sa.append(np.corrcoef(p, a)[0, 1])
                 su.append(np.corrcoef(p, u)[0, 1])
                 
+        if len(sa) == 0:
+            results[win_name] = 0.5
+            continue
+            
         y_true = [1] * len(sa) + [0] * len(su)
         y_scores = sa + su
         if len(np.unique(y_true)) < 2: 
@@ -135,7 +148,7 @@ def main():
         
     # Sweep Parameters
     trigger_swaps = [False, True]
-    delay_ms_list = [0, 250, 750, 1250, 2000]
+    delay_ms_list = [1500, 1750, 2000, 2250, 2500]
     
     # 5-Fold Cross Validation
     num_trials = len(trials)
@@ -185,10 +198,11 @@ def main():
                     X_test = X_all[idx]
                     y_att = att_all[idx]
                     y_unatt = unatt_all[idx]
+                    switch_points = trials[idx]['meta']['switch_points']
                     
                     pred = ridge.predict(X_test)
                     
-                    trial_aurocs = compute_trial_auroc(pred, y_att, y_unatt)
+                    trial_aurocs = compute_trial_auroc(pred, y_att, y_unatt, switch_points, delay_samples)
                     for k in fold_results.keys():
                         fold_results[k].append(trial_aurocs[k])
                         
@@ -197,16 +211,16 @@ def main():
                 mean_auc = np.mean(fold_results[k])
                 print(f"  {k} Window: {mean_auc:.4f}")
                 
-            # Track best based on 10s window (standard AAD metric)
-            if np.mean(fold_results['10.0s']) > best_auroc:
-                best_auroc = np.mean(fold_results['10.0s'])
+            # Track best based on 2.0s window
+            if np.mean(fold_results['2.0s']) > best_auroc:
+                best_auroc = np.mean(fold_results['2.0s'])
                 best_config = (swap, delay_ms)
                 
     print("\n=======================================================")
     print(f" BEST CONFIGURATION FOUND: ")
     print(f" Swap Triggers: {best_config[0]}")
     print(f" Cognitive Delay: {best_config[1]}ms")
-    print(f" Best 10s AUROC: {best_auroc:.4f}")
+    print(f" Best 2.0s AUROC: {best_auroc:.4f}")
     print("=======================================================")
 
 if __name__ == "__main__":
