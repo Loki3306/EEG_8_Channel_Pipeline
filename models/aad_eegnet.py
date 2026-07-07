@@ -8,9 +8,10 @@ class AAD_EEGNet(nn.Module):
     We use causal padding to ensure no future information leaks into the predictions,
     which is essential for simulating real-world online decoding.
     """
-    def __init__(self, in_channels=8, F1=32, D=2, F2=64, temporal_kernel=64, max_lag=24):
+    def __init__(self, in_channels=60, F1=32, D=2, F2=64, temporal_kernel=64, max_lag=24):
         super(AAD_EEGNet, self).__init__()
         
+        self.in_channels = in_channels
         self.F1 = F1
         self.D = D
         self.F2 = F2
@@ -36,7 +37,25 @@ class AAD_EEGNet(nn.Module):
         
         # Decoder: Map F2 features to 1D scalar (envelope prediction)
         # We use a 1D Conv as a causal ridge decoder equivalent.
-        self.decoder = nn.Conv1d(F2, 1, kernel_size=max_lag + 1, bias=False)
+        self.decoder = nn.Conv1d(F2, 1, kernel_size=25, bias=True)
+        
+    def get_channel_importance(self):
+        """
+        Computes the absolute sum of the spatial filter weights for each input channel.
+        Returns a numpy array of shape (in_channels,)
+        """
+        # spatial_conv weight shape: (F1*D, 1, in_channels, 1)
+        # because groups=F1, each group (F1) has D filters mapping from 1 input channel.
+        # The weight tensor is of shape (out_channels, in_channels/groups, kH, kW)
+        # -> (F1*D, 1, in_channels, 1)
+        weights = self.spatial_conv.weight.detach().cpu().numpy()
+        # Sum absolute weights across all filters for each input channel
+        # weights is (F1*D, 1, in_channels, 1) -> absolute sum over axis 0
+        importance = np.sum(np.abs(weights), axis=(0, 1, 3))
+        # Normalize to sum to 1
+        if np.sum(importance) > 0:
+            importance = importance / np.sum(importance)
+        return importance
         
     def _causal_pad(self, x, kernel_size):
         # x is [B, C, H, W (Time)]

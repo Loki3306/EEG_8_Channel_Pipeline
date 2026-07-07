@@ -16,8 +16,8 @@ if str(REPO_ROOT) not in sys.path:
 
 from models.aad_eegnet import AAD_EEGNet
 
-# --- CONSTANTS & CONFIG ---
-PHYSICAL_8_CHANNELS = [0, 2, 5, 13, 23, 31, 41, 49]
+# We will train on all 60 channels to verify if AASD contains the signal.
+# Removing PHYSICAL_8_CHANNELS slicing.
 MAX_LAG = 24
 WINDOW_LEN = 64 * 5
 HOP_LEN = 64 * 1
@@ -101,9 +101,9 @@ def simulate_trial_unsupervised(model, trial, device):
     
     att, unatt = build_ground_truth_envelope(trial)
     
-    eeg_8ch = torch.from_numpy(eeg).float().unsqueeze(0).to(device)[:, PHYSICAL_8_CHANNELS, :]
+    eeg_60ch = torch.from_numpy(eeg).float().unsqueeze(0).to(device)
     with torch.no_grad():
-        pred = model(eeg_8ch).squeeze(0).cpu().numpy()
+        pred = model(eeg_60ch).squeeze(0).cpu().numpy()
         
     num_windows = (eeg.shape[1] - WINDOW_LEN) // HOP_LEN + 1
     if num_windows <= 0: return [], []
@@ -152,8 +152,7 @@ class AADDataset(torch.utils.data.Dataset):
             eeg = np.pad(eeg, ((0, 0), (0, self.max_len - T)))
             att = np.pad(att, (0, self.max_len - T))
             
-        eeg_8ch = eeg[PHYSICAL_8_CHANNELS, :]
-        return torch.from_numpy(eeg_8ch).float(), torch.from_numpy(att).float()
+        return torch.from_numpy(eeg).float(), torch.from_numpy(att).float()
 
 def run_native_eegnet(cache_dir, subject_ids, device):
     print("\n=======================================================")
@@ -168,6 +167,9 @@ def run_native_eegnet(cache_dir, subject_ids, device):
         subject_data[subj] = cached['raw']
     print("Data loaded.\n")
     
+    fold_aurocs = []
+    fold_importances = []
+    
     for test_subj in subject_ids:
         print(f"\n>> Leaving out Test Subject: {test_subj}")
         
@@ -181,7 +183,7 @@ def run_native_eegnet(cache_dir, subject_ids, device):
         train_ds = AADDataset(train_trials)
         train_loader = torch.utils.data.DataLoader(train_ds, batch_size=BATCH_SIZE, shuffle=True, num_workers=0)
         
-        model = AAD_EEGNet(in_channels=8, max_lag=MAX_LAG).to(device)
+        model = AAD_EEGNet(in_channels=60, max_lag=MAX_LAG).to(device)
         optimizer = torch.optim.AdamW(model.parameters(), lr=LR, weight_decay=0.0)
         scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=EPOCHS)
         
@@ -228,6 +230,23 @@ def run_native_eegnet(cache_dir, subject_ids, device):
             
         zs_auroc = compute_trial_auroc(zs_sa, zs_su)
         print(f"   [Zero-Shot (Generalized) AUROC on {test_subj}]: {zs_auroc:.4f}")
+        fold_aurocs.append(zs_auroc)
+        
+        # Extract channel importance
+        fold_importances.append(model.get_channel_importance())
+        
+    print("\n=======================================================")
+    print(" SUMMARY OF ZERO-SHOT GENERALIZATION (ALL 60 CHANNELS) ")
+    print("=======================================================")
+    print(f"Mean AUROC across {len(subject_ids)} subjects: {np.mean(fold_aurocs):.4f}")
+    
+    # Average channel importance
+    if len(fold_importances) > 0:
+        mean_importance = np.mean(fold_importances, axis=0)
+        top_channels = np.argsort(mean_importance)[::-1]
+        print("\nTop 10 Most Important Channels (Indices):")
+        for rank, ch_idx in enumerate(top_channels[:10]):
+            print(f"  #{rank+1}: Channel {ch_idx} (Weight: {mean_importance[ch_idx]:.4f})")
 
 def main():
     set_seed(42)
