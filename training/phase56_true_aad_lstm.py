@@ -129,14 +129,14 @@ def extract_sequence_windows(trial):
             
             att_spk = get_attended_speaker_at_time(win_start + WIN_SAMPLES//2, switch_points)
             
-            # Speaker A is Attended, Speaker B is Unattended
-            aud_a = env_l[win_start:win_end] if att_spk == 'L' else env_r[win_start:win_end]
-            aud_b = env_r[win_start:win_end] if att_spk == 'L' else env_l[win_start:win_end]
+            # Real product behavior: Stream A is Left Speaker, Stream B is Right Speaker
+            aud_a = env_l[win_start:win_end]
+            aud_b = env_r[win_start:win_end]
             
             win_eeg.append(eeg[:, win_start:win_end])
             win_a.append(aud_a)
             win_b.append(aud_b)
-            win_labels.append(1.0) # 1.0 means Speaker A is attended
+            win_labels.append(1.0 if att_spk == 'L' else 0.0)
             
         seq_eeg.append(np.stack(win_eeg))
         seq_aud_a.append(np.stack(win_a))
