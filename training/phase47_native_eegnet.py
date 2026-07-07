@@ -187,7 +187,7 @@ def run_native_eegnet(cache_dir, subject_ids, device):
         train_ds = AADDataset(train_trials)
         train_loader = torch.utils.data.DataLoader(train_ds, batch_size=BATCH_SIZE, shuffle=True, num_workers=0)
         
-        model = AAD_EEGNet(in_channels=60, max_lag=MAX_LAG).to(device)
+        model = AAD_EEGNet(in_channels=60).to(device)
         optimizer = torch.optim.AdamW(model.parameters(), lr=LR, weight_decay=0.0)
         scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=EPOCHS)
         
