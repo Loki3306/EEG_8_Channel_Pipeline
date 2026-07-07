@@ -4,7 +4,7 @@ import torch.optim as optim
 import torch.nn.functional as F
 from torch.utils.data import Dataset, DataLoader
 from sklearn.metrics import roc_auc_score
-from sklearn.model_selection import GroupKFold
+from sklearn.model_selection import KFold
 import numpy as np
 from pathlib import Path
 
@@ -101,7 +101,6 @@ class AASDSequenceDataset(Dataset):
         self.trials = trials
         self.sequences = []
         
-        # Pre-calculate all valid sequence start indices
         for t_idx, tr in enumerate(trials):
             T = tr['eeg'].shape[1]
             for seq_start in range(0, T - SEQ_SAMPLES + 1, int(SR * 2.0)):
@@ -146,11 +145,10 @@ def main():
         return
         
     print("\n=======================================================")
-    print(" PHASE 57: UNIVERSAL LSTM SEQUENCE MODEL (LOSO)")
+    print(" PHASE 58: KNOWN-SUBJECT LSTM SEQUENCE MODEL (LOTO)")
     print("=======================================================\n")
     
     all_trials = []
-    trial_groups = []
     
     print(f"Loading {len(cache_files)} subjects into RAM...")
     for subj_idx, cache_path in enumerate(sorted(cache_files)):
@@ -163,33 +161,30 @@ def main():
             env_r = tr['env_r'].numpy()
             sp = tr['meta']['switch_points']
             
-            # Pre-normalize the raw trial to save compute in dataloader
             eeg = (eeg - np.mean(eeg, axis=1, keepdims=True)) / (np.std(eeg, axis=1, keepdims=True) + 1e-8)
             env_l = (env_l - np.mean(env_l)) / (np.std(env_l) + 1e-8)
             env_r = (env_r - np.mean(env_r)) / (np.std(env_r) + 1e-8)
             
-            # Discard trials that are too short to form a single sequence
             if eeg.shape[1] >= SEQ_SAMPLES:
                 all_trials.append({'eeg': eeg, 'env_l': env_l, 'env_r': env_r, 'sp': sp})
-                trial_groups.append(subj_idx)
     
     print(f"Total Valid Trials Loaded: {len(all_trials)}")
             
-    # GroupKFold guarantees that trials from the same subject are never split between train and test!
-    gkf = GroupKFold(n_splits=5)
+    # Standard KFold randomly shuffles trials across all subjects.
+    # The model will see Subject 1 during training, and test on Subject 1's unseen trials.
+    kf = KFold(n_splits=5, shuffle=True, random_state=42)
     fold_aurocs = []
     
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print(f"Training on Device: {device}\n")
     
-    for fold, (train_idx, test_idx) in enumerate(gkf.split(all_trials, groups=trial_groups)):
+    for fold, (train_idx, test_idx) in enumerate(kf.split(all_trials)):
         train_trials = [all_trials[i] for i in train_idx]
         test_trials = [all_trials[i] for i in test_idx]
         
         train_ds = AASDSequenceDataset(train_trials)
         test_ds = AASDSequenceDataset(test_trials)
         
-        # Using num_workers=2 helps fetch sequences in parallel so GPU doesn't starve
         train_loader = DataLoader(train_ds, batch_size=BATCH_SIZE, shuffle=True, num_workers=2, pin_memory=True)
         test_loader = DataLoader(test_ds, batch_size=BATCH_SIZE, shuffle=False, num_workers=2, pin_memory=True)
         
@@ -205,7 +200,7 @@ def main():
             for b_e, b_a, b_b, b_y in train_loader:
                 b_e, b_a, b_b, b_y = b_e.to(device), b_a.to(device), b_b.to(device), b_y.to(device)
                 optimizer.zero_grad()
-                logits, _ = model(b_e, b_a, b_b) # (B, SeqLen)
+                logits, _ = model(b_e, b_a, b_b)
                 loss = criterion(logits, b_y) 
                 loss.backward()
                 optimizer.step()
@@ -229,7 +224,7 @@ def main():
         print(f"  Fold {fold+1} Best AUROC: {best_val:.4f}")
         fold_aurocs.append(best_val)
         
-    print(f"\nAVERAGE 5-FOLD LOSO AUROC: {np.mean(fold_aurocs):.4f}")
+    print(f"\nAVERAGE 5-FOLD KNOWN-SUBJECT AUROC: {np.mean(fold_aurocs):.4f}")
 
 if __name__ == "__main__":
     main()
