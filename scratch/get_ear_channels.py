@@ -3,7 +3,6 @@ import os
 import glob
 
 def main():
-    # Find any subject's MAT file
     base_dir = '/kaggle/input/datasets/lokeshgile/aasd-processed-eeg/Processed EEG'
     mat_files = glob.glob(f'{base_dir}/*/*.mat')
     
@@ -14,17 +13,16 @@ def main():
     mat_path = mat_files[0]
     print(f"Loading {mat_path} to read channel labels...")
     
-    mat = scipy.io.loadmat(mat_path, squeeze_me=True, struct_as_record=False)
-    eeg_var = [k for k in mat.keys() if not k.startswith('__')][0]
-    eeg_obj = mat[eeg_var]
+    # Use simplify_cells=True to properly parse the nested structs
+    mat = scipy.io.loadmat(mat_path, simplify_cells=True)
     
-    if not hasattr(eeg_obj, 'chanlocs'):
-        print("No chanlocs found!")
+    if 'EEG' in mat and 'chanlocs' in mat['EEG']:
+        chanlocs = mat['EEG']['chanlocs']
+        channel_names = [c['labels'].upper() for c in chanlocs]
+    else:
+        print("No chanlocs found in mat['EEG']!")
         return
         
-    chanlocs = eeg_obj.chanlocs
-    channel_names = [getattr(ch, 'labels', str(ch)).upper() for ch in chanlocs]
-    
     target_channels = ['T7', 'T8', 'TP7', 'TP8', 'FT7', 'FT8', 'P7', 'P8']
     
     print("\nTarget Ear-EEG Channels:")
