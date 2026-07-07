@@ -128,12 +128,8 @@ if __name__ == "__main__":
     data_root = '/kaggle/input/datasets/lokeshgile/aasd-processed-eeg/Processed EEG'
     wav_dir = '/kaggle/input/datasets/lokeshgile/aasd-audio/Stimuli Audio'
     
-    mat_files = []
-    for root, dirs, files in os.walk(data_root):
-        for file in files:
-            if file.endswith('.mat') and not file.startswith('._'):
-                mat_files.append(os.path.join(root, file))
-    mat_files.sort()
+    # FAST TESTING: Only process S1!
+    mat_files = [os.path.join(data_root, 'S1', 'S1.mat')]
     
     cache_dir = Path('/kaggle/working/eeg_cache')
     cache_dir.mkdir(parents=True, exist_ok=True)
