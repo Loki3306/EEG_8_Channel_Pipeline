@@ -105,7 +105,11 @@ def simulate_trial_unsupervised(model, trial, device):
     with torch.no_grad():
         pred = model(eeg_60ch).squeeze(0).cpu().numpy()
         
-    num_windows = (eeg.shape[1] - WINDOW_LEN) // HOP_LEN + 1
+    # Align att and unatt exactly with pred (clip last 102 samples)
+    att = att[:-102]
+    unatt = unatt[:-102]
+        
+    num_windows = (len(pred) - WINDOW_LEN) // HOP_LEN + 1
     if num_windows <= 0: return [], []
     
     true_att_corr, true_unatt_corr = [], []
@@ -201,9 +205,12 @@ def run_native_eegnet(cache_dir, subject_ids, device):
                 optimizer.zero_grad()
                 pred = model(X)
                 
-                # Align Y for temporal convolution delay and skip initial padded frames
-                y_aligned = y[:, MAX_LAG:]
-                pred_aligned = pred[:, MAX_LAG:]
+                # The network has a temporal receptive field of 103 samples (reduction of 102).
+                # pred[t] maps to EEG[t : t+103].
+                # This perfectly correlates with the stimulus at time t (Audio[t]).
+                # Therefore, we align pred[0 : T-102] with y[0 : T-102].
+                y_aligned = y[:, :-102]
+                pred_aligned = pred
                 
                 # Loss is MSE + 0.1 * (1 - Pearson Correlation)
                 corr = safe_corr_torch(pred_aligned, y_aligned).mean()
