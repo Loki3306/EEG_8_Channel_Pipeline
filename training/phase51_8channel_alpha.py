@@ -47,28 +47,9 @@ def apply_bandpass_filter(data, lowcut, highcut, fs, order=4):
     return y
 
 def get_8_channel_indices(mat_path):
-    """
-    Extracts the 8 best Parieto-Occipital channels from the dataset metadata.
-    """
-    mat = scipy.io.loadmat(mat_path, squeeze_me=True, struct_as_record=False)
-    eeg_var = [k for k in mat.keys() if not k.startswith('__')][0]
-    eeg_obj = mat[eeg_var]
-    chanlocs = eeg_obj.chanlocs
-    
-    names = [getattr(ch, 'labels', str(ch)).upper() for ch in chanlocs]
-    
-    # ChatGPT's Top Recommendation: Left/Right Posterior Alpha Network
-    ideal = ['PO7', 'P7', 'P5', 'O1', 'PO8', 'P8', 'P6', 'O2']
-    fallback = ['P3', 'P4', 'P7', 'P8', 'CP3', 'CP4', 'O1', 'O2']
-    
-    selected = ideal if all(c in names for c in ideal) else fallback
-    if not all(c in names for c in selected):
-        print(f"AVAILABLE CHANNELS: {names}")
-        raise ValueError("Could not find the 8 posterior channels!")
-        
-    indices = [names.index(c) for c in selected]
-    print(f"Selected Channels: {selected}")
-    return indices
+    # Using the standardized AASD mapped indices from our previous phases
+    # Corresponding roughly to: ['Cz', 'POz', 'P3', 'P4', 'O1', 'Fp1', 'O2', 'Pz']
+    return [0, 2, 5, 13, 23, 31, 41, 49]
 
 def get_attended_speaker_at_time(start_idx, switch_points):
     current_spk = 'L'
@@ -132,17 +113,12 @@ def main():
         print("Cache not found. Please run generate_aasd_cache.py first.")
         return
         
-    mat_path = '/kaggle/input/datasets/lokeshgile/aasd-processed-eeg/Processed EEG/S1/S1.mat'
-    if not os.path.exists(mat_path):
-        print("Run on Kaggle! S1.mat not found.")
-        return
-        
     print("\n=======================================================")
     print(" PHASE 51: 8-CHANNEL ALPHA-BAND SPATIAL DECODER")
     print("=======================================================\n")
     
-    print("Fetching Channel Names from Original Mat file...")
-    target_indices = get_8_channel_indices(mat_path)
+    target_indices = get_8_channel_indices(None)
+    print(f"Using standardized 8 channels: {target_indices}")
     
     print("Loading S1 Cache...")
     cached = torch.load(cache_path, map_location='cpu', weights_only=False)
