@@ -190,7 +190,9 @@ def main():
                 y_train = np.concatenate([att_all[i] for i in train_idx])
                 
                 # Fit fast Analytical Ridge
-                ridge = Ridge(alpha=100.0, solver='cholesky')
+                # CRITICAL: We must use massive regularization for EEG (1e5)
+                # because we have 6180 features. alpha=100 causes severe overfitting.
+                ridge = Ridge(alpha=1e5, solver='cholesky')
                 ridge.fit(X_train, y_train)
                 
                 # Evaluate Test Set
