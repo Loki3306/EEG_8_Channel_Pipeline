@@ -15,7 +15,7 @@ def load_wavlm_model(device):
     return model
 
 @torch.no_grad()
-def extract_wavlm_features_stereo(audio_l, audio_r, model, device, target_length):
+def extract_wavlm_features_stereo(audio_l, audio_r, model, device):
     """
     Extracts 768-dim WavLM features for both Left and Right channels simultaneously (Batch Size 2).
     Uses Mixed Precision (FP16) to double GPU efficiency and halve VRAM usage.
@@ -39,13 +39,8 @@ def extract_wavlm_features_stereo(audio_l, audio_r, model, device, target_length
         outputs = model(audio_tensor)
         hidden_states = outputs.last_hidden_state # [2, TimeWavLM, 768]
     
-    # 3. Interpolate from 50Hz (WavLM) to 128Hz (EEG)
-    # Convert back to float32 for precise interpolation
-    hidden_states = hidden_states.transpose(1, 2).float() # [2, 768, TimeWavLM]
-    interpolated = torch.nn.functional.interpolate(hidden_states, size=target_length, mode='linear', align_corners=False)
-    
-    # 4. Return to CPU to save GPU memory immediately
-    final_features = interpolated.transpose(1, 2).cpu() # [2, target_length, 768]
+    # Return native 50Hz features in FP16 to drastically save Disk Space (460MB instead of 2.3GB)
+    final_features = hidden_states.cpu().half().clone().detach() # [2, TimeWavLM, 768]
     return final_features[0], final_features[1]
 
 def load_trials_from_raw(mat_path, wav_dir, wavlm_model, device):
@@ -85,9 +80,9 @@ def load_trials_from_raw(mat_path, wav_dir, wavlm_model, device):
         wav_path = os.path.join(wav_dir, f"mixed_{audio_id:03d}.wav")
         if not os.path.exists(wav_path): continue
             
-        # Extract WavLM Embeddings efficiently in Stereo
+        # Extract WavLM Embeddings efficiently in Stereo (50Hz FP16)
         sr, wav_data = wav.read(wav_path)
-        wavlm_l, wavlm_r = extract_wavlm_features_stereo(wav_data[:, 0], wav_data[:, 1], wavlm_model, device, target_length=eeg_target_length)
+        wavlm_l, wavlm_r = extract_wavlm_features_stereo(wav_data[:, 0], wav_data[:, 1], wavlm_model, device)
         
         # Find Switch Points
         epoch_start_lat = trial_idx * 7680 + 1
@@ -103,12 +98,11 @@ def load_trials_from_raw(mat_path, wav_dir, wavlm_model, device):
                     
         switch_points.sort(key=lambda x: x[1])
         
-        min_len = min(trial_eeg_norm.shape[0], wavlm_l.shape[0], wavlm_r.shape[0])
-        
+        # Keep native lengths (EEG is 128Hz, WavLM is 50Hz)
         trials.append({
-            'eeg': torch.from_numpy(trial_eeg_norm[:min_len].T).float(), # Transpose to (60, Time)
-            'wavlm_l': wavlm_l[:min_len].float(),
-            'wavlm_r': wavlm_r[:min_len].float(),
+            'eeg': torch.from_numpy(trial_eeg_norm.T).float(), # Transpose to (60, Time_EEG)
+            'wavlm_l': wavlm_l, # [Time_WavLM, 768] (FP16)
+            'wavlm_r': wavlm_r,
             'meta': {'switch_points': switch_points}
         })
         
