@@ -184,3 +184,38 @@ class TCNAADModel(nn.Module):
         logits = self.classifier(tcn_pool).squeeze(-1)
         
         return logits, None
+
+class HybridMoEAADModel(nn.Module):
+    def __init__(self, eeg_channels=8, latent_dim=64, tcn_channels=[64, 64, 64], kernel_size=2, dropout=0.3):
+        super().__init__()
+        # We instantiate two complete independent backbones to prevent feature entanglement
+        self.wavlm_expert = TCNAADModel(eeg_channels, latent_dim, tcn_channels, kernel_size, dropout, use_wavlm=True)
+        self.multiband_expert = TCNAADModel(eeg_channels, latent_dim, tcn_channels, kernel_size, dropout, use_wavlm=False, audio_channels=16)
+        
+        # A small gating network that looks at the EEG to determine which expert to trust
+        self.gate = nn.Sequential(
+            nn.Conv1d(eeg_channels, 16, kernel_size=33, padding=16),
+            nn.BatchNorm1d(16),
+            nn.ReLU(),
+            nn.AdaptiveAvgPool1d(1),
+            nn.Flatten(),
+            nn.Linear(16, 1),
+            nn.Sigmoid() # Outputs alpha (0 to 1)
+        )
+        
+    def forward(self, eeg_seq, wavlm_a, wavlm_b, multi_a, multi_b):
+        B, SeqLen, C, T = eeg_seq.shape
+        eeg_flat = eeg_seq.reshape(B * SeqLen, C, T)
+        
+        # Calculate gating weight based on the EEG signal
+        # The gate determines how much to trust WavLM vs Multiband for this specific subject/sequence
+        alpha = self.gate(eeg_flat).reshape(B, SeqLen).mean(dim=1) # [B]
+        
+        # Forward pass through both experts
+        logits_wavlm, _ = self.wavlm_expert(eeg_seq, wavlm_a, wavlm_b) # [B]
+        logits_multi, _ = self.multiband_expert(eeg_seq, multi_a, multi_b) # [B]
+        
+        # Final prediction is a weighted sum of both expert predictions
+        hybrid_logits = (alpha * logits_wavlm) + ((1 - alpha) * logits_multi)
+        
+        return hybrid_logits, None
