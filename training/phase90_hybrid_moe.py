@@ -206,11 +206,16 @@ def main():
                     logits, alpha = model(b_e, b_wa, b_wb, b_ma, b_mb)
                     bce_loss = criterion(logits, b_y)
                     
-                    # We want the gate to be decisive (entropy minimization) to force it to pick an expert
-                    entropy = - (alpha * torch.log(alpha + 1e-8) + (1 - alpha) * torch.log(1 - alpha + 1e-8)).mean()
+                    # Convert to float32 to prevent float16 underflow NaNs in log
+                    alpha_f32 = alpha.float()
                     
-                    # Add positive entropy to loss to MINIMIZE entropy (force decisiveness)
-                    loss = bce_loss + 0.1 * entropy
+                    # Entropy MAXIMIZATION (Load Balancing) to prevent premature collapse
+                    entropy = - (alpha_f32 * torch.log(alpha_f32 + 1e-7) + (1 - alpha_f32) * torch.log(1 - alpha_f32 + 1e-7)).mean()
+                    
+                    # Subtract entropy to maximize it (keeps alpha near 0.5 early on)
+                    # Decays over epochs to allow specialization later
+                    entropy_weight = 0.5 * (0.8 ** epoch)
+                    loss = bce_loss - entropy_weight * entropy
                     
                 scaler.scale(loss).backward()
                 scaler.step(optimizer)
