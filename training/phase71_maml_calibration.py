@@ -230,8 +230,11 @@ def main():
                 # 1. Clone the model for this specific task
                 learner = copy.deepcopy(model)
                 learner.train()
-                # Fast Adaptation uses standard SGD
-                inner_opt = optim.SGD(learner.parameters(), lr=FAST_LR)
+                # ChatGPT Option C: Adapt CNN + Classifier, Freeze LSTM
+                inner_params = list(learner.eeg_encoder.parameters()) + \
+                               list(learner.aud_encoder.parameters()) + \
+                               list(learner.classifier.parameters())
+                inner_opt = optim.SGD(inner_params, lr=FAST_LR)
                 
                 seqs = all_subj_seqs[subj].copy()
                 random.shuffle(seqs)
@@ -297,7 +300,11 @@ def main():
             # 2. Fast Adaptation (MAML Deployment)
             learner = copy.deepcopy(model)
             learner.train()
-            inner_opt = optim.SGD(learner.parameters(), lr=FAST_LR)
+            # ChatGPT Option C: Adapt CNN + Classifier, Freeze LSTM
+            inner_params = list(learner.eeg_encoder.parameters()) + \
+                           list(learner.aud_encoder.parameters()) + \
+                           list(learner.classifier.parameters())
+            inner_opt = optim.SGD(inner_params, lr=FAST_LR)
             
             for _ in range(ADAPT_STEPS):
                 inner_opt.zero_grad()
