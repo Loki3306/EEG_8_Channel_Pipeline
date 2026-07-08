@@ -103,19 +103,20 @@ class SpatialAttention(nn.Module):
         weights = self.se(x) 
         return x * weights 
 
-class SpectralAttention(nn.Module):
-    def __init__(self, in_channels):
+class CrossModalGate(nn.Module):
+    def __init__(self, latent_dim, audio_channels):
         super().__init__()
-        self.se = nn.Sequential(
-            nn.AdaptiveAvgPool1d(1),
-            nn.Conv1d(in_channels, max(1, in_channels // 2), kernel_size=1),
+        # Takes the Brain State and predicts bounded weights for the audio channels
+        self.net = nn.Sequential(
+            nn.Linear(latent_dim, latent_dim // 2),
             nn.ReLU(),
-            nn.Conv1d(max(1, in_channels // 2), in_channels, kernel_size=1),
-            nn.Sigmoid()
+            nn.Linear(latent_dim // 2, audio_channels),
+            nn.Tanh() # Outputs between -1 and 1
         )
-    def forward(self, x):
-        weights = self.se(x)
-        return x * weights
+    def forward(self, eeg_latent):
+        # We use (1 + 0.5 * tanh) to bound the weights between 0.5 (suppress) and 1.5 (amplify)
+        weights = 1.0 + 0.5 * self.net(eeg_latent) 
+        return weights.unsqueeze(-1) # [B*SeqLen, audio_channels, 1]
 
 class TemporalConvNet(nn.Module):
     def __init__(self, num_inputs, num_channels, kernel_size=2, dropout=0.2):
@@ -145,13 +146,13 @@ class TCNAADModel(nn.Module):
         
         if self.use_wavlm:
             self.audio_encoder = WavLMEncoder(in_channels=768, out_dim=latent_dim)
-            self.spectral_attention = None
+            self.cross_modal_gate = None
         else:
             self.audio_encoder = LocalEncoder(in_channels=audio_channels, out_dim=latent_dim)
             if audio_channels > 1:
-                self.spectral_attention = SpectralAttention(audio_channels)
+                self.cross_modal_gate = CrossModalGate(latent_dim, audio_channels)
             else:
-                self.spectral_attention = None
+                self.cross_modal_gate = None
                 
         # Input to TCN: eeg_latent (64) + aud_a_latent (64) + aud_b_latent (64) + 
         #               cos_sim_a (1) + cos_sim_b (1) + diff (1) = 195
@@ -165,7 +166,8 @@ class TCNAADModel(nn.Module):
         eeg_flat = eeg_seq.reshape(B * SeqLen, C, T)
         
         eeg_flat = self.spatial_attention(eeg_flat)
-        p_eeg = F.normalize(self.eeg_encoder(eeg_flat), dim=-1) # [B*SeqLen, latent_dim]
+        eeg_latent_raw = self.eeg_encoder(eeg_flat)
+        p_eeg = F.normalize(eeg_latent_raw, dim=-1) # [B*SeqLen, latent_dim]
         
         if self.use_wavlm:
             T_aud = aud_seq_a.shape[2]
@@ -178,9 +180,10 @@ class TCNAADModel(nn.Module):
             aud_a_flat = aud_seq_a.reshape(B * SeqLen, C_a, T_a)
             aud_b_flat = aud_seq_b.reshape(B * SeqLen, C_a, T_a)
             
-            if self.spectral_attention is not None:
-                aud_a_flat = self.spectral_attention(aud_a_flat)
-                aud_b_flat = self.spectral_attention(aud_b_flat)
+            if self.cross_modal_gate is not None:
+                spectral_weights = self.cross_modal_gate(eeg_latent_raw) # [B*SeqLen, C_a, 1]
+                aud_a_flat = aud_a_flat * spectral_weights
+                aud_b_flat = aud_b_flat * spectral_weights
                 
             p_a = F.normalize(self.audio_encoder(aud_a_flat), dim=-1)
             p_b = F.normalize(self.audio_encoder(aud_b_flat), dim=-1)
