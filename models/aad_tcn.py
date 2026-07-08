@@ -55,39 +55,56 @@ class Chomp1d(nn.Module):
         return x[:, :, :-self.chomp_size].contiguous()
 
 class TemporalBlock(nn.Module):
-    def __init__(self, n_inputs, n_outputs, kernel_size, stride, dilation, padding, dropout=0.2):
+    def __init__(self, in_channels, out_channels, kernel_size, stride, dilation, padding, dropout=0.2):
         super(TemporalBlock, self).__init__()
-        # Causal Dilated Conv 1
-        self.conv1 = nn.Conv1d(n_inputs, n_outputs, kernel_size,
-                               stride=stride, padding=padding, dilation=dilation)
-        self.chomp1 = Chomp1d(padding)
+        self.conv1 = nn.Conv1d(in_channels, out_channels, kernel_size, stride=stride, padding=padding, dilation=dilation)
+        self.bn1 = nn.BatchNorm1d(out_channels)
         self.relu1 = nn.ReLU()
         self.dropout1 = nn.Dropout(dropout)
 
-        # Causal Dilated Conv 2
-        self.conv2 = nn.Conv1d(n_outputs, n_outputs, kernel_size,
-                               stride=stride, padding=padding, dilation=dilation)
-        self.chomp2 = Chomp1d(padding)
+        self.conv2 = nn.Conv1d(out_channels, out_channels, kernel_size, stride=stride, padding=padding, dilation=dilation)
+        self.bn2 = nn.BatchNorm1d(out_channels)
         self.relu2 = nn.ReLU()
         self.dropout2 = nn.Dropout(dropout)
 
-        self.net = nn.Sequential(self.conv1, self.chomp1, self.relu1, self.dropout1,
-                                 self.conv2, self.chomp2, self.relu2, self.dropout2)
-                                 
-        self.downsample = nn.Conv1d(n_inputs, n_outputs, 1) if n_inputs != n_outputs else None
-        self.relu = nn.ReLU()
-        self.init_weights()
+        self.net = nn.Sequential(self.conv1, self.bn1, self.relu1, self.dropout1,
+                                 self.conv2, self.bn2, self.relu2, self.dropout2)
 
-    def init_weights(self):
-        self.conv1.weight.data.normal_(0, 0.01)
-        self.conv2.weight.data.normal_(0, 0.01)
-        if self.downsample is not None:
-            self.downsample.weight.data.normal_(0, 0.01)
+        self.downsample = nn.Conv1d(in_channels, out_channels, 1) if in_channels != out_channels else None
+        self.relu = nn.ReLU()
 
     def forward(self, x):
         out = self.net(x)
         res = x if self.downsample is None else self.downsample(x)
         return self.relu(out + res)
+
+class SpatialAttention(nn.Module):
+    def __init__(self, in_channels):
+        super().__init__()
+        self.se = nn.Sequential(
+            nn.AdaptiveAvgPool1d(1),
+            nn.Conv1d(in_channels, max(1, in_channels // 2), kernel_size=1),
+            nn.ReLU(),
+            nn.Conv1d(max(1, in_channels // 2), in_channels, kernel_size=1),
+            nn.Sigmoid() 
+        )
+    def forward(self, x):
+        weights = self.se(x) 
+        return x * weights 
+
+class SpectralAttention(nn.Module):
+    def __init__(self, in_channels):
+        super().__init__()
+        self.se = nn.Sequential(
+            nn.AdaptiveAvgPool1d(1),
+            nn.Conv1d(in_channels, max(1, in_channels // 2), kernel_size=1),
+            nn.ReLU(),
+            nn.Conv1d(max(1, in_channels // 2), in_channels, kernel_size=1),
+            nn.Sigmoid()
+        )
+    def forward(self, x):
+        weights = self.se(x)
+        return x * weights
 
 class TemporalConvNet(nn.Module):
     def __init__(self, num_inputs, num_channels, kernel_size=2, dropout=0.2):
@@ -109,79 +126,63 @@ class TemporalConvNet(nn.Module):
 
 class TCNAADModel(nn.Module):
     def __init__(self, eeg_channels=8, latent_dim=64, tcn_channels=[64, 64, 64], kernel_size=2, dropout=0.3, use_wavlm=False, audio_channels=1):
-        super().__init__()
+        super(TCNAADModel, self).__init__()
+        self.use_wavlm = use_wavlm
         self.eeg_encoder = LocalEncoder(in_channels=eeg_channels, out_dim=latent_dim)
         
-        if use_wavlm:
-            self.aud_encoder = WavLMEncoder(in_channels=768, out_dim=latent_dim)
-        else:
-            self.aud_encoder = LocalEncoder(in_channels=audio_channels, out_dim=latent_dim)
+        self.spatial_attention = SpatialAttention(eeg_channels)
         
-        # Total concatenated features per timestep
+        if self.use_wavlm:
+            self.audio_encoder = WavLMEncoder(in_channels=768, out_dim=latent_dim)
+            self.spectral_attention = None
+        else:
+            self.audio_encoder = LocalEncoder(in_channels=audio_channels, out_dim=latent_dim)
+            if audio_channels > 1:
+                self.spectral_attention = SpectralAttention(audio_channels)
+            else:
+                self.spectral_attention = None
+                
+        # Input to TCN: eeg_latent (64) + aud_a_latent (64) + aud_b_latent (64) + 
+        #               cos_sim_a (1) + cos_sim_b (1) + diff (1) = 195
         tcn_input_dim = latent_dim * 3 + 3 
         
-        self.tcn = TemporalConvNet(
-            num_inputs=tcn_input_dim, 
-            num_channels=tcn_channels, 
-            kernel_size=kernel_size, 
-            dropout=dropout
-        )
-        
-        # Classifier runs on the TCN outputs
+        self.tcn = TemporalConvNet(tcn_input_dim, tcn_channels, kernel_size=kernel_size, dropout=dropout)
         self.classifier = nn.Linear(tcn_channels[-1], 1)
-        
-    def forward(self, eeg_seq, aud_a_seq, aud_b_seq, hidden=None):
-        # Determine if input is Envelope (1D) or WavLM (768D)
-        is_wavlm = aud_a_seq.shape[-1] == 768
-        
-        B, SeqLen = eeg_seq.shape[0], eeg_seq.shape[1]
-        
-        # eeg_seq is [B, SeqLen, C, T]
-        C, T = eeg_seq.shape[2], eeg_seq.shape[3]
+
+    def forward(self, eeg_seq, aud_seq_a, aud_seq_b):
+        B, SeqLen, C, T = eeg_seq.shape
         eeg_flat = eeg_seq.reshape(B * SeqLen, C, T)
         
-        if is_wavlm:
-            # aud_seq is [B, SeqLen, T, 768] -> reshape to [B*SeqLen, 768, T]
-            T_aud = aud_a_seq.shape[2]
-            aud_a_flat = aud_a_seq.reshape(B * SeqLen, T_aud, 768).transpose(1, 2)
-            aud_b_flat = aud_b_seq.reshape(B * SeqLen, T_aud, 768).transpose(1, 2)
-        else:
-            if aud_a_seq.dim() == 3:
-                # 1D Envelope: aud_seq is [B, SeqLen, T] -> reshape to [B*SeqLen, 1, T]
-                T_aud = aud_a_seq.shape[2]
-                aud_a_flat = aud_a_seq.reshape(B * SeqLen, 1, T_aud)
-                aud_b_flat = aud_b_seq.reshape(B * SeqLen, 1, T_aud)
-            else:
-                # Multiband Envelope: aud_seq is [B, SeqLen, Channels, T]
-                C_aud = aud_a_seq.shape[2]
-                T_aud = aud_a_seq.shape[3]
-                aud_a_flat = aud_a_seq.reshape(B * SeqLen, C_aud, T_aud)
-                aud_b_flat = aud_b_seq.reshape(B * SeqLen, C_aud, T_aud)
+        eeg_flat = self.spatial_attention(eeg_flat)
+        p_eeg = F.normalize(self.eeg_encoder(eeg_flat), dim=-1) # [B*SeqLen, latent_dim]
         
-        p_eeg = F.normalize(self.eeg_encoder(eeg_flat), dim=-1)
-        p_a = F.normalize(self.aud_encoder(aud_a_flat), dim=-1)
-        p_b = F.normalize(self.aud_encoder(aud_b_flat), dim=-1)
+        if self.use_wavlm:
+            T_aud = aud_seq_a.shape[2]
+            aud_a_flat = aud_seq_a.reshape(B * SeqLen, T_aud, 768).transpose(1, 2)
+            aud_b_flat = aud_seq_b.reshape(B * SeqLen, T_aud, 768).transpose(1, 2)
+            p_a = F.normalize(self.audio_encoder(aud_a_flat), dim=-1)
+            p_b = F.normalize(self.audio_encoder(aud_b_flat), dim=-1)
+        else:
+            C_a, T_a = aud_seq_a.shape[2], aud_seq_a.shape[3]
+            aud_a_flat = aud_seq_a.reshape(B * SeqLen, C_a, T_a)
+            aud_b_flat = aud_seq_b.reshape(B * SeqLen, C_a, T_a)
+            
+            if self.spectral_attention is not None:
+                aud_a_flat = self.spectral_attention(aud_a_flat)
+                aud_b_flat = self.spectral_attention(aud_b_flat)
+                
+            p_a = F.normalize(self.audio_encoder(aud_a_flat), dim=-1)
+            p_b = F.normalize(self.audio_encoder(aud_b_flat), dim=-1)
         
         score_a = F.cosine_similarity(p_eeg, p_a, dim=-1)
         score_b = F.cosine_similarity(p_eeg, p_b, dim=-1)
         score_diff = score_a - score_b
         
-        # [B, SeqLen, 195]
         seq_feat = torch.cat([p_eeg, p_a, p_b, score_a.unsqueeze(-1), score_b.unsqueeze(-1), score_diff.unsqueeze(-1)], dim=-1)
-        seq_feat = seq_feat.reshape(B, SeqLen, -1)
+        seq_feat = seq_feat.reshape(B, SeqLen, -1).transpose(1, 2)
         
-        # TCN expects [B, Channels, Time]
-        seq_feat_tcn = seq_feat.transpose(1, 2)
-        
-        # Pass through TCN
-        tcn_out = self.tcn(seq_feat_tcn)
-        
-        # Transpose back to [B, Time, Channels]
-        tcn_out = tcn_out.transpose(1, 2)
-        
-        # Global Average Pooling over time dimension (as recommended by GPT IPC)
-        tcn_pool = tcn_out.mean(dim=1)
-        logits = self.classifier(tcn_pool).squeeze(-1)
+        tcn_out = self.tcn(seq_feat).transpose(1, 2)
+        logits = self.classifier(tcn_out.mean(dim=1)).squeeze(-1)
         
         return logits, None
 
