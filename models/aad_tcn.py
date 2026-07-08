@@ -22,6 +22,27 @@ class LocalEncoder(nn.Module):
         x = torch.flatten(x, 1) 
         return self.fc(x)
 
+class WavLMEncoder(nn.Module):
+    """Projects 768-dimensional WavLM embeddings down to latent_dim without blowing up parameters."""
+    def __init__(self, in_channels=768, out_dim=64):
+        super().__init__()
+        # 1x1 Convolution to reduce dimensionality drastically
+        self.proj = nn.Conv1d(in_channels, 64, kernel_size=1)
+        self.bn1 = nn.BatchNorm1d(64)
+        self.conv2 = nn.Conv1d(64, 32, kernel_size=5, padding=2)
+        self.bn2 = nn.BatchNorm1d(32)
+        self.pool = nn.AdaptiveAvgPool1d(4)
+        self.fc = nn.Linear(32 * 4, out_dim)
+        
+    def forward(self, x):
+        if x.dim() == 2: x = x.unsqueeze(1)
+        x = F.relu(self.bn1(self.proj(x)))
+        x = F.max_pool1d(x, 2)
+        x = F.relu(self.bn2(self.conv2(x)))
+        x = self.pool(x)
+        x = torch.flatten(x, 1) 
+        return self.fc(x)
+
 class Chomp1d(nn.Module):
     """Slices off the padding added for causal convolutions."""
     def __init__(self, chomp_size):
@@ -87,10 +108,14 @@ class TemporalConvNet(nn.Module):
         return self.network(x)
 
 class TCNAADModel(nn.Module):
-    def __init__(self, eeg_channels=8, latent_dim=64, tcn_channels=[64, 64, 64], kernel_size=2, dropout=0.3):
+    def __init__(self, eeg_channels=8, latent_dim=64, tcn_channels=[64, 64, 64], kernel_size=2, dropout=0.3, use_wavlm=False):
         super().__init__()
         self.eeg_encoder = LocalEncoder(in_channels=eeg_channels, out_dim=latent_dim)
-        self.aud_encoder = LocalEncoder(in_channels=1, out_dim=latent_dim)
+        
+        if use_wavlm:
+            self.aud_encoder = WavLMEncoder(in_channels=768, out_dim=latent_dim)
+        else:
+            self.aud_encoder = LocalEncoder(in_channels=1, out_dim=latent_dim)
         
         # Total concatenated features per timestep
         tcn_input_dim = latent_dim * 3 + 3 
@@ -106,10 +131,25 @@ class TCNAADModel(nn.Module):
         self.classifier = nn.Linear(tcn_channels[-1], 1)
         
     def forward(self, eeg_seq, aud_a_seq, aud_b_seq, hidden=None):
-        B, SeqLen, C, T = eeg_seq.shape
+        # Determine if input is Envelope (1D) or WavLM (768D)
+        is_wavlm = aud_a_seq.shape[-1] == 768
+        
+        B, SeqLen = eeg_seq.shape[0], eeg_seq.shape[1]
+        
+        # eeg_seq is [B, SeqLen, C, T]
+        C, T = eeg_seq.shape[2], eeg_seq.shape[3]
         eeg_flat = eeg_seq.reshape(B * SeqLen, C, T)
-        aud_a_flat = aud_a_seq.reshape(B * SeqLen, 1, T)
-        aud_b_flat = aud_b_seq.reshape(B * SeqLen, 1, T)
+        
+        if is_wavlm:
+            # aud_seq is [B, SeqLen, T, 768] -> reshape to [B*SeqLen, 768, T]
+            T_aud = aud_a_seq.shape[2]
+            aud_a_flat = aud_a_seq.reshape(B * SeqLen, T_aud, 768).transpose(1, 2)
+            aud_b_flat = aud_b_seq.reshape(B * SeqLen, T_aud, 768).transpose(1, 2)
+        else:
+            # aud_seq is [B, SeqLen, T] -> reshape to [B*SeqLen, 1, T]
+            T_aud = aud_a_seq.shape[2]
+            aud_a_flat = aud_a_seq.reshape(B * SeqLen, 1, T_aud)
+            aud_b_flat = aud_b_seq.reshape(B * SeqLen, 1, T_aud)
         
         p_eeg = F.normalize(self.eeg_encoder(eeg_flat), dim=-1)
         p_a = F.normalize(self.aud_encoder(aud_a_flat), dim=-1)
