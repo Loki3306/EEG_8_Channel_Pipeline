@@ -1,548 +1,289 @@
-I compared your reconstruction against the conversation history in this chat. Some parts are well supported, while others contain inconsistencies or values that changed across later experiments.
+Implementation Plan
+1. Affected Files
 
-Overall assessment
+Primary
 
-Phases 56–80: Mostly consistent with the discussion history.
+models/aad_mamba.py — Profile and redesign the MambaBlock implementation to eliminate the Python scan bottleneck.
 
-Phases 81–93: There are several AUROC inconsistencies because the project evolved from:
+training/phase95_mamba_evaluation.py — Add benchmarking, timing, and configuration switches for alternative SSM implementations.
 
-4-subject debugging runs,
+Supporting
 
-17-subject cohort,
+Training/evaluation utilities that instantiate ContinuousMambaAADModel.
 
-then 33-subject cohort.
+Configuration/constants for selecting different sequence models (Mamba, GRU, SSM-lite, etc.).
 
-Some values in your summary mix these different evaluation protocols.
+Profiling scripts (new or existing) for forward/backward timing.
 
-Phase 56–64
-Status
+2. Reusable Components
 
-Mostly correct.
+Reuse the following without modification where possible:
 
-Key milestones:
+Existing data loading and preprocessing pipeline.
 
-AASD Ear-EEG integration
+Stable sequence extraction (448-sample sequences).
 
-Stable sequence extraction
+EEG/audio embedding interfaces.
 
-16-band cochlear envelopes
+Training loop, optimizer, scheduler, evaluation metrics.
 
-3.5 s sequence generation
+Similarity computation and classifier head where compatible.
 
-2.0 s windows
+Existing benchmarking infrastructure from previous phases.
 
-1.5 s transition exclusion
+Only replace the sequence modeling backend so comparisons remain scientifically valid.
 
-I don't remember any fixed AUROC associated with these infrastructure phases.
+3. Implementation Strategy
+Phase A — Profile Before Optimizing
 
-Phase 65
+Establish where time is actually spent.
 
-Correct.
+Measure separately:
 
-Main scientific discovery:
+Data loading
 
-Cognitive transition period after attention switch
+Forward pass
 
-Stable windows outperform transition windows
+Backward pass
 
-Motivated all later "stable epoch" experiments
+Optimizer step
 
-Phase 66–70
+GPU utilization
 
-Correct.
+CUDA synchronization overhead
 
-Major conclusions:
+Profile:
 
-Universal pretraining collapsed
+Entire model
 
-FiLM adaptation failed
+Each MambaBlock
 
-Spatial mixer failed
+Python scan loop
 
-Calibration adapters failed
+einsum
 
-Scientific conclusion:
+Conv1D
 
-Cross-subject transfer is fundamentally difficult for low-density Ear-EEG.
+Linear layers
 
-Phase 71–80
+The goal is to determine whether the bottleneck is:
 
-Important milestones that should probably appear.
+Python loop overhead
 
-Phase 79
+Autograd graph size
 
-Dilated TCN
+einsum
 
-Important observation
+Memory bandwidth
 
-Weak subjects partially rescued.
+GPU kernel launch overhead
 
-Roughly
+Phase B — Reduce Computational Complexity
 
-S05  failed
-S11  failed
-S16  improved
-S17  improved
+Audit the current architecture.
 
-This motivated WavLM.
+Current design:
 
-Phase 80
+EEG encoder: 2 MambaBlocks
 
-WavLM evaluation
+Audio A encoder: 2 MambaBlocks
 
-Known values discussed earlier
+Audio B encoder: 2 MambaBlocks
 
-S05
+Integrator: 1 MambaBlock
 
-0.4848
+Total:
 
-S11
+7 recurrent scans
 
-0.6024
+7 × 448 sequential updates
 
-S16
+Evaluate whether all seven are necessary.
 
-0.6801
+Potential simplifications:
 
-S17
+Shared audio encoder executed once per audio stream efficiently
 
-0.6372
+Single shared temporal backbone
 
-These numbers were referenced multiple times.
+Smaller d_state
 
-Phase 81
+Smaller expand
 
-Your table is not the original Phase 81 values.
+Fewer Mamba layers
 
-Earlier conversation contained
+Shallower integrator
 
-S05 0.4937
+Benchmark each reduction independently.
 
-S11 0.5318
+Phase C — Replace the Python Scan
 
-S16 0.7173
+Investigate progressively faster PyTorch-native alternatives.
 
-S17 0.5233
+Priority order:
 
-Those four values were used repeatedly when comparing
+Option 1 (Highest Priority)
 
-Phase 80
+Compile the scan using:
 
-↓
+torch.compile()
 
-Phase 81
+to fuse Python execution into graph execution.
 
-So I'd trust these.
+If successful, this preserves the architecture while reducing interpreter overhead.
 
-Phase 82
+Option 2
 
-Hybrid MoE
+Replace the explicit Python recurrence with built-in recurrent operators.
 
-Major events
+Candidates:
 
-Gate collapse
+GRU
 
-Alpha≈1
+LSTM
 
-Shared encoder redesign
+Custom gated RNN
 
-Entropy regularization
+These are heavily optimized CUDA kernels.
 
-Probability-space fusion
+This becomes a strong experimental baseline.
 
-No stable scientific AUROC.
+Option 3
 
-I'd summarize architecture rather than numbers.
+Investigate vectorized SSM approximations.
 
-Phase 84
+Examples:
 
-Missing.
+Parallel scan
 
-This was actually important.
+Associative scan
 
-Inference-only ablation.
+Prefix-scan formulations
 
-Main finding
+Convolutional state-space approximations
 
-Subject 11
+Goal:
 
-many channels
+Replace
 
-negative importance
+for t in sequence
 
-(removing them improved AUROC)
+with large batched tensor operations.
 
-Subject 16
+Option 4
 
-channels
+Investigate linear-attention-style state models implemented entirely with batched matrix operations.
 
-5
+This sacrifices exact recurrence but greatly improves throughput.
 
-6
+Phase D — Replace Expensive Operations
 
-7
+Review every einsum.
 
-were strongly positive.
+Determine whether each can be rewritten as:
 
-This motivated spatial attention.
+batched matrix multiplication
 
-Phase 85
+elementwise multiplication
 
-Missing.
+broadcasting
 
-Spatial/Spectral Attention.
+matmul
 
-Important numbers
+PyTorch often optimizes these better than general-purpose einsum.
 
-Original 4-subject study
+Phase E — Memory Optimization
 
-S05
+Investigate:
 
-0.4937
+Gradient checkpointing
 
-↓
+Mixed precision stability
 
-0.5148
-S11
+Activation recomputation
 
-0.5318
+Smaller hidden dimensions
 
-↓
+Reduced state dimension
 
-0.5596
-S16
+Reduced expansion factor
 
-0.7173
+Monitor:
 
-↓
+GPU memory
 
-0.6804
-S17
+Graph size
 
-0.5233
+Training throughput
 
-↓
+Phase F — Architectural Alternatives
 
-0.5760
+If sequential SSM remains too slow, benchmark alternative long-range models using identical preprocessing.
 
-Important scientific finding
+Candidate models:
 
-Attention rescued weak subjects
+GRU
 
-while hurting the best subject.
+Dilated GRU
 
-Phase 86
+SRU
 
-Missing.
+Temporal Convolution
 
-Cross-modal EEG gate.
+Lightweight Transformer
 
-Numbers
+Linear Attention
 
-S05
+RetNet-style recurrent attention
 
-0.4818
-S11
+S4-inspired convolutional approximation
 
-0.5164
-S16
+The objective is to determine whether Mamba is providing sufficient accuracy gains to justify its computational cost.
 
-0.6834
-S17
+Phase G — Benchmark Matrix
 
-0.5973
+For every candidate, record:
 
-Key conclusion
+Forward latency
 
-EEG-driven gating
+Backward latency
 
-did not generalize.
+Epoch time
 
-Phase 87
+GPU utilization
 
-Be careful.
+Memory usage
 
-You have two different Phase 87 baselines in the conversation.
+AUROC
 
-Earlier
+Training stability
 
-S11
+Convergence speed
 
-0.6513
+Only retain architectures that improve either:
 
-Later
+accuracy at similar cost, or
 
-S11
+speed at similar accuracy.
 
-0.5610
+4. Risks
 
-Likewise
+Primary Risks
 
-S17
+The sequential recurrence is algorithmically sequential; Python optimization alone may not eliminate the dependency chain.
 
-changed substantially.
+torch.compile() may not fuse the scan effectively on the Kaggle environment.
 
-Those cannot both be correct.
+Replacing the scan with an approximation changes the underlying model, requiring fair scientific comparison.
 
-I suspect
+Reducing state size or depth may improve speed but reduce representational capacity.
 
-one comes from
+Vectorized approximations may introduce numerical differences from the intended recurrence.
 
-17-subject run
+Scientific Risks
 
-another
+Runtime improvements should not alter preprocessing, evaluation protocol, or subject splits, to preserve comparability with previous phases.
 
-33-subject rerun.
+Any architectural replacement (e.g., GRU instead of Mamba) should be treated as a distinct experimental condition rather than an implementation optimization.
 
-I would check Kaggle outputs.
-
-Phase 88
-
-Missing.
-
-Deep Temporal Cross-Modal Gate.
-
-Results
-
-Universal regression.
-
-This was one of the strongest negative experiments.
-
-Scientific conclusion
-
-Temporal multiplicative modulation
-
-creates
-
-moving-target optimization.
-
-Phase 89
-
-Your numbers
-
-mostly look internally consistent.
-
-Main conclusion
-
-Fast cluster
-
-huge gains.
-
-Slow cluster
-
-large regressions.
-
-This phase first clearly exposed
-
-two temporal preference groups.
-
-Phase 90
-
-Correct.
-
-Main story
-
-MoE optimization
-
-never specialized.
-
-Alpha
-
-hovered
-
-near
-
-50%
-
-or collapsed.
-
-Phase 91
-
-Looks consistent with the final version discussed.
-
-Main scientific conclusion
-
-Temporal Pyramid
-
-rescues
-
-Fast cluster
-
-again
-
-fails
-
-Slow cluster.
-
-Phase 92
-
-Late Expert Fusion.
-
-Main conclusion
-
-Experts individually worked.
-
-Combiner failed.
-
-Very important distinction.
-
-Phase 93
-
-This section contains inconsistencies.
-
-Earlier in the discussion
-
-you described
-
-S01
-
-Baseline
-
-0.7157
-
-Fast
-
-0.5009
-
-Later
-
-your reconstruction says
-
-Slow
-
-0.5072
-
-Those are incompatible.
-
-Likewise
-
-S03
-
-was previously described as
-
-Fast
-
-inferior
-
-then later
-
-Slow superior.
-
-I think your oracle table is not reconstructed correctly.
-
-I'd verify directly from logs.
-
-Biggest inconsistencies I found
-Phase 81
-
-Should probably be
-
-S05
-
-0.4937
-
-not
-
-0.5229
-Phase 87
-
-Several subjects changed
-
-between conversations.
-
-Notably
-
-S11
-
-S17
-
-S04
-
-S07
-
-Need verification.
-
-Phase 93
-
-The oracle table
-
-conflicts
-
-with your earlier narrative.
-
-Needs verification.
-
-Scientific timeline I'd emphasize
-Phase 56–64
-
-Infrastructure
-
-Phase 65
-
-Transition lag discovered
-
-Phase 66–70
-
-Cross-subject transfer falsified
-
-Phase 79
-
-TCN successfully improves envelope decoding
-
-Phase 80
-
-WavLM helps some subjects
-
-hurts others
-
-Phase 81
-
-16-band cochlear envelopes outperform WavLM for some subjects
-
-Phase 82
-
-Hybrid MoE optimization unstable
-
-Phase 84
-
-Channel/band ablation reveals subject-specific spatial importance
-
-Phase 85
-
-Spatial attention
-
-helps weak subjects
-
-hurts strong ones
-
-Phase 86
-
-Cross-modal gating fails
-
-Phase 88
-
-Temporal EEG gating fails universally
-
-Phase 89
-
-Multi-scale encoder restores transient-sensitive subjects
-
-Phase 91
-
-Temporal pyramid confirms temporal heterogeneity
-
-Phase 92
-
-Late expert fusion fails because routing never specializes
-
-Phase 93
-
-Oracle experiment demonstrates that different subjects have different optimal temporal inductive biases, establishing the strongest evidence in the project that no single temporal encoder dominates across all subjects.
-
-One recommendation
-
-I would create a master experiment table in CSV format with columns such as:
-
-Phase	Model	Dataset	Evaluation Protocol	Subjects	Mean AUROC	Subject-wise AUROC Source
-
-The inconsistencies you encountered stem largely from mixing results from 4-subject debugging, 17-subject cohorts, and 33-subject cohorts. Recording the evaluation protocol alongside each result will make the history reproducible and prevent accidental comparisons across incompatible experiments.
+Optimization should preserve the validated training pipeline so that observed AUROC differences can be attributed to the sequence model rather than unrelated implementation changes.

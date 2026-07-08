@@ -88,6 +88,7 @@ def train_and_eval_continuous(subj_idx, train_loader, eval_loader, device):
     print(f"\n  [Training S{subj_idx:02d} with CONTINUOUS LSTM]")
     for epoch in range(TRAIN_EPOCHS):
         model.train()
+        total_loss = 0
         for b_e, b_a_a, b_a_b, b_y in train_loader:
             b_e = b_e.to(device, non_blocking=True)
             b_a_a = b_a_a.to(device, non_blocking=True)
@@ -101,6 +102,11 @@ def train_and_eval_continuous(subj_idx, train_loader, eval_loader, device):
             scaler.scale(loss).backward()
             scaler.step(optimizer)
             scaler.update()
+            
+            total_loss += loss.item()
+            
+        avg_loss = total_loss / len(train_loader)
+        print(f"    Epoch {epoch+1}/{TRAIN_EPOCHS} | Loss: {avg_loss:.4f}")
             
     # Evaluation
     model.eval()
