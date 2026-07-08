@@ -204,8 +204,17 @@ def main():
                     optimizer.zero_grad()
                     
                     with torch.autocast(device_type='cuda', dtype=torch.float16):
-                        logits, _ = model(b_e, b_wa, b_wb, b_ma, b_mb)
-                        loss = criterion(logits, b_y)
+                        logits, alpha = model(b_e, b_wa, b_wb, b_ma, b_mb)
+                        bce_loss = criterion(logits, b_y)
+                        
+                        # Entropy regularization to prevent gate collapse
+                        # We want to keep alpha near 0.5 early on, so we maximize entropy (minimize -entropy)
+                        entropy = - (alpha * torch.log(alpha + 1e-8) + (1 - alpha) * torch.log(1 - alpha + 1e-8)).mean()
+                        
+                        # The entropy weight decays each epoch so the gate can eventually specialize
+                        entropy_weight = 0.5 * (0.8 ** epoch) 
+                        
+                        loss = bce_loss - entropy_weight * entropy
                         
                     scaler.scale(loss).backward()
                     scaler.step(optimizer)

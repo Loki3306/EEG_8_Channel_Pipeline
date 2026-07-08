@@ -188,34 +188,89 @@ class TCNAADModel(nn.Module):
 class HybridMoEAADModel(nn.Module):
     def __init__(self, eeg_channels=8, latent_dim=64, tcn_channels=[64, 64, 64], kernel_size=2, dropout=0.3):
         super().__init__()
-        # We instantiate two complete independent backbones to prevent feature entanglement
-        self.wavlm_expert = TCNAADModel(eeg_channels, latent_dim, tcn_channels, kernel_size, dropout, use_wavlm=True)
-        self.multiband_expert = TCNAADModel(eeg_channels, latent_dim, tcn_channels, kernel_size, dropout, use_wavlm=False, audio_channels=16)
+        # 1. Shared EEG Encoder (Saves massive GPU memory and compute)
+        self.eeg_encoder = LocalEncoder(in_channels=eeg_channels, out_dim=latent_dim)
         
-        # A small gating network that looks at the EEG to determine which expert to trust
+        # 2. Independent Audio Encoders
+        self.wavlm_encoder = WavLMEncoder(in_channels=768, out_dim=latent_dim)
+        self.multi_encoder = LocalEncoder(in_channels=16, out_dim=latent_dim)
+        
+        tcn_input_dim = latent_dim * 3 + 3 
+        
+        # 3. Independent TCN Backbones (One for each expert)
+        self.wavlm_tcn = TemporalConvNet(tcn_input_dim, tcn_channels, kernel_size, dropout)
+        self.wavlm_classifier = nn.Linear(tcn_channels[-1], 1)
+        
+        self.multi_tcn = TemporalConvNet(tcn_input_dim, tcn_channels, kernel_size, dropout)
+        self.multi_classifier = nn.Linear(tcn_channels[-1], 1)
+        
+        # 4. Temporal Gating Network
+        # Takes the encoded EEG and the encoded audio representations (much richer input than raw EEG)
         self.gate = nn.Sequential(
-            nn.Conv1d(eeg_channels, 16, kernel_size=33, padding=16),
-            nn.BatchNorm1d(16),
+            nn.Linear(latent_dim * 3, 32),
             nn.ReLU(),
-            nn.AdaptiveAvgPool1d(1),
-            nn.Flatten(),
-            nn.Linear(16, 1),
+            nn.Linear(32, 1),
             nn.Sigmoid() # Outputs alpha (0 to 1)
         )
         
     def forward(self, eeg_seq, wavlm_a, wavlm_b, multi_a, multi_b):
-        B, SeqLen, C, T = eeg_seq.shape
+        B, SeqLen = eeg_seq.shape[0], eeg_seq.shape[1]
+        
+        # 1. Shared EEG Encoding
+        C, T = eeg_seq.shape[2], eeg_seq.shape[3]
         eeg_flat = eeg_seq.reshape(B * SeqLen, C, T)
+        p_eeg = F.normalize(self.eeg_encoder(eeg_flat), dim=-1) # [B*SeqLen, latent_dim]
         
-        # Calculate gating weight based on the EEG signal
-        # The gate determines how much to trust WavLM vs Multiband for this specific subject/sequence
-        alpha = self.gate(eeg_flat).reshape(B, SeqLen).mean(dim=1) # [B]
+        # 2. WavLM Encoding
+        T_aud = wavlm_a.shape[2]
+        wa_flat = wavlm_a.reshape(B * SeqLen, T_aud, 768).transpose(1, 2)
+        wb_flat = wavlm_b.reshape(B * SeqLen, T_aud, 768).transpose(1, 2)
+        p_wa = F.normalize(self.wavlm_encoder(wa_flat), dim=-1)
+        p_wb = F.normalize(self.wavlm_encoder(wb_flat), dim=-1)
         
-        # Forward pass through both experts
-        logits_wavlm, _ = self.wavlm_expert(eeg_seq, wavlm_a, wavlm_b) # [B]
-        logits_multi, _ = self.multiband_expert(eeg_seq, multi_a, multi_b) # [B]
+        # 3. Multiband Encoding
+        C_m, T_m = multi_a.shape[2], multi_a.shape[3]
+        ma_flat = multi_a.reshape(B * SeqLen, C_m, T_m)
+        mb_flat = multi_b.reshape(B * SeqLen, C_m, T_m)
+        p_ma = F.normalize(self.multi_encoder(ma_flat), dim=-1)
+        p_mb = F.normalize(self.multi_encoder(mb_flat), dim=-1)
         
-        # Final prediction is a weighted sum of both expert predictions
-        hybrid_logits = (alpha * logits_wavlm) + ((1 - alpha) * logits_multi)
+        # 4. Temporal Gating
+        # The gate dynamically adapts PER TIMESTEP, rather than averaging over the whole sequence!
+        gate_input = torch.cat([p_eeg, p_wa, p_ma], dim=-1)
+        alpha = self.gate(gate_input).reshape(B, SeqLen) # [B, SeqLen]
         
-        return hybrid_logits, None
+        # 5. WavLM Expert TCN
+        score_wa = F.cosine_similarity(p_eeg, p_wa, dim=-1)
+        score_wb = F.cosine_similarity(p_eeg, p_wb, dim=-1)
+        diff_w = score_wa - score_wb
+        feat_w = torch.cat([p_eeg, p_wa, p_wb, score_wa.unsqueeze(-1), score_wb.unsqueeze(-1), diff_w.unsqueeze(-1)], dim=-1)
+        feat_w = feat_w.reshape(B, SeqLen, -1).transpose(1, 2)
+        tcn_out_w = self.wavlm_tcn(feat_w).transpose(1, 2) # [B, SeqLen, Channels]
+        
+        # 6. Multiband Expert TCN
+        score_ma = F.cosine_similarity(p_eeg, p_ma, dim=-1)
+        score_mb = F.cosine_similarity(p_eeg, p_mb, dim=-1)
+        diff_m = score_ma - score_mb
+        feat_m = torch.cat([p_eeg, p_ma, p_mb, score_ma.unsqueeze(-1), score_mb.unsqueeze(-1), diff_m.unsqueeze(-1)], dim=-1)
+        feat_m = feat_m.reshape(B, SeqLen, -1).transpose(1, 2)
+        tcn_out_m = self.multi_tcn(feat_m).transpose(1, 2) # [B, SeqLen, Channels]
+        
+        # 7. Classification and Fusion
+        logits_w = self.wavlm_classifier(tcn_out_w).squeeze(-1) # [B, SeqLen]
+        logits_m = self.multi_classifier(tcn_out_m).squeeze(-1) # [B, SeqLen]
+        
+        # PROBABILITY Fusion (prevents +8 and -8 from cancelling out to 0!)
+        prob_w = torch.sigmoid(logits_w)
+        prob_m = torch.sigmoid(logits_m)
+        
+        hybrid_prob = (alpha * prob_w) + ((1 - alpha) * prob_m)
+        
+        # Convert back to logit space for BCEWithLogitsLoss
+        hybrid_logits = torch.log(hybrid_prob / (1 - hybrid_prob + 1e-8) + 1e-8)
+        
+        # Global Average Pooling for final prediction
+        hybrid_logits_pool = hybrid_logits.mean(dim=1)
+        
+        # Return alpha as the second argument so the training loop can apply Entropy Regularization!
+        return hybrid_logits_pool, alpha
