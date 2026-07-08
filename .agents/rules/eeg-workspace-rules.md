@@ -115,3 +115,6 @@ When building simulators or deployment pipelines for the active hearing aid, adh
 1. **Instantaneous Audio Pipeline:** Blind source separation (e.g. beamforming) and audio mixing must run continuously in real-time (<10ms latency). Never delay the acoustic output by the AAD window size.
 2. **Lagged BCI Control Loop:** The `SequenceAADModel` runs in a slower background thread, buffering the last 3.5s of data.
 3. **EMA Smoothing:** The AAD model's predictions must update the audio mixer's Gain Multipliers asynchronously, using an Exponential Moving Average (EMA) to prevent volume jitter.
+
+**5. The Recurrent Sequence Trap (No LSTMs/Mamba):**
+Do not use continuous sequence models (LSTM, GRU, RNN, Mamba) for spatial or temporal modeling of Ear-EEG data. These models suffer from severe dimensionality collapse and overfit catastrophically to the training set (e.g., dropping loss to ~0.00 while test AUROC drops to ~0.27). The optimal temporal architecture for Ear-EEG phase-alignment is the **Temporal Convolutional Network (TCN)** with rigid, dilated receptive fields.
