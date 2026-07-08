@@ -69,6 +69,65 @@ class InceptionAudioEncoder(nn.Module):
         p = torch.flatten(p, 1)
         return self.fc(p)
 
+class TemporalPyramidEncoder(nn.Module):
+    """
+    Multi-Resolution Temporal Pyramid
+    Physically downsamples the audio to force clean low-frequency tracking,
+    then upsamples and adds the features together (ResNet style).
+    """
+    def __init__(self, in_channels, out_dim=64):
+        super().__init__()
+        
+        # Branch 1: 128 Hz (Fast transients, kernel=3)
+        self.branch_128 = nn.Sequential(
+            nn.Conv1d(in_channels, 24, kernel_size=3, padding=1),
+            nn.BatchNorm1d(24),
+            nn.ReLU()
+        )
+        
+        # Branch 2: 64 Hz (Medium scales, stride=2)
+        self.branch_64 = nn.Sequential(
+            nn.Conv1d(in_channels, 24, kernel_size=5, stride=2, padding=2),
+            nn.BatchNorm1d(24),
+            nn.ReLU()
+        )
+        
+        # Branch 3: 32 Hz (Slow semantics, stride=4)
+        self.branch_32 = nn.Sequential(
+            nn.Conv1d(in_channels, 24, kernel_size=9, stride=4, padding=4),
+            nn.BatchNorm1d(24),
+            nn.ReLU()
+        )
+        
+        self.fusion = nn.Sequential(
+            nn.Conv1d(24, 64, kernel_size=1),
+            nn.BatchNorm1d(64),
+            nn.ReLU()
+        )
+        
+        self.pool = nn.AdaptiveAvgPool1d(4)
+        self.fc = nn.Linear(64 * 4, out_dim)
+        
+    def forward(self, x):
+        if x.dim() == 2: x = x.unsqueeze(1)
+        
+        out_128 = self.branch_128(x)
+        out_64 = self.branch_64(x)
+        out_32 = self.branch_32(x)
+        
+        T = out_128.shape[2]
+        
+        # Upsample back to original T (128Hz)
+        out_64_up = F.interpolate(out_64, size=T, mode='linear', align_corners=False)
+        out_32_up = F.interpolate(out_32, size=T, mode='linear', align_corners=False)
+        
+        # Additive fusion (No unstable gating, pure gradient stability)
+        fused = out_128 + out_64_up + out_32_up
+        
+        p = self.pool(self.fusion(fused))
+        p = torch.flatten(p, 1)
+        return self.fc(p)
+
 class WavLMEncoder(nn.Module):
     """Projects 768-dimensional WavLM embeddings down to latent_dim without blowing up parameters."""
     def __init__(self, in_channels=768, out_dim=64):
@@ -221,7 +280,7 @@ class TemporalConvNet(nn.Module):
         return self.network(x)
 
 class TCNAADModel(nn.Module):
-    def __init__(self, eeg_channels=8, latent_dim=64, tcn_channels=[64, 64, 64], kernel_size=2, dropout=0.2, use_wavlm=False, audio_channels=1, attention_type='none', use_inception=False):
+    def __init__(self, eeg_channels=8, latent_dim=64, tcn_channels=[64, 64, 64], kernel_size=2, dropout=0.2, use_wavlm=False, audio_channels=1, attention_type='none', use_inception=False, use_pyramid=False):
         super().__init__()
         self.use_wavlm = use_wavlm
         
@@ -240,6 +299,8 @@ class TCNAADModel(nn.Module):
         else:
             if use_inception:
                 self.audio_encoder = InceptionAudioEncoder(in_channels=audio_channels, out_dim=latent_dim)
+            elif use_pyramid:
+                self.audio_encoder = TemporalPyramidEncoder(in_channels=audio_channels, out_dim=latent_dim)
             else:
                 self.audio_encoder = LocalEncoder(in_channels=audio_channels, out_dim=latent_dim)
                 
