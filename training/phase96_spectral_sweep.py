@@ -31,8 +31,8 @@ BATCH_SIZE = 32
 TRAIN_EPOCHS = 10
 TRAIN_LR = 1e-3
 
-# We evaluate S01 (Slow) and S16 (Fast) to verify the heterogeneous spectral hypothesis
-EVAL_SUBJECTS = [1, 16] 
+# We evaluate all 18 subjects to cluster their biological modulation phenotypes
+EVAL_SUBJECTS = list(range(18)) 
 
 # Modulation Bands (Hz)
 MODULATION_BANDS = [
