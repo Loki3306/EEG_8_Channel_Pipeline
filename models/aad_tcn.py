@@ -108,14 +108,14 @@ class TemporalConvNet(nn.Module):
         return self.network(x)
 
 class TCNAADModel(nn.Module):
-    def __init__(self, eeg_channels=8, latent_dim=64, tcn_channels=[64, 64, 64], kernel_size=2, dropout=0.3, use_wavlm=False):
+    def __init__(self, eeg_channels=8, latent_dim=64, tcn_channels=[64, 64, 64], kernel_size=2, dropout=0.3, use_wavlm=False, audio_channels=1):
         super().__init__()
         self.eeg_encoder = LocalEncoder(in_channels=eeg_channels, out_dim=latent_dim)
         
         if use_wavlm:
             self.aud_encoder = WavLMEncoder(in_channels=768, out_dim=latent_dim)
         else:
-            self.aud_encoder = LocalEncoder(in_channels=1, out_dim=latent_dim)
+            self.aud_encoder = LocalEncoder(in_channels=audio_channels, out_dim=latent_dim)
         
         # Total concatenated features per timestep
         tcn_input_dim = latent_dim * 3 + 3 
@@ -146,10 +146,17 @@ class TCNAADModel(nn.Module):
             aud_a_flat = aud_a_seq.reshape(B * SeqLen, T_aud, 768).transpose(1, 2)
             aud_b_flat = aud_b_seq.reshape(B * SeqLen, T_aud, 768).transpose(1, 2)
         else:
-            # aud_seq is [B, SeqLen, T] -> reshape to [B*SeqLen, 1, T]
-            T_aud = aud_a_seq.shape[2]
-            aud_a_flat = aud_a_seq.reshape(B * SeqLen, 1, T_aud)
-            aud_b_flat = aud_b_seq.reshape(B * SeqLen, 1, T_aud)
+            if aud_a_seq.dim() == 3:
+                # 1D Envelope: aud_seq is [B, SeqLen, T] -> reshape to [B*SeqLen, 1, T]
+                T_aud = aud_a_seq.shape[2]
+                aud_a_flat = aud_a_seq.reshape(B * SeqLen, 1, T_aud)
+                aud_b_flat = aud_b_seq.reshape(B * SeqLen, 1, T_aud)
+            else:
+                # Multiband Envelope: aud_seq is [B, SeqLen, Channels, T]
+                C_aud = aud_a_seq.shape[2]
+                T_aud = aud_a_seq.shape[3]
+                aud_a_flat = aud_a_seq.reshape(B * SeqLen, C_aud, T_aud)
+                aud_b_flat = aud_b_seq.reshape(B * SeqLen, C_aud, T_aud)
         
         p_eeg = F.normalize(self.eeg_encoder(eeg_flat), dim=-1)
         p_a = F.normalize(self.aud_encoder(aud_a_flat), dim=-1)
