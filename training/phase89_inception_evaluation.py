@@ -27,8 +27,8 @@ BATCH_SIZE = 32
 TRAIN_EPOCHS = 15
 TRAIN_LR = 1e-3
 
-# We evaluate S11 (Requires Slow Envelope) and S16 (Requires Fast Transients)
-EVAL_SUBJECTS = [5, 11, 16, 17]
+# We evaluate all subjects to observe representational heterogeneity across the cohort
+EVAL_SUBJECTS = list(range(1, 34))
 
 class StableAASDDataset(Dataset):
     def __init__(self, sequences):
