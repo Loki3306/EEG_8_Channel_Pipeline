@@ -8,13 +8,7 @@ from sklearn.model_selection import KFold
 import numpy as np
 from pathlib import Path
 import random
-
-try:
-    import learn2learn as l2l
-except ImportError:
-    print("Please install learn2learn: pip install learn2learn")
-    import sys
-    sys.exit(1)
+import copy
 
 # -------------------------------------------------------------------------
 # CONSTANTS
@@ -48,7 +42,7 @@ class LocalEncoder(nn.Module):
     def __init__(self, in_channels, out_dim=64):
         super().__init__()
         self.conv1 = nn.Conv1d(in_channels, 16, kernel_size=33, padding=16)
-        # Replacing BatchNorm with LayerNorm for MAML stability on small support sets!
+        # Using GroupNorm(1, C) which is equivalent to LayerNorm
         self.ln1 = nn.GroupNorm(1, 16) 
         self.conv2 = nn.Conv1d(16, 32, kernel_size=17, padding=8)
         self.ln2 = nn.GroupNorm(1, 32)
@@ -163,7 +157,7 @@ def batchify(seqs, device):
     return b_e, b_a, b_b, b_y
 
 # -------------------------------------------------------------------------
-# MAIN MAML LOOP
+# MAIN FOMAML LOOP (PURE PYTORCH)
 # -------------------------------------------------------------------------
 def main():
     cache_dir = Path('/kaggle/input/datasets/lowkieee/aasd-universal-cache-v1/kaggle/working/eeg_cache')
@@ -177,7 +171,7 @@ def main():
         return
         
     print("\n=======================================================")
-    print(" PHASE 71: MODEL-AGNOSTIC META-LEARNING (MAML)")
+    print(" PHASE 71: PURE PYTORCH FOMAML (No learn2learn)")
     print(" Pivot to Rapid Personalization using First-Order MAML")
     print("=======================================================\n")
     
@@ -221,48 +215,62 @@ def main():
         print(f"\n==================== FOLD {fold+1}/4 ====================")
         
         model = SequenceAADModel(eeg_channels=8).to(device)
-        maml = l2l.algorithms.MAML(model, lr=FAST_LR, first_order=True)
-        meta_opt = optim.Adam(maml.parameters(), lr=META_LR)
+        meta_opt = optim.Adam(model.parameters(), lr=META_LR)
         criterion = nn.BCEWithLogitsLoss()
         
         print(f"--- STEP 1: META-TRAINING ON {len(train_subjs)} SUBJECTS ---")
         for epoch in range(META_EPOCHS):
-            meta_loss = 0.0
+            meta_opt.zero_grad()
+            meta_loss_sum = 0.0
+            
             meta_batch = random.sample(list(train_subjs), META_BATCH_SIZE)
             
             for subj in meta_batch:
-                # 1 Task = 1 Subject
-                learner = maml.clone()
+                # 1. Clone the model for this specific task
+                learner = copy.deepcopy(model)
+                learner.train()
+                # Fast Adaptation uses standard SGD
+                inner_opt = optim.SGD(learner.parameters(), lr=FAST_LR)
+                
                 seqs = all_subj_seqs[subj].copy()
                 random.shuffle(seqs)
                 
-                # Sample Support and Query
                 support = seqs[:SUPPORT_SIZE]
                 query = seqs[SUPPORT_SIZE:SUPPORT_SIZE+QUERY_SIZE]
-                
                 if len(support) == 0 or len(query) == 0: continue
                 
                 b_e_s, b_a_s, b_b_s, b_y_s = batchify(support, device)
                 b_e_q, b_a_q, b_b_q, b_y_q = batchify(query, device)
                 
-                # Inner Loop: Fast Adaptation
+                # 2. Fast Adaptation (Inner Loop)
                 for _ in range(ADAPT_STEPS):
+                    inner_opt.zero_grad()
                     logits, _ = learner(b_e_s, b_a_s, b_b_s)
                     loss = criterion(logits, b_y_s)
-                    learner.adapt(loss)
+                    loss.backward()
+                    inner_opt.step()
                     
-                # Outer Loop: Evaluate on Query Set
+                # 3. Outer Loop: Evaluate on Query Set
                 logits_q, _ = learner(b_e_q, b_a_q, b_b_q)
                 q_loss = criterion(logits_q, b_y_q)
-                meta_loss += q_loss
+                meta_loss_sum += q_loss.item()
                 
-            meta_loss = meta_loss / len(meta_batch)
-            meta_opt.zero_grad()
-            meta_loss.backward()
+                # 4. FOMAML Trick: Compute gradients on the adapted model...
+                learner.zero_grad()
+                q_loss.backward()
+                
+                # ...and copy them directly into the original meta-model!
+                for p_meta, p_learner in zip(model.parameters(), learner.parameters()):
+                    if p_learner.grad is not None:
+                        if p_meta.grad is None:
+                            p_meta.grad = p_learner.grad.clone() / META_BATCH_SIZE
+                        else:
+                            p_meta.grad += p_learner.grad.clone() / META_BATCH_SIZE
+            
             meta_opt.step()
             
             if (epoch + 1) % 10 == 0:
-                print(f"  Meta-Epoch {epoch+1:03d}/{META_EPOCHS} | Meta Loss: {meta_loss.item():.4f}")
+                print(f"  Meta-Epoch {epoch+1:03d}/{META_EPOCHS} | Avg Query Loss: {meta_loss_sum/META_BATCH_SIZE:.4f}")
                 
         print("\n--- STEP 2: META-TESTING (DEPLOYMENT CALIBRATION) ---")
         for subj in test_subjs:
@@ -270,7 +278,7 @@ def main():
             if len(seqs) < SUPPORT_SIZE + 50:
                 continue
                 
-            # Deployment is Chronological! We use the FIRST 50 sequences for calibration.
+            # Deployment is Chronological! First sequences are calibration.
             support = seqs[:SUPPORT_SIZE]
             query = seqs[SUPPORT_SIZE:]
             
@@ -278,6 +286,7 @@ def main():
             b_e_q, b_a_q, b_b_q, b_y_q = batchify(query, device)
             
             # 1. Zero-Shot Baseline (using unmodified Meta-Weights)
+            model.eval()
             with torch.no_grad():
                 zs_logits, _ = model(b_e_q, b_a_q, b_b_q)
                 zs_preds = torch.sigmoid(zs_logits).cpu().numpy().flatten()
@@ -285,12 +294,18 @@ def main():
             zs_auc = roc_auc_score(labels, zs_preds) if len(np.unique(labels)) > 1 else 0.5
             
             # 2. Fast Adaptation (MAML Deployment)
-            learner = maml.clone()
+            learner = copy.deepcopy(model)
+            learner.train()
+            inner_opt = optim.SGD(learner.parameters(), lr=FAST_LR)
+            
             for _ in range(ADAPT_STEPS):
+                inner_opt.zero_grad()
                 logits, _ = learner(b_e_s, b_a_s, b_b_s)
                 loss = criterion(logits, b_y_s)
-                learner.adapt(loss)
+                loss.backward()
+                inner_opt.step()
                 
+            learner.eval()
             with torch.no_grad():
                 calib_logits, _ = learner(b_e_q, b_a_q, b_b_q)
                 calib_preds = torch.sigmoid(calib_logits).cpu().numpy().flatten()
