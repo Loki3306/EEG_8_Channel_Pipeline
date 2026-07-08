@@ -5,14 +5,13 @@ import torch.nn.functional as F
 class LocalEncoder(nn.Module):
     def __init__(self, in_channels, out_dim=64):
         super().__init__()
-        # Explicit depthwise-separable style for EEG to reduce parameters
-        self.conv1 = nn.Conv1d(in_channels, 16, kernel_size=33, padding=16)
-        self.bn1 = nn.BatchNorm1d(16)
-        self.conv2 = nn.Conv1d(16, 32, kernel_size=17, padding=8)
-        self.bn2 = nn.BatchNorm1d(32)
+        self.conv1 = nn.Conv1d(in_channels, 32, kernel_size=15, padding=7)
+        self.bn1 = nn.BatchNorm1d(32)
+        self.conv2 = nn.Conv1d(32, 64, kernel_size=7, padding=3)
+        self.bn2 = nn.BatchNorm1d(64)
         self.pool = nn.AdaptiveAvgPool1d(4)
-        self.fc = nn.Linear(32 * 4, out_dim)
-        
+        self.fc = nn.Linear(64 * 4, out_dim)
+
     def forward(self, x):
         if x.dim() == 2: x = x.unsqueeze(1)
         x = F.relu(self.bn1(self.conv1(x)))
@@ -21,6 +20,54 @@ class LocalEncoder(nn.Module):
         x = self.pool(x)
         x = torch.flatten(x, 1) 
         return self.fc(x)
+
+class InceptionAudioEncoder(nn.Module):
+    def __init__(self, in_channels, out_dim=64):
+        super().__init__()
+        
+        # Branch 1: Fast (RF ~23ms)
+        self.branch1 = nn.Sequential(
+            nn.Conv1d(in_channels, 24, kernel_size=3, padding=1, dilation=1),
+            nn.BatchNorm1d(24),
+            nn.ReLU()
+        )
+        
+        # Branch 2: Medium (RF ~117ms)
+        self.branch2 = nn.Sequential(
+            nn.Conv1d(in_channels, 24, kernel_size=15, padding=7, dilation=1),
+            nn.BatchNorm1d(24),
+            nn.ReLU()
+        )
+        
+        # Branch 3: Slow (RF ~445ms)
+        self.branch3 = nn.Sequential(
+            nn.Conv1d(in_channels, 24, kernel_size=15, padding=28, dilation=4),
+            nn.BatchNorm1d(24),
+            nn.ReLU()
+        )
+        
+        # Fusion 1x1 Conv
+        self.fusion = nn.Sequential(
+            nn.Conv1d(24 * 3, 64, kernel_size=1),
+            nn.BatchNorm1d(64),
+            nn.ReLU()
+        )
+        
+        self.pool = nn.AdaptiveAvgPool1d(4)
+        self.fc = nn.Linear(64 * 4, out_dim)
+        
+    def forward(self, x):
+        if x.dim() == 2: x = x.unsqueeze(1)
+        
+        out1 = self.branch1(x)
+        out2 = self.branch2(x)
+        out3 = self.branch3(x)
+        
+        fused = self.fusion(torch.cat([out1, out2, out3], dim=1))
+        
+        p = self.pool(fused)
+        p = torch.flatten(p, 1)
+        return self.fc(p)
 
 class WavLMEncoder(nn.Module):
     """Projects 768-dimensional WavLM embeddings down to latent_dim without blowing up parameters."""
@@ -174,24 +221,28 @@ class TemporalConvNet(nn.Module):
         return self.network(x)
 
 class TCNAADModel(nn.Module):
-    def __init__(self, eeg_channels=8, latent_dim=64, tcn_channels=[64, 64, 64], kernel_size=2, dropout=0.3, use_wavlm=False, audio_channels=1, attention_type='cross_modal'):
-        super(TCNAADModel, self).__init__()
+    def __init__(self, eeg_channels=8, latent_dim=64, tcn_channels=[64, 64, 64], kernel_size=2, dropout=0.2, use_wavlm=False, audio_channels=1, attention_type='none', use_inception=False):
+        super().__init__()
         self.use_wavlm = use_wavlm
-        self.attention_type = attention_type
+        
         self.eeg_encoder = LocalEncoder(in_channels=eeg_channels, out_dim=latent_dim)
         
         if attention_type in ['spatial_spectral', 'cross_modal']:
             self.spatial_attention = SpatialAttention(eeg_channels)
         else:
             self.spatial_attention = None
-        
-        if self.use_wavlm:
+            
+        if use_wavlm:
             self.audio_encoder = WavLMEncoder(in_channels=768, out_dim=latent_dim)
             self.cross_modal_gate = None
             self.spectral_attention = None
             self.temporal_cross_modal_gate = None
         else:
-            self.audio_encoder = LocalEncoder(in_channels=audio_channels, out_dim=latent_dim)
+            if use_inception:
+                self.audio_encoder = InceptionAudioEncoder(in_channels=audio_channels, out_dim=latent_dim)
+            else:
+                self.audio_encoder = LocalEncoder(in_channels=audio_channels, out_dim=latent_dim)
+                
             if audio_channels > 1 and attention_type == 'spatial_spectral':
                 self.spectral_attention = SpectralAttention(audio_channels)
                 self.cross_modal_gate = None
