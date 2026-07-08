@@ -117,9 +117,9 @@ def extract_sequences(trials):
                     al_seq = env_l[:, seq_start:seq_start + SEQ_SAMPLES]
                     ar_seq = env_r[:, seq_start:seq_start + SEQ_SAMPLES]
                     
-                    e = torch.from_numpy(e_seq).unfold(-1, WIN_SAMPLES, HOP_SAMPLES).permute(1, 0, 2)
-                    al = torch.from_numpy(al_seq).unfold(-1, WIN_SAMPLES, HOP_SAMPLES).permute(1, 0, 2)
-                    ar = torch.from_numpy(ar_seq).unfold(-1, WIN_SAMPLES, HOP_SAMPLES).permute(1, 0, 2)
+                    e = torch.from_numpy(e_seq.copy()).unfold(-1, WIN_SAMPLES, HOP_SAMPLES).permute(1, 0, 2)
+                    al = torch.from_numpy(al_seq.copy()).unfold(-1, WIN_SAMPLES, HOP_SAMPLES).permute(1, 0, 2)
+                    ar = torch.from_numpy(ar_seq.copy()).unfold(-1, WIN_SAMPLES, HOP_SAMPLES).permute(1, 0, 2)
                     
                     num_windows = e.shape[0]
                     y = torch.full((num_windows,), label, dtype=torch.float32)
