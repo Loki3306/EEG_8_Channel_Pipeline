@@ -88,6 +88,7 @@ class SequenceAADModel(nn.Module):
         ], dim=-1)
         lstm_feat = lstm_feat.reshape(B, SeqLen, -1)
         
+        self.lstm.flatten_parameters()
         lstm_out, hidden = self.lstm(lstm_feat, hidden)
         logits = self.classifier(lstm_out).squeeze(-1)
         return logits, hidden
