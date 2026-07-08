@@ -277,8 +277,12 @@ def main():
                     all_labels.extend(b_y.cpu().numpy().flatten())
             zs_auc = roc_auc_score(all_labels, all_preds) if len(np.unique(all_labels)) > 1 else 0.5
             
-            # Calibration Fix 1: Keep model in eval() to freeze BatchNorm running stats!
-            model.eval()
+            # Calibration Fix 1: Keep model in train() so CuDNN LSTM can backprop,
+            # but manually force BatchNorm layers to eval() to freeze running stats!
+            model.train()
+            for m in model.modules():
+                if isinstance(m, nn.BatchNorm1d):
+                    m.eval()
             
             # Freeze all parameters except Adapter
             for param in model.parameters(): param.requires_grad = False
