@@ -15,30 +15,38 @@ def load_wavlm_model(device):
     return model
 
 @torch.no_grad()
-def extract_wavlm_features(audio_data, model, device, target_length):
+def extract_wavlm_features_stereo(audio_l, audio_r, model, device, target_length):
     """
-    Extracts 768-dim WavLM features and interpolates them to perfectly match the EEG target_length.
+    Extracts 768-dim WavLM features for both Left and Right channels simultaneously (Batch Size 2).
+    Uses Mixed Precision (FP16) to double GPU efficiency and halve VRAM usage.
     """
-    # 1. Safe Audio Normalization
-    if np.issubdtype(audio_data.dtype, np.integer):
-        audio = audio_data.astype(np.float32)
-        audio /= np.iinfo(audio_data.dtype).max
-    else:
-        audio = audio_data.astype(np.float32)
+    def normalize_audio(audio_data):
+        if np.issubdtype(audio_data.dtype, np.integer):
+            audio = audio_data.astype(np.float32)
+            audio /= np.iinfo(audio_data.dtype).max
+        else:
+            audio = audio_data.astype(np.float32)
+        return audio
         
-    audio_tensor = torch.from_numpy(audio).unsqueeze(0).to(device) # [1, Time]
+    audio_l = normalize_audio(audio_l)
+    audio_r = normalize_audio(audio_r)
     
-    # 2. Extract Hidden States from WavLM
-    outputs = model(audio_tensor)
-    hidden_states = outputs.last_hidden_state # [1, TimeWavLM, 768]
+    # Batch Left and Right into [2, Time] to double GPU utilization
+    audio_tensor = torch.from_numpy(np.stack([audio_l, audio_r])).to(device)
+    
+    # Use TensorCores via FP16 Autocast
+    with torch.autocast(device_type='cuda', dtype=torch.float16):
+        outputs = model(audio_tensor)
+        hidden_states = outputs.last_hidden_state # [2, TimeWavLM, 768]
     
     # 3. Interpolate from 50Hz (WavLM) to 128Hz (EEG)
-    hidden_states = hidden_states.transpose(1, 2) # [1, 768, TimeWavLM]
+    # Convert back to float32 for precise interpolation
+    hidden_states = hidden_states.transpose(1, 2).float() # [2, 768, TimeWavLM]
     interpolated = torch.nn.functional.interpolate(hidden_states, size=target_length, mode='linear', align_corners=False)
     
-    # 4. Return to CPU to save memory
-    final_features = interpolated.transpose(1, 2).squeeze(0).cpu() # [target_length, 768]
-    return final_features
+    # 4. Return to CPU to save GPU memory immediately
+    final_features = interpolated.transpose(1, 2).cpu() # [2, target_length, 768]
+    return final_features[0], final_features[1]
 
 def load_trials_from_raw(mat_path, wav_dir, wavlm_model, device):
     mat = scipy.io.loadmat(mat_path, simplify_cells=True)
@@ -77,10 +85,9 @@ def load_trials_from_raw(mat_path, wav_dir, wavlm_model, device):
         wav_path = os.path.join(wav_dir, f"mixed_{audio_id:03d}.wav")
         if not os.path.exists(wav_path): continue
             
-        # Extract WavLM Embeddings
+        # Extract WavLM Embeddings efficiently in Stereo
         sr, wav_data = wav.read(wav_path)
-        wavlm_l = extract_wavlm_features(wav_data[:, 0], wavlm_model, device, target_length=eeg_target_length)
-        wavlm_r = extract_wavlm_features(wav_data[:, 1], wavlm_model, device, target_length=eeg_target_length)
+        wavlm_l, wavlm_r = extract_wavlm_features_stereo(wav_data[:, 0], wav_data[:, 1], wavlm_model, device, target_length=eeg_target_length)
         
         # Find Switch Points
         epoch_start_lat = trial_idx * 7680 + 1
