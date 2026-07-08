@@ -138,7 +138,10 @@ class AASDSequenceDataset(Dataset):
 # MAIN
 # -------------------------------------------------------------------------
 def main():
-    cache_dir = Path('/kaggle/working/eeg_cache')
+    cache_dir = Path('/kaggle/input/datasets/lowkieee/aasd-universal-cache-v1/kaggle/working/eeg_cache')
+    if not cache_dir.exists():
+        cache_dir = Path('/kaggle/working/eeg_cache')
+        
     cache_files = list(cache_dir.glob('*_processed.pt'))
     
     if len(cache_files) == 0:
