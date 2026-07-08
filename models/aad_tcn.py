@@ -132,6 +132,29 @@ class CrossModalGate(nn.Module):
         weights = 1.0 + 0.5 * self.net(eeg_latent) 
         return weights.unsqueeze(-1) # [B*SeqLen, audio_channels, 1]
 
+class DeepTemporalCrossModalGate(nn.Module):
+    def __init__(self, eeg_channels, audio_channels):
+        super().__init__()
+        # A deep temporal convolutional network to extract clean EEG features
+        # while strictly preserving the temporal sequence dimension 'T'.
+        self.net = nn.Sequential(
+            nn.Conv1d(eeg_channels, 32, kernel_size=15, padding=7),
+            nn.BatchNorm1d(32),
+            nn.ReLU(),
+            nn.Conv1d(32, 64, kernel_size=7, padding=3),
+            nn.BatchNorm1d(64),
+            nn.ReLU(),
+            nn.Conv1d(64, audio_channels, kernel_size=3, padding=1),
+            nn.Tanh() # Outputs between -1 and 1
+        )
+        
+    def forward(self, eeg_seq):
+        # eeg_seq: [B*SeqLen, eeg_channels, T]
+        # output bounds: [0.5, 1.5]
+        # Mathematics: A * (1 + 0.5w) = A + 0.5(A*w), which acts as a residual connection
+        weights = 1.0 + 0.5 * self.net(eeg_seq) 
+        return weights # [B*SeqLen, audio_channels, T]
+
 class TemporalConvNet(nn.Module):
     def __init__(self, num_inputs, num_channels, kernel_size=2, dropout=0.2):
         super(TemporalConvNet, self).__init__()
@@ -166,17 +189,25 @@ class TCNAADModel(nn.Module):
             self.audio_encoder = WavLMEncoder(in_channels=768, out_dim=latent_dim)
             self.cross_modal_gate = None
             self.spectral_attention = None
+            self.temporal_cross_modal_gate = None
         else:
             self.audio_encoder = LocalEncoder(in_channels=audio_channels, out_dim=latent_dim)
             if audio_channels > 1 and attention_type == 'spatial_spectral':
                 self.spectral_attention = SpectralAttention(audio_channels)
                 self.cross_modal_gate = None
+                self.temporal_cross_modal_gate = None
             elif audio_channels > 1 and attention_type == 'cross_modal':
                 self.cross_modal_gate = CrossModalGate(latent_dim, audio_channels)
+                self.spectral_attention = None
+                self.temporal_cross_modal_gate = None
+            elif audio_channels > 1 and attention_type == 'temporal_cross_modal':
+                self.temporal_cross_modal_gate = DeepTemporalCrossModalGate(eeg_channels, audio_channels)
+                self.cross_modal_gate = None
                 self.spectral_attention = None
             else:
                 self.cross_modal_gate = None
                 self.spectral_attention = None
+                self.temporal_cross_modal_gate = None
                 
         # Input to TCN: eeg_latent (64) + aud_a_latent (64) + aud_b_latent (64) + 
         #               cos_sim_a (1) + cos_sim_b (1) + diff (1) = 195
@@ -191,6 +222,23 @@ class TCNAADModel(nn.Module):
         
         if self.spatial_attention is not None:
             eeg_flat = self.spatial_attention(eeg_flat)
+            
+        if self.use_wavlm:
+            pass # Temporal cross-modal gate not supported for WavLM
+        else:
+            if getattr(self, 'temporal_cross_modal_gate', None) is not None:
+                # Apply residual temporal gating to audio BEFORE audio flattening/encoding
+                temporal_weights = self.temporal_cross_modal_gate(eeg_flat) # [B*SeqLen, C_a, T]
+                C_a, T_a = aud_seq_a.shape[2], aud_seq_a.shape[3]
+                aud_a_flat = aud_seq_a.reshape(B * SeqLen, C_a, T_a)
+                aud_b_flat = aud_seq_b.reshape(B * SeqLen, C_a, T_a)
+                
+                aud_a_flat = aud_a_flat * temporal_weights
+                aud_b_flat = aud_b_flat * temporal_weights
+                
+                aud_seq_a = aud_a_flat.reshape(B, SeqLen, C_a, T_a)
+                aud_seq_b = aud_b_flat.reshape(B, SeqLen, C_a, T_a)
+                
         eeg_latent_raw = self.eeg_encoder(eeg_flat)
         p_eeg = F.normalize(eeg_latent_raw, dim=-1) # [B*SeqLen, latent_dim]
         
