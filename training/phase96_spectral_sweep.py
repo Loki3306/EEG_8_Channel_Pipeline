@@ -204,6 +204,7 @@ def main():
             model = TCNAADModel(encoder_type='baseline', audio_channels=16, use_wavlm=False, attention_type='none').to(device)
             optimizer = optim.Adam(model.parameters(), lr=TRAIN_LR, weight_decay=1e-4)
             criterion = nn.BCEWithLogitsLoss()
+            scaler = torch.amp.GradScaler('cuda')
             
             best_auc = 0
             for epoch in range(TRAIN_EPOCHS):
@@ -216,11 +217,13 @@ def main():
                     if b_e.size(0) == 1: continue 
                     optimizer.zero_grad()
                     
-                    logits, _ = model(b_e, b_a, b_b)
-                    loss = criterion(logits, b_y)
+                    with torch.autocast(device_type='cuda', dtype=torch.float16):
+                        logits, _ = model(b_e, b_a, b_b)
+                        loss = criterion(logits, b_y)
                         
-                    loss.backward()
-                    optimizer.step()
+                    scaler.scale(loss).backward()
+                    scaler.step(optimizer)
+                    scaler.update()
                 
                 model.eval()
                 all_preds, all_labels = [], []
@@ -229,7 +232,10 @@ def main():
                         b_e = b_e.to(device, non_blocking=True).float()
                         b_a = b_a.to(device, non_blocking=True).float()
                         b_b = b_b.to(device, non_blocking=True).float()
-                        logits, _ = model(b_e, b_a, b_b)
+                        
+                        with torch.autocast(device_type='cuda', dtype=torch.float16):
+                            logits, _ = model(b_e, b_a, b_b)
+                            
                         all_preds.extend(torch.sigmoid(logits).cpu().numpy().flatten())
                         all_labels.extend(b_y.numpy().flatten())
                 
