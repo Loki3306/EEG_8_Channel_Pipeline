@@ -471,3 +471,96 @@ class HybridMoEAADModel(nn.Module):
         
         # Return alpha as the second argument so the training loop can apply Entropy Regularization!
         return hybrid_logits_pool, alpha
+
+class LateFusionAADModel(nn.Module):
+    def __init__(self, eeg_channels=8, latent_dim=64, tcn_channels=[64, 64, 64], kernel_size=2, dropout=0.3):
+        super().__init__()
+        
+        # 1. Shared EEG Encoder
+        self.eeg_encoder = LocalEncoder(in_channels=eeg_channels, out_dim=latent_dim)
+        
+        tcn_input_dim = latent_dim * 3 + 3
+        
+        # 2. Fast Expert (128 Hz)
+        self.fast_audio = nn.Sequential(
+            nn.Conv1d(16, 32, kernel_size=3, padding=1),
+            nn.BatchNorm1d(32),
+            nn.ReLU(),
+            nn.AdaptiveAvgPool1d(4),
+            nn.Flatten(1),
+            nn.Linear(32 * 4, latent_dim)
+        )
+        self.fast_tcn = TemporalConvNet(tcn_input_dim, tcn_channels, kernel_size, dropout)
+        self.fast_classifier = nn.Linear(tcn_channels[-1], 1)
+        
+        # 3. Slow Expert (32 Hz)
+        self.slow_audio = nn.Sequential(
+            nn.Conv1d(16, 32, kernel_size=9, stride=4, padding=4),
+            nn.BatchNorm1d(32),
+            nn.ReLU(),
+            nn.AdaptiveAvgPool1d(4),
+            nn.Flatten(1),
+            nn.Linear(32 * 4, latent_dim)
+        )
+        self.slow_tcn = TemporalConvNet(tcn_input_dim, tcn_channels, kernel_size, dropout)
+        self.slow_classifier = nn.Linear(tcn_channels[-1], 1)
+        
+        # 4. Combiner (Static Subject-Specific Router)
+        self.combiner = nn.Linear(2, 1)
+        
+    def forward(self, eeg_seq, aud_a, aud_b):
+        B, SeqLen = eeg_seq.shape[0], eeg_seq.shape[1]
+        
+        # -- Shared EEG --
+        C_e, T_e = eeg_seq.shape[2], eeg_seq.shape[3]
+        eeg_flat = eeg_seq.reshape(B * SeqLen, C_e, T_e)
+        p_eeg = F.normalize(self.eeg_encoder(eeg_flat), dim=-1)
+        
+        # -- Audio Flattening --
+        C_a, T_a = aud_a.shape[2], aud_a.shape[3]
+        a_flat = aud_a.reshape(B * SeqLen, C_a, T_a)
+        b_flat = aud_b.reshape(B * SeqLen, C_a, T_a)
+        
+        # ==========================================
+        # FAST EXPERT
+        # ==========================================
+        p_f_a = F.normalize(self.fast_audio(a_flat), dim=-1)
+        p_f_b = F.normalize(self.fast_audio(b_flat), dim=-1)
+        
+        score_f_a = F.cosine_similarity(p_eeg, p_f_a, dim=-1)
+        score_f_b = F.cosine_similarity(p_eeg, p_f_b, dim=-1)
+        diff_f = score_f_a - score_f_b
+        
+        feat_f = torch.cat([p_eeg, p_f_a, p_f_b, score_f_a.unsqueeze(-1), score_f_b.unsqueeze(-1), diff_f.unsqueeze(-1)], dim=-1)
+        feat_f = feat_f.reshape(B, SeqLen, -1).transpose(1, 2)
+        
+        tcn_out_f = self.fast_tcn(feat_f).transpose(1, 2)
+        logits_f = self.fast_classifier(tcn_out_f).squeeze(-1) # [B, SeqLen]
+        
+        # ==========================================
+        # SLOW EXPERT
+        # ==========================================
+        p_s_a = F.normalize(self.slow_audio(a_flat), dim=-1)
+        p_s_b = F.normalize(self.slow_audio(b_flat), dim=-1)
+        
+        score_s_a = F.cosine_similarity(p_eeg, p_s_a, dim=-1)
+        score_s_b = F.cosine_similarity(p_eeg, p_s_b, dim=-1)
+        diff_s = score_s_a - score_s_b
+        
+        feat_s = torch.cat([p_eeg, p_s_a, p_s_b, score_s_a.unsqueeze(-1), score_s_b.unsqueeze(-1), diff_s.unsqueeze(-1)], dim=-1)
+        feat_s = feat_s.reshape(B, SeqLen, -1).transpose(1, 2)
+        
+        tcn_out_s = self.slow_tcn(feat_s).transpose(1, 2)
+        logits_s = self.slow_classifier(tcn_out_s).squeeze(-1) # [B, SeqLen]
+        
+        # ==========================================
+        # COMBINER (STATIC ROUTING)
+        # ==========================================
+        # Average pooling over the sequence BEFORE the combiner, to give a single robust logit per expert
+        pool_f = logits_f.mean(dim=1).unsqueeze(-1) # [B, 1]
+        pool_s = logits_s.mean(dim=1).unsqueeze(-1) # [B, 1]
+        
+        combined_features = torch.cat([pool_f, pool_s], dim=-1) # [B, 2]
+        final_logits = self.combiner(combined_features).squeeze(-1) # [B]
+        
+        return final_logits, None
