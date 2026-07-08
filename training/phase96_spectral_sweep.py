@@ -36,11 +36,22 @@ EVAL_SUBJECTS = [1, 16]
 
 # Modulation Bands (Hz)
 MODULATION_BANDS = [
-    ("0.5-2.0 Hz (Prosody)", 0.5, 2.0),
-    ("2.0-4.0 Hz (Words)", 2.0, 4.0),
-    ("4.0-8.0 Hz (Syllables)", 4.0, 8.0),
-    ("8.0-16.0 Hz (Phonemes)", 8.0, 16.0),
-    ("16.0-32.0 Hz (Fast Transients)", 16.0, 32.0)
+    # Cumulative Low-Pass
+    ("LPF < 2.0 Hz", None, 2.0),
+    ("LPF < 4.0 Hz", None, 4.0),
+    ("LPF < 8.0 Hz", None, 8.0),
+    ("LPF < 16.0 Hz", None, 16.0),
+    # Cumulative High-Pass
+    ("HPF > 2.0 Hz", 2.0, None),
+    ("HPF > 4.0 Hz", 4.0, None),
+    ("HPF > 8.0 Hz", 8.0, None),
+    ("HPF > 16.0 Hz", 16.0, None),
+    # Band-Pass Sweeps
+    ("Band 0.5-2.0 Hz", 0.5, 2.0),
+    ("Band 2.0-4.0 Hz", 2.0, 4.0),
+    ("Band 4.0-8.0 Hz", 4.0, 8.0),
+    ("Band 8.0-16.0 Hz", 8.0, 16.0),
+    ("Band 16.0-32.0 Hz", 16.0, 32.0)
 ]
 
 def apply_modulation_filter(env, lowcut, highcut, fs, order=4):
@@ -50,9 +61,15 @@ def apply_modulation_filter(env, lowcut, highcut, fs, order=4):
     env: numpy array of shape [Channels, Time]
     """
     nyq = 0.5 * fs
-    low = lowcut / nyq
-    high = highcut / nyq
-    b, a = signal.butter(order, [low, high], btype='band')
+    if lowcut is None and highcut is not None:
+        b, a = signal.butter(order, highcut / nyq, btype='low')
+    elif highcut is None and lowcut is not None:
+        b, a = signal.butter(order, lowcut / nyq, btype='high')
+    else:
+        low = lowcut / nyq
+        high = highcut / nyq
+        b, a = signal.butter(order, [low, high], btype='band')
+        
     # Use filtfilt for zero-phase distortion (preserves phase alignment for AAD)
     filtered = signal.filtfilt(b, a, env, axis=1)
     return filtered
@@ -146,13 +163,14 @@ def main():
                 env_l = tr['env_l'].numpy()
                 env_r = tr['env_r'].numpy()
                 
-                # Apply Temporal Modulation Bandpass Filter
-                env_l = apply_modulation_filter(env_l, lowcut, highcut, SR)
-                env_r = apply_modulation_filter(env_r, lowcut, highcut, SR)
-                
+                # IMPORTANT: Normalize BEFORE filtering to preserve the relative physical energy of the filtered bands!
                 eeg = (eeg - np.mean(eeg, axis=1, keepdims=True)) / (np.std(eeg, axis=1, keepdims=True) + 1e-8)
                 env_l = (env_l - np.mean(env_l, axis=1, keepdims=True)) / (np.std(env_l, axis=1, keepdims=True) + 1e-8)
                 env_r = (env_r - np.mean(env_r, axis=1, keepdims=True)) / (np.std(env_r, axis=1, keepdims=True) + 1e-8)
+
+                # Apply Temporal Modulation Filter
+                env_l = apply_modulation_filter(env_l, lowcut, highcut, SR)
+                env_r = apply_modulation_filter(env_r, lowcut, highcut, SR)
                 
                 min_len = min(eeg.shape[1], env_l.shape[1])
                 
