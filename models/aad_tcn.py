@@ -205,9 +205,9 @@ class HybridMoEAADModel(nn.Module):
         self.multi_classifier = nn.Linear(tcn_channels[-1], 1)
         
         # 4. Temporal Gating Network
-        # Takes the encoded EEG and the encoded audio representations (much richer input than raw EEG)
+        # Takes the encoded EEG and ALL encoded audio representations (much richer input)
         self.gate = nn.Sequential(
-            nn.Linear(latent_dim * 3, 32),
+            nn.Linear(latent_dim * 5, 32),
             nn.ReLU(),
             nn.Linear(32, 1),
             nn.Sigmoid() # Outputs alpha (0 to 1)
@@ -236,8 +236,8 @@ class HybridMoEAADModel(nn.Module):
         p_mb = F.normalize(self.multi_encoder(mb_flat), dim=-1)
         
         # 4. Temporal Gating
-        # The gate dynamically adapts PER TIMESTEP, rather than averaging over the whole sequence!
-        gate_input = torch.cat([p_eeg, p_wa, p_ma], dim=-1)
+        # The gate dynamically adapts PER TIMESTEP, and looks at both Audio A and Audio B!
+        gate_input = torch.cat([p_eeg, p_wa, p_wb, p_ma, p_mb], dim=-1)
         alpha = self.gate(gate_input).reshape(B, SeqLen) # [B, SeqLen]
         
         # 5. WavLM Expert TCN
@@ -260,14 +260,8 @@ class HybridMoEAADModel(nn.Module):
         logits_w = self.wavlm_classifier(tcn_out_w).squeeze(-1) # [B, SeqLen]
         logits_m = self.multi_classifier(tcn_out_m).squeeze(-1) # [B, SeqLen]
         
-        # PROBABILITY Fusion (prevents +8 and -8 from cancelling out to 0!)
-        prob_w = torch.sigmoid(logits_w)
-        prob_m = torch.sigmoid(logits_m)
-        
-        hybrid_prob = (alpha * prob_w) + ((1 - alpha) * prob_m)
-        
-        # Convert back to logit space for BCEWithLogitsLoss
-        hybrid_logits = torch.log(hybrid_prob / (1 - hybrid_prob + 1e-8) + 1e-8)
+        # LOGIT Fusion (Standard MoE practice)
+        hybrid_logits = (alpha * logits_w) + ((1 - alpha) * logits_m)
         
         # Global Average Pooling for final prediction
         hybrid_logits_pool = hybrid_logits.mean(dim=1)
