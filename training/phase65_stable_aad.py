@@ -110,8 +110,10 @@ class StableSequenceDataset(Dataset):
             T = eeg.shape[1]
             
             # Find the boundaries of every attention block
-            boundaries = [idx for spk, idx in sp]
-            if boundaries[-1] < T:
+            boundaries = [0]
+            boundaries.extend([idx for spk, idx in sp])
+            boundaries = sorted(set(boundaries))
+            if boundaries[-1] != T:
                 boundaries.append(T)
                 
             for i in range(len(boundaries) - 1):
