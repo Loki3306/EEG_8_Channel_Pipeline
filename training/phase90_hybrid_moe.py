@@ -26,7 +26,7 @@ EXCLUSION_SAMPLES = int(EXCLUSION_SEC * SR)
 SEQ_SAMPLES = int(SEQ_SEC * SR)
 
 EAR_CHANNEL_INDICES = [23, 31, 32, 40, 14, 22, 41, 49]
-BATCH_SIZE = 16 
+BATCH_SIZE = 64 # Increased from 16 to saturate GPU (Currently only 400MB used)
 TRAIN_EPOCHS = 15
 TRAIN_LR = 1e-3
 
@@ -178,8 +178,8 @@ def main():
         
         if len(eval_set) == 0 or len(calib_pool) == 0: continue
             
-        train_loader = DataLoader(StableHybridDataset(calib_pool), batch_size=BATCH_SIZE, shuffle=True, pin_memory=True, num_workers=2)
-        eval_loader = DataLoader(StableHybridDataset(eval_set), batch_size=BATCH_SIZE, shuffle=False, pin_memory=True, num_workers=2)
+        train_loader = DataLoader(StableHybridDataset(calib_pool), batch_size=BATCH_SIZE, shuffle=True, pin_memory=True, num_workers=0)
+        eval_loader = DataLoader(StableHybridDataset(eval_set), batch_size=BATCH_SIZE, shuffle=False, pin_memory=True, num_workers=0)
         
         model = HybridMoEAADModel(dropout=0.3).to(device)
         optimizer = optim.Adam(model.parameters(), lr=TRAIN_LR, weight_decay=1e-4)
