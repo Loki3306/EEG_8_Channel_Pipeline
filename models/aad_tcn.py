@@ -55,23 +55,34 @@ class Chomp1d(nn.Module):
         return x[:, :, :-self.chomp_size].contiguous()
 
 class TemporalBlock(nn.Module):
-    def __init__(self, in_channels, out_channels, kernel_size, stride, dilation, padding, dropout=0.2):
+    def __init__(self, n_inputs, n_outputs, kernel_size, stride, dilation, padding, dropout=0.2):
         super(TemporalBlock, self).__init__()
-        self.conv1 = nn.Conv1d(in_channels, out_channels, kernel_size, stride=stride, padding=padding, dilation=dilation)
-        self.bn1 = nn.BatchNorm1d(out_channels)
+        # Causal Dilated Conv 1
+        self.conv1 = nn.Conv1d(n_inputs, n_outputs, kernel_size,
+                               stride=stride, padding=padding, dilation=dilation)
+        self.chomp1 = Chomp1d(padding)
         self.relu1 = nn.ReLU()
         self.dropout1 = nn.Dropout(dropout)
 
-        self.conv2 = nn.Conv1d(out_channels, out_channels, kernel_size, stride=stride, padding=padding, dilation=dilation)
-        self.bn2 = nn.BatchNorm1d(out_channels)
+        # Causal Dilated Conv 2
+        self.conv2 = nn.Conv1d(n_outputs, n_outputs, kernel_size,
+                               stride=stride, padding=padding, dilation=dilation)
+        self.chomp2 = Chomp1d(padding)
         self.relu2 = nn.ReLU()
         self.dropout2 = nn.Dropout(dropout)
 
-        self.net = nn.Sequential(self.conv1, self.bn1, self.relu1, self.dropout1,
-                                 self.conv2, self.bn2, self.relu2, self.dropout2)
-
-        self.downsample = nn.Conv1d(in_channels, out_channels, 1) if in_channels != out_channels else None
+        self.net = nn.Sequential(self.conv1, self.chomp1, self.relu1, self.dropout1,
+                                 self.conv2, self.chomp2, self.relu2, self.dropout2)
+                                 
+        self.downsample = nn.Conv1d(n_inputs, n_outputs, 1) if n_inputs != n_outputs else None
         self.relu = nn.ReLU()
+        self.init_weights()
+
+    def init_weights(self):
+        self.conv1.weight.data.normal_(0, 0.01)
+        self.conv2.weight.data.normal_(0, 0.01)
+        if self.downsample is not None:
+            self.downsample.weight.data.normal_(0, 0.01)
 
     def forward(self, x):
         out = self.net(x)
