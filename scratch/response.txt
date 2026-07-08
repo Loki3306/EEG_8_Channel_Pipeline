@@ -1,391 +1,548 @@
-Executive Summary
+I compared your reconstruction against the conversation history in this chat. Some parts are well supported, while others contain inconsistencies or values that changed across later experiments.
 
-I would recommend Option 3, but with one important conceptual refinement:
+Overall assessment
 
-Do not think of KUL/DTU as teaching the model "attention." Think of them as teaching the model "EEG feature extraction."
+Phases 56–80: Mostly consistent with the discussion history.
 
-Your AASD model should remain the task-specific model. KUL/DTU should provide a pretrained physiological representation, not the final decoder.
+Phases 81–93: There are several AUROC inconsistencies because the project evolved from:
 
-This separates representation learning from task learning, which is the standard strategy in modern transfer learning.
+4-subject debugging runs,
 
-First Principle: What knowledge actually transfers?
+17-subject cohort,
 
-The biggest mistake would be assuming that because all three datasets are "AAD," the entire model should transfer.
+then 33-subject cohort.
 
-It should not.
+Some values in your summary mix these different evaluation protocols.
 
-Different parts of the model learn different things.
+Phase 56–64
+Status
 
-EEG
- ↓
-Spatial Processing
- ↓
-Temporal EEG Features
- ↓
-Attention Representation
- ↓
-Task Decoder
- ↓
-Prediction
+Mostly correct.
 
-Each stage has different transferability.
+Key milestones:
 
-Component	Transferability	Reason
-Low-level temporal filters	High	Auditory cortical responses are shared across tasks.
-Mid-level EEG representations	Moderate	Envelope tracking and auditory rhythms generalize reasonably well.
-Subject-specific spatial mapping	Low	Electrode placement, skull conductivity, anatomy differ.
-Sustained-attention decoder	Low	Different task objective from switching.
-Switching detector	None	KUL/DTU contain no switching labels.
+AASD Ear-EEG integration
 
-This immediately rules out transferring an entire pretrained decoder.
+Stable sequence extraction
 
-Why Option 1 is weak
+16-band cochlear envelopes
 
-Mechanically align AASD to 8 channels and directly use the frozen KUL-Conformer or DTU-MatchNet.
+3.5 s sequence generation
 
-This is essentially assuming
+2.0 s windows
 
-Task A
-↓
+1.5 s transition exclusion
 
-same latent space
+I don't remember any fixed AUROC associated with these infrastructure phases.
 
-↓
+Phase 65
 
-Task B
+Correct.
 
-But Task A is
+Main scientific discovery:
 
-sustained selective attention
+Cognitive transition period after attention switch
 
-Task B is
+Stable windows outperform transition windows
 
-dynamic switching between attended streams.
+Motivated all later "stable epoch" experiments
 
-Those are not equivalent.
+Phase 66–70
 
-The frozen decoder has never learned:
+Correct.
 
-switching transients
+Major conclusions:
 
-transition uncertainty
+Universal pretraining collapsed
 
-reconstruction instability during switches
+FiLM adaptation failed
 
-CUSUM-compatible residual behavior
+Spatial mixer failed
 
-Even if preprocessing is perfectly aligned, the decoder objective is mismatched.
+Calibration adapters failed
 
-Your earlier KUL↔DTU transfer worked because both datasets solved essentially the same task.
+Scientific conclusion:
 
-Here they do not.
+Cross-subject transfer is fundamentally difficult for low-density Ear-EEG.
 
-Why Option 2 is also not ideal
+Phase 71–80
 
-Train the Neural Ridge Hybrid entirely on KUL/DTU.
+Important milestones that should probably appear.
 
-This sounds attractive, but consider what the model would optimize.
+Phase 79
 
-Your Neural Ridge Hybrid was designed for
+Dilated TCN
 
-EEG
-↓
+Important observation
 
-Speech reconstruction
+Weak subjects partially rescued.
 
-↓
+Roughly
 
-CUSUM
+S05  failed
+S11  failed
+S16  improved
+S17  improved
 
-↓
+This motivated WavLM.
 
-Switch detection
+Phase 80
 
-KUL and DTU contain no switches.
+WavLM evaluation
 
-Therefore the model would learn
+Known values discussed earlier
 
-stable reconstruction
+S05
 
-which is exactly what those datasets encourage.
+0.4848
 
-The switching behavior is absent.
+S11
 
-Consequently:
+0.6024
 
-reconstruction filters transfer,
+S16
 
-switching behavior does not.
+0.6801
 
-Training the entire architecture on KUL/DTU does not magically create knowledge that isn't in the labels.
+S17
 
-Why Option 3 is the strongest
+0.6372
 
-The important insight is:
+These numbers were referenced multiple times.
 
-transfer the representation, not the task.
+Phase 81
 
-Conceptually:
+Your table is not the original Phase 81 values.
 
-KUL / DTU
+Earlier conversation contained
 
-↓
+S05 0.4937
 
-Universal EEG Encoder
+S11 0.5318
+
+S16 0.7173
+
+S17 0.5233
+
+Those four values were used repeatedly when comparing
+
+Phase 80
 
 ↓
 
-Latent EEG Representation
+Phase 81
 
-==============================
+So I'd trust these.
 
-AASD
+Phase 82
 
-↓
+Hybrid MoE
 
-Frozen Universal Encoder
+Major events
 
-↓
+Gate collapse
 
-Latent Representation
+Alpha≈1
 
-↓
+Shared encoder redesign
 
-Personalized Neural Ridge
+Entropy regularization
 
-↓
+Probability-space fusion
 
-Reconstruction
+No stable scientific AUROC.
 
-↓
+I'd summarize architecture rather than numbers.
 
-CUSUM
+Phase 84
 
-↓
+Missing.
 
-Switch Detection
+This was actually important.
 
-Now every component learns what it is actually capable of learning.
+Inference-only ablation.
 
-What does the frozen encoder contribute?
+Main finding
 
-Instead of learning from only
+Subject 11
 
-7.5 hours
+many channels
 
-of AASD,
+negative importance
 
-the first layers have already learned
+(removing them improved AUROC)
 
-auditory evoked responses
+Subject 16
 
-temporal EEG structure
+channels
 
-speech-envelope tracking
+5
 
-oscillatory dynamics
+6
 
-robust temporal filtering
+7
 
-Those representations are much harder to overfit than raw EEG.
+were strongly positive.
 
-What does AASD still learn?
+This motivated spatial attention.
 
-Everything unique.
+Phase 85
 
-Specifically
+Missing.
 
-personalized spatial mapping
+Spatial/Spectral Attention.
 
-reconstruction residuals
+Important numbers
 
-switching instability
+Original 4-subject study
 
-decision dynamics
+S05
 
-CUSUM behavior
-
-Exactly the information KUL and DTU cannot provide.
-
-One refinement I would make
-
-I would actually avoid feeding raw EEG directly into the Neural Ridge decoder after transfer.
-
-Instead
-
-Raw EEG
+0.4937
 
 ↓
 
-Frozen Universal Encoder
+0.5148
+S11
+
+0.5318
 
 ↓
 
-Latent EEG
+0.5596
+S16
+
+0.7173
 
 ↓
 
-Small Personalization Adapter
+0.6804
+S17
+
+0.5233
 
 ↓
 
-Neural Ridge Reconstruction
+0.5760
 
-↓
+Important scientific finding
 
-CUSUM
+Attention rescued weak subjects
 
-Notice something important.
+while hurting the best subject.
 
-The Neural Ridge model is no longer reconstructing from raw EEG.
+Phase 86
 
-It reconstructs from a much cleaner latent representation.
+Missing.
 
-This reduces the burden on the small AASD dataset.
+Cross-modal EEG gate.
 
-Even better architecture
+Numbers
 
-I would slightly modify Option 3.
+S05
 
-Instead of
+0.4818
+S11
 
-Frozen Encoder
+0.5164
+S16
 
-↓
+0.6834
+S17
 
-Neural Ridge
+0.5973
 
-I would use
+Key conclusion
 
-Frozen Encoder
+EEG-driven gating
 
-↓
+did not generalize.
 
-Low-Rank Subject Adapter
+Phase 87
 
-↓
+Be careful.
 
-Neural Ridge
+You have two different Phase 87 baselines in the conversation.
 
-↓
+Earlier
 
-CUSUM
+S11
 
-Now the only trainable components are
+0.6513
 
-adapter
+Later
 
-ridge residual
+S11
 
-Everything else stays frozen.
+0.5610
 
-This dramatically reduces variance.
+Likewise
 
-Should the encoder come from MatchNet or Conformer?
+S17
 
-This is actually an important design choice.
+changed substantially.
 
-MatchNet learns
+Those cannot both be correct.
 
-representation
+I suspect
 
-↓
+one comes from
 
-similarity
+17-subject run
 
-Conformer learns
+another
 
-representation
+33-subject rerun.
 
-↓
+I would check Kaggle outputs.
 
-reconstruction
+Phase 88
 
-Your downstream task is
+Missing.
 
-reconstruction
+Deep Temporal Cross-Modal Gate.
 
-↓
+Results
 
-CUSUM
+Universal regression.
 
-That makes the Conformer encoder a more natural starting point because its objective is closer to the downstream objective.
+This was one of the strongest negative experiments.
 
-The MatchNet encoder may still learn useful EEG representations, but its optimization target (contrastive discrimination) differs more from the reconstruction-based Neural Ridge pipeline.
+Scientific conclusion
 
-Rather than assuming one is superior, treat this as an empirical question:
+Temporal multiplicative modulation
 
-Pretrained Conformer encoder → Personalized Neural Ridge
+creates
 
-Pretrained MatchNet encoder → Personalized Neural Ridge
+moving-target optimization.
 
-Compare both under the same calibration protocol.
+Phase 89
 
-What I would not do
+Your numbers
 
-I would not
+mostly look internally consistent.
 
-AASD
+Main conclusion
 
-↓
+Fast cluster
 
-Random Spatial Layer
+huge gains.
 
-↓
+Slow cluster
 
-Frozen Conformer
+large regressions.
 
-↓
+This phase first clearly exposed
 
-Prediction
+two temporal preference groups.
 
-This is essentially the experiment you've already performed.
+Phase 90
 
-The spatial layer had to discover an inverse mapping into a frozen latent space using only a few hours of data.
+Correct.
 
-That is exactly the optimization problem that failed.
+Main story
 
-Long-Term Research Vision
+MoE optimization
 
-The architecture I would pursue is:
+never specialized.
 
-                KUL
-                  \
-                   \
-                    > Universal EEG Encoder
-                   /
-                  /
-               DTU
+Alpha
 
-===============================
+hovered
 
-           Frozen Encoder
-                  ↓
-      Subject Personalization Adapter
-                  ↓
-      Neural Ridge Reconstruction
-                  ↓
-          CUSUM Change Detector
-                  ↓
-        Attention Switch Prediction
+near
 
-This cleanly separates responsibilities:
+50%
 
-KUL/DTU learn universal auditory EEG physiology.
+or collapsed.
 
-AASD learns subject-specific adaptation and switching dynamics.
+Phase 91
 
-Neural Ridge remains optimized for continuous reconstruction.
+Looks consistent with the final version discussed.
 
-CUSUM remains responsible for temporal change detection.
+Main scientific conclusion
 
-Recommendation
+Temporal Pyramid
 
-I would rank the options as follows:
+rescues
 
-Rank	Strategy	Assessment
-1	Hybrid transfer (Option 3, refined)	Strongest. Uses KUL/DTU to learn transferable EEG representations while reserving AASD for subject adaptation and switch-specific learning.
-2	Train the Neural Ridge architecture on KUL/DTU first, but only as an encoder pretraining stage—not expecting it to learn switching.	Potentially useful if the architecture itself is retained, but its outputs should still be adapted on AASD.
-3	Directly reuse a frozen KUL or DTU decoder after mechanical channel alignment.	Weakest. Decoder objectives are tied to sustained attention and are unlikely to model switching behavior or personalized reconstruction effectively.
+Fast cluster
 
-The key scientific principle is that tasks transfer poorly, representations transfer well. Use KUL and DTU to pretrain a universal auditory EEG encoder, but let the AASD-specific Neural Ridge model learn what only AASD contains: personalized spatial mappings, reconstruction behavior, and the temporal dynamics of attention switching. This architecture best matches both the empirical evidence from your experiments and established transfer-learning practice in EEG decoding.
+again
+
+fails
+
+Slow cluster.
+
+Phase 92
+
+Late Expert Fusion.
+
+Main conclusion
+
+Experts individually worked.
+
+Combiner failed.
+
+Very important distinction.
+
+Phase 93
+
+This section contains inconsistencies.
+
+Earlier in the discussion
+
+you described
+
+S01
+
+Baseline
+
+0.7157
+
+Fast
+
+0.5009
+
+Later
+
+your reconstruction says
+
+Slow
+
+0.5072
+
+Those are incompatible.
+
+Likewise
+
+S03
+
+was previously described as
+
+Fast
+
+inferior
+
+then later
+
+Slow superior.
+
+I think your oracle table is not reconstructed correctly.
+
+I'd verify directly from logs.
+
+Biggest inconsistencies I found
+Phase 81
+
+Should probably be
+
+S05
+
+0.4937
+
+not
+
+0.5229
+Phase 87
+
+Several subjects changed
+
+between conversations.
+
+Notably
+
+S11
+
+S17
+
+S04
+
+S07
+
+Need verification.
+
+Phase 93
+
+The oracle table
+
+conflicts
+
+with your earlier narrative.
+
+Needs verification.
+
+Scientific timeline I'd emphasize
+Phase 56–64
+
+Infrastructure
+
+Phase 65
+
+Transition lag discovered
+
+Phase 66–70
+
+Cross-subject transfer falsified
+
+Phase 79
+
+TCN successfully improves envelope decoding
+
+Phase 80
+
+WavLM helps some subjects
+
+hurts others
+
+Phase 81
+
+16-band cochlear envelopes outperform WavLM for some subjects
+
+Phase 82
+
+Hybrid MoE optimization unstable
+
+Phase 84
+
+Channel/band ablation reveals subject-specific spatial importance
+
+Phase 85
+
+Spatial attention
+
+helps weak subjects
+
+hurts strong ones
+
+Phase 86
+
+Cross-modal gating fails
+
+Phase 88
+
+Temporal EEG gating fails universally
+
+Phase 89
+
+Multi-scale encoder restores transient-sensitive subjects
+
+Phase 91
+
+Temporal pyramid confirms temporal heterogeneity
+
+Phase 92
+
+Late expert fusion fails because routing never specializes
+
+Phase 93
+
+Oracle experiment demonstrates that different subjects have different optimal temporal inductive biases, establishing the strongest evidence in the project that no single temporal encoder dominates across all subjects.
+
+One recommendation
+
+I would create a master experiment table in CSV format with columns such as:
+
+Phase	Model	Dataset	Evaluation Protocol	Subjects	Mean AUROC	Subject-wise AUROC Source
+
+The inconsistencies you encountered stem largely from mixing results from 4-subject debugging, 17-subject cohorts, and 33-subject cohorts. Recording the evaluation protocol alongside each result will make the history reproducible and prevent accidental comparisons across incompatible experiments.

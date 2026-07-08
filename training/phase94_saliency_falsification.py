@@ -153,7 +153,7 @@ def train_and_eval_saliency(subj_idx, encoder_type, train_loader, eval_loader, d
     return auc_clean, auc_masked
 
 def main():
-    cache_dir = Path('/kaggle/input/datasets/lowkieee/aasd-universal-cache-v1/kaggle/working/multiband_cache')
+    cache_dir = Path('/kaggle/input/datasets/lowkieee/multiband-cache/kaggle/working/multiband_cache')
     if not cache_dir.exists(): cache_dir = Path('/kaggle/working/multiband_cache')
         
     cache_files = sorted(list(cache_dir.glob('*_multiband.pt')))

@@ -225,6 +225,7 @@ def main():
             meta_loss_sum = 0.0
             
             meta_batch = random.sample(list(train_subjs), META_BATCH_SIZE)
+            actual_tasks = 0
             
             for subj in meta_batch:
                 # 1. Clone the model for this specific task
@@ -242,6 +243,8 @@ def main():
                 support = seqs[:SUPPORT_SIZE]
                 query = seqs[SUPPORT_SIZE:SUPPORT_SIZE+QUERY_SIZE]
                 if len(support) == 0 or len(query) == 0: continue
+                
+                actual_tasks += 1
                 
                 b_e_s, b_a_s, b_b_s, b_y_s = batchify(support, device)
                 b_e_q, b_a_q, b_b_q, b_y_q = batchify(query, device)
@@ -267,14 +270,18 @@ def main():
                 for p_meta, p_learner in zip(model.parameters(), learner.parameters()):
                     if p_learner.grad is not None:
                         if p_meta.grad is None:
-                            p_meta.grad = p_learner.grad.clone() / META_BATCH_SIZE
+                            p_meta.grad = p_learner.grad.detach().clone()
                         else:
-                            p_meta.grad += p_learner.grad.clone() / META_BATCH_SIZE
+                            p_meta.grad += p_learner.grad.detach().clone()
             
-            meta_opt.step()
+            if actual_tasks > 0:
+                for p_meta in model.parameters():
+                    if p_meta.grad is not None:
+                        p_meta.grad /= actual_tasks
+                meta_opt.step()
             
             if (epoch + 1) % 10 == 0:
-                print(f"  Meta-Epoch {epoch+1:03d}/{META_EPOCHS} | Avg Query Loss: {meta_loss_sum/META_BATCH_SIZE:.4f}")
+                print(f"  Meta-Epoch {epoch+1:03d}/{META_EPOCHS} | Avg Query Loss: {meta_loss_sum/max(1, actual_tasks):.4f}")
                 
         print("\n--- STEP 2: META-TESTING (DEPLOYMENT CALIBRATION) ---")
         for subj in test_subjs:
