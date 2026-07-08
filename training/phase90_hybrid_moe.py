@@ -30,7 +30,7 @@ BATCH_SIZE = 16
 TRAIN_EPOCHS = 15
 TRAIN_LR = 1e-3
 
-EVAL_SUBJECTS = [5, 11, 16, 17]
+EVAL_SUBJECTS = list(range(1, 34))
 
 # -------------------------------------------------------------------------
 # DATASET
@@ -112,7 +112,7 @@ def extract_hybrid_sequences(trials):
 # -------------------------------------------------------------------------
 def main():
     multi_cache_dir = Path('/kaggle/input/datasets/lowkieee/aasd-universal-cache-v1/kaggle/working/multiband_cache')
-    wavlm_cache_dir = Path('/kaggle/input/datasets/lowkieee/aasd-universal-cache-v1/kaggle/working/wavlm_cache')
+    wavlm_cache_dir = Path('/kaggle/input/datasets/lowkieee/wavlm-cache/kaggle/working/wavlm_cache')
     
     if not multi_cache_dir.exists(): multi_cache_dir = Path('/kaggle/working/multiband_cache')
     if not wavlm_cache_dir.exists(): wavlm_cache_dir = Path('/kaggle/working/wavlm_cache')
