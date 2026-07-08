@@ -89,3 +89,29 @@ A task is complete only after:
 - verification
 
 If any stage fails, continue improving the implementation until it passes or clearly explain why it cannot.
+
+---
+
+## Ear-EEG Architectural & Optimization Rules
+
+**1. Normalization:**
+Never use `GroupNorm(1, C)` or `LayerNorm` across EEG channels. Normalizing across channels destroys the relative amplitude ratios that represent physical electrode impedances and spatial geometries, causing catastrophic performance collapse. Always use `BatchNorm1d` to explicitly learn per-channel physical scaling and shifts.
+
+**2. The Anti-Correlation Trap (Universal Pre-Training):**
+Do not use cross-subject Universal Pre-Training for spatial models. The physical geometry of Ear-EEG electrodes varies too significantly across subjects. Universal spatial filters actively trap the model in anti-correlated local minima (Zero-Shot AUROC < 0.50).
+
+**3. Personalization Protocol:**
+When calibrating an Ear-EEG model for a specific subject, you must initialize a random network and **train completely from scratch**. Do not attempt to fine-tune a pre-trained backbone, as it will consistently underperform a from-scratch initialization.
+
+**4. The Dimensionality Collapse Trap (SSL Features):**
+When using self-supervised speech representations (e.g., WavLM, HuBERT) on Ear-EEG, do not pass massive 768-dimensional manifolds directly to the network. While these features hold valuable latent information (e.g., boosting 'weak' subjects like S11 to >0.60 AUROC), the massive modality imbalance overwhelms the optimizer on noisier subjects (collapsing S05 to <0.50 AUROC). You must strictly perform extreme dimensionality reduction (e.g., projecting to 16-64 dims) or use intermediate biologically-grounded representations (e.g., Multi-band Cochlear Envelopes) to prevent catastrophic network collapse.
+
+---
+
+## Product Deployment Rules (Real-Time Architecture)
+
+When building simulators or deployment pipelines for the active hearing aid, adhere to the **Decoupled Control Loop** architecture:
+
+1. **Instantaneous Audio Pipeline:** Blind source separation (e.g. beamforming) and audio mixing must run continuously in real-time (<10ms latency). Never delay the acoustic output by the AAD window size.
+2. **Lagged BCI Control Loop:** The `SequenceAADModel` runs in a slower background thread, buffering the last 3.5s of data.
+3. **EMA Smoothing:** The AAD model's predictions must update the audio mixer's Gain Multipliers asynchronously, using an Exponential Moving Average (EMA) to prevent volume jitter.
