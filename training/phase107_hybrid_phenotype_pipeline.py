@@ -349,9 +349,9 @@ def main():
                     loss = criterion(logits, b_y)
                 scaler.scale(loss).backward()
                 scaler.step(optimizer)
+                scaler.update()
             # We only evaluate on the eval set AFTER all epochs finish to prevent optimistic bias!
             # The final epoch is the true deployment model checkpoint.
-            pass
             
         # 4. FINAL DEPLOYMENT EVALUATION (Strictly 1 look)
         model.eval()
