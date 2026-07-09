@@ -199,7 +199,7 @@ def main():
         
         optimizer = optim.Adam(model.parameters(), lr=TRAIN_LR, weight_decay=1e-4)
         criterion = nn.BCEWithLogitsLoss()
-        scaler = torch.amp.GradScaler('cuda')
+        scaler = torch.amp.GradScaler(device.type, enabled=(device.type == 'cuda'))
         
         print("Training DeepMatchMismatchTCN with WavLM Encoder...", flush=True)
         best_auc = 0
@@ -213,7 +213,7 @@ def main():
                 if b_e.size(0) == 1: continue 
                 optimizer.zero_grad()
                 
-                with torch.autocast(device_type='cuda', dtype=torch.float16):
+                with torch.autocast(device_type=device.type, dtype=torch.float16, enabled=(device.type == 'cuda')):
                     logits, _ = model(b_e, b_a)
                     loss = criterion(logits, b_y)
                     
@@ -228,7 +228,7 @@ def main():
                     b_e = b_e.to(device, non_blocking=True).float()
                     b_a = b_a.to(device, non_blocking=True).float()
                     
-                    with torch.autocast(device_type='cuda', dtype=torch.float16):
+                    with torch.autocast(device_type=device.type, dtype=torch.float16, enabled=(device.type == 'cuda')):
                         logits, _ = model(b_e, b_a)
                         
                     all_preds.extend(torch.sigmoid(logits).cpu().numpy().flatten())
