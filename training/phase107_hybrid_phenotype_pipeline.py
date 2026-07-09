@@ -155,6 +155,11 @@ def fast_clinical_calibration(raw_train_trials, device):
             env_l = apply_modulation_filter(tr['env_l'], lowcut, highcut, SR)
             env_r = apply_modulation_filter(tr['env_r'], lowcut, highcut, SR)
             
+            # Normalize AFTER filtering (to match deployment exactly)
+            eeg = (eeg - np.mean(eeg, axis=1, keepdims=True)) / (np.std(eeg, axis=1, keepdims=True) + 1e-8)
+            env_l = (env_l - np.mean(env_l, axis=1, keepdims=True)) / (np.std(env_l, axis=1, keepdims=True) + 1e-8)
+            env_r = (env_r - np.mean(env_r, axis=1, keepdims=True)) / (np.std(env_r, axis=1, keepdims=True) + 1e-8)
+            
             trial = {'eeg': eeg, 'env_l': env_l, 'env_r': env_r, 'meta': tr['meta']}
             if i in calib_train_idx:
                 band_train_trials.append(trial)
