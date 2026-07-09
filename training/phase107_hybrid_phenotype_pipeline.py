@@ -169,7 +169,7 @@ def fast_clinical_calibration(raw_train_trials, device):
         val_loader = DataLoader(MatchMismatchDataset(c_val_seq), batch_size=BATCH_SIZE, shuffle=False, pin_memory=True, num_workers=2)
         
         # 3. Train tiny model for 2 epochs
-        model = DeepMatchMismatchTCN(eeg_channels=8, latent_dim=64, tcn_channels=[64, 64, 64], kernel_size=2, dropout=0.2, encoder_type='baseline').to(device)
+        model = DeepMatchMismatchTCN(eeg_channels=8, latent_dim=64, tcn_channels=[64, 64, 64], kernel_size=2, dropout=0.2, encoder_type='baseline', audio_channels=16).to(device)
         optimizer = optim.Adam(model.parameters(), lr=1e-3, weight_decay=1e-4)
         criterion = nn.BCEWithLogitsLoss()
         scaler = torch.amp.GradScaler(device.type, enabled=(device.type == 'cuda'))
@@ -330,7 +330,7 @@ def main():
         
         # 3. DEPLOYMENT TRAINING
         print(f"  [Deployment] Training Full TCN on chosen phenotype...", flush=True)
-        model = DeepMatchMismatchTCN(eeg_channels=8, latent_dim=64, tcn_channels=[64, 64, 64], kernel_size=2, dropout=0.2, encoder_type='baseline').to(device)
+        model = DeepMatchMismatchTCN(eeg_channels=8, latent_dim=64, tcn_channels=[64, 64, 64], kernel_size=2, dropout=0.2, encoder_type='baseline', audio_channels=16).to(device)
         optimizer = optim.Adam(model.parameters(), lr=1e-3, weight_decay=1e-4)
         criterion = nn.BCEWithLogitsLoss()
         scaler = torch.amp.GradScaler(device.type, enabled=(device.type == 'cuda'))
