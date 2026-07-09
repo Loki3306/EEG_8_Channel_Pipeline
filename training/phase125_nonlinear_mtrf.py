@@ -145,20 +145,27 @@ def prepare_trial_data(tr, device):
     }
 
 def train_mlp(model, X_train, Y_train):
-    if X_train.shape[0] == 0:
+    N = X_train.shape[0]
+    if N == 0:
         return model
         
-    dataset = TensorDataset(X_train, Y_train.unsqueeze(1))
-    loader = DataLoader(dataset, batch_size=BATCH_SIZE, shuffle=True)
+    Y_train = Y_train.unsqueeze(1)
     
     criterion = nn.MSELoss()
     optimizer = optim.Adam(model.parameters(), lr=LR, weight_decay=1e-4)
-    scheduler = optim.lr_scheduler.OneCycleLR(optimizer, max_lr=LR, steps_per_epoch=len(loader), epochs=EPOCHS)
+    
+    steps_per_epoch = (N + BATCH_SIZE - 1) // BATCH_SIZE
+    scheduler = optim.lr_scheduler.OneCycleLR(optimizer, max_lr=LR, steps_per_epoch=steps_per_epoch, epochs=EPOCHS)
     
     model.train()
     for epoch in range(EPOCHS):
-        for bx, by in loader:
-            optimizer.zero_grad()
+        indices = torch.randperm(N, device=X_train.device)
+        for start_idx in range(0, N, BATCH_SIZE):
+            batch_idx = indices[start_idx : start_idx + BATCH_SIZE]
+            bx = X_train[batch_idx]
+            by = Y_train[batch_idx]
+            
+            optimizer.zero_grad(set_to_none=True)
             pred = model(bx)
             loss = criterion(pred, by)
             loss.backward()
