@@ -595,3 +595,62 @@ class MatchMismatchTCN(nn.Module):
         logits = self.classifier(tcn_out.mean(dim=1)).squeeze(-1)
         
         return logits, None
+
+class DeepMatchMismatchTCN(nn.Module):
+    """
+    Phase 103: The Hierarchical TCN for Match-Mismatch (True AAD).
+    Encodes EEG and Audio windows into embeddings using TCNs.
+    Then uses a temporal convolution across the sequence of embeddings to accumulate evidence.
+    """
+    def __init__(self, eeg_channels=8, latent_dim=64, tcn_channels=[64, 64, 64], kernel_size=2, dropout=0.2, audio_channels=1, encoder_type='baseline'):
+        super().__init__()
+        
+        # We reuse the LocalEncoder since it internally uses 1D Convolutions
+        self.eeg_encoder = LocalEncoder(in_channels=eeg_channels, out_dim=latent_dim)
+        
+        if encoder_type == 'fast':
+            self.audio_encoder = FastAudioEncoder(in_channels=audio_channels, out_dim=latent_dim)
+        elif encoder_type == 'slow':
+            self.audio_encoder = SlowAudioEncoder(in_channels=audio_channels, out_dim=latent_dim)
+        else:
+            self.audio_encoder = LocalEncoder(in_channels=audio_channels, out_dim=latent_dim)
+                
+        # Input to Temporal ConvNet: eeg_latent (64) + aud_latent (64) + cos_sim (1) = 129
+        tcn_input_dim = latent_dim * 2 + 1 
+        
+        # Sequence-level Temporal Convolutional Network
+        self.tcn = TemporalConvNet(tcn_input_dim, tcn_channels, kernel_size=kernel_size, dropout=dropout)
+        
+        # We output logits per timestep, which are then pooled (or we can pool features)
+        self.classifier = nn.Linear(tcn_channels[-1], 1)
+
+    def forward(self, eeg_seq, aud_seq):
+        """
+        eeg_seq: [B, SeqLen, EEG_Channels, Time]
+        aud_seq: [B, SeqLen, Audio_Channels, Time]
+        """
+        B, SeqLen, C_e, T_e = eeg_seq.shape
+        eeg_flat = eeg_seq.reshape(B * SeqLen, C_e, T_e)
+        
+        C_a, T_a = aud_seq.shape[2], aud_seq.shape[3]
+        aud_flat = aud_seq.reshape(B * SeqLen, C_a, T_a)
+        
+        # Stage 1: Window-Level Encoding
+        eeg_latent_raw = self.eeg_encoder(eeg_flat)
+        p_eeg = F.normalize(eeg_latent_raw, dim=-1) # [B*SeqLen, latent_dim]
+        
+        p_a = F.normalize(self.audio_encoder(aud_flat), dim=-1)
+        
+        # Stage 2: Cross-Modal Feature Construction
+        score = F.cosine_similarity(p_eeg, p_a, dim=-1)
+        seq_feat = torch.cat([p_eeg, p_a, score.unsqueeze(-1)], dim=-1) # [B*SeqLen, 129]
+        seq_feat = seq_feat.reshape(B, SeqLen, -1).transpose(1, 2) # [B, 129, SeqLen]
+        
+        # Stage 3: Sequence-Level Temporal Evidence Accumulation
+        tcn_out = self.tcn(seq_feat).transpose(1, 2) # [B, SeqLen, tcn_channels[-1]]
+        
+        # Stage 4: Classification
+        logits_per_step = self.classifier(tcn_out).squeeze(-1) # [B, SeqLen]
+        
+        # Final prediction is the average across the sequence
+        return logits_per_step.mean(dim=1), None
