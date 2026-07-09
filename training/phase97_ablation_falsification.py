@@ -8,6 +8,8 @@ from scipy import signal
 from sklearn.metrics import roc_auc_score
 from torch.utils.data import DataLoader, TensorDataset
 
+import sys
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from models.aad_tcn import TCNAADModel
 
 # Constants
