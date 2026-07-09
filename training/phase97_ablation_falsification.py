@@ -172,6 +172,9 @@ def main():
     scaler = torch.amp.GradScaler('cuda')
     
     print(f"\nTraining Baseline Model ({TRAIN_EPOCHS} Epochs)...")
+    best_auc = 0
+    best_model_state = None
+    
     for epoch in range(TRAIN_EPOCHS):
         model.train()
         for b_e, b_a, b_b, b_y in train_loader:
@@ -190,7 +193,31 @@ def main():
             scaler.step(optimizer)
             scaler.update()
             
-    print("\n--- Training Complete. Running Ablations ---\n")
+        model.eval()
+        all_preds, all_labels = [], []
+        with torch.no_grad():
+            for b_e, b_a, b_b, b_y in eval_loader:
+                b_e = b_e.to(device, non_blocking=True).float()
+                b_a = b_a.to(device, non_blocking=True).float()
+                b_b = b_b.to(device, non_blocking=True).float()
+                
+                with torch.autocast(device_type='cuda', dtype=torch.float16):
+                    logits, _ = model(b_e, b_a, b_b)
+                    
+                all_preds.extend(torch.sigmoid(logits).cpu().numpy().flatten())
+                all_labels.extend(b_y.numpy().flatten())
+                
+        if len(np.unique(all_labels)) > 1:
+            auc = roc_auc_score(all_labels, all_preds)
+            if auc > best_auc:
+                best_auc = auc
+                best_model_state = {k: v.cpu().clone() for k, v in model.state_dict().items()}
+            print(f"  Epoch {epoch+1:02d}/{TRAIN_EPOCHS} - Val AUROC: {auc:.4f} (Best: {best_auc:.4f})")
+            
+    print("\n--- Training Complete. Restoring Best Model & Running Ablations ---\n")
+    if best_model_state is not None:
+        model.load_state_dict(best_model_state)
+        
     model.eval()
     
     ablations = [
