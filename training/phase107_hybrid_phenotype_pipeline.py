@@ -251,7 +251,6 @@ def fast_clinical_calibration(raw_train_trials, calib_train_idx, calib_val_idx, 
                     band_best_auc = effective_auc
                     band_invert = is_inverted
                 
-        band_results[band_name] = band_best_auc
         print(f"    - {band_name}: {band_best_auc:.4f} {'(Inverted)' if band_invert else ''}")
         
         if band_best_auc > best_val_auc:
@@ -419,7 +418,7 @@ def main():
                 
                 if effective_auc > best_val_auc:
                     best_val_auc = effective_auc
-                    best_model_state = model.state_dict().copy()
+                    best_model_state = {k: v.cpu().clone() for k, v in model.state_dict().items()}
                     patience_counter = 0
                 else:
                     patience_counter += 1
