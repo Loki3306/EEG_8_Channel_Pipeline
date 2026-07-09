@@ -545,3 +545,53 @@ class LateFusionAADModel(nn.Module):
         final_logits = self.combiner(combined_features).squeeze(-1) # [B]
         
         return final_logits, None
+
+class MatchMismatchTCN(nn.Module):
+    """
+    A TCN designed for the Match-Mismatch objective.
+    It takes an EEG sequence and a SINGLE audio stream, and predicts whether they match.
+    This explicitly breaks the EEG-only spatial attention shortcut.
+    """
+    def __init__(self, eeg_channels=8, latent_dim=64, tcn_channels=[64, 64, 64], kernel_size=2, dropout=0.2, audio_channels=1, encoder_type='baseline'):
+        super().__init__()
+        
+        self.eeg_encoder = LocalEncoder(in_channels=eeg_channels, out_dim=latent_dim)
+        
+        if encoder_type == 'fast':
+            self.audio_encoder = FastAudioEncoder(in_channels=audio_channels, out_dim=latent_dim)
+        elif encoder_type == 'slow':
+            self.audio_encoder = SlowAudioEncoder(in_channels=audio_channels, out_dim=latent_dim)
+        else:
+            self.audio_encoder = LocalEncoder(in_channels=audio_channels, out_dim=latent_dim)
+                
+        # Input to TCN: eeg_latent (64) + aud_latent (64) + cos_sim (1) = 129
+        tcn_input_dim = latent_dim * 2 + 1 
+        
+        self.tcn = TemporalConvNet(tcn_input_dim, tcn_channels, kernel_size=kernel_size, dropout=dropout)
+        self.classifier = nn.Linear(tcn_channels[-1], 1)
+
+    def forward(self, eeg_seq, aud_seq):
+        """
+        eeg_seq: [B, SeqLen, EEG_Channels, Time]
+        aud_seq: [B, SeqLen, Audio_Channels, Time]
+        """
+        B, SeqLen, C_e, T_e = eeg_seq.shape
+        eeg_flat = eeg_seq.reshape(B * SeqLen, C_e, T_e)
+        
+        C_a, T_a = aud_seq.shape[2], aud_seq.shape[3]
+        aud_flat = aud_seq.reshape(B * SeqLen, C_a, T_a)
+        
+        eeg_latent_raw = self.eeg_encoder(eeg_flat)
+        p_eeg = F.normalize(eeg_latent_raw, dim=-1) # [B*SeqLen, latent_dim]
+        
+        p_a = F.normalize(self.audio_encoder(aud_flat), dim=-1)
+        
+        score = F.cosine_similarity(p_eeg, p_a, dim=-1)
+        
+        seq_feat = torch.cat([p_eeg, p_a, score.unsqueeze(-1)], dim=-1)
+        seq_feat = seq_feat.reshape(B, SeqLen, -1).transpose(1, 2)
+        
+        tcn_out = self.tcn(seq_feat).transpose(1, 2)
+        logits = self.classifier(tcn_out.mean(dim=1)).squeeze(-1)
+        
+        return logits, None
