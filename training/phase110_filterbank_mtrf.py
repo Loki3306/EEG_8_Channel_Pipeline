@@ -38,7 +38,7 @@ def apply_modulation_filter(env, lowcut, highcut, fs, order=4):
 
 def get_trial_dominant_speaker(tr):
     sp = tr['meta']['switch_points']
-    T = tr['eeg'].shape[1]
+    T = tr['eeg_bands'][0].shape[1]
     
     boundaries = [0]
     boundaries.extend([idx for spk, idx in sp])
