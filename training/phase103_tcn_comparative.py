@@ -118,32 +118,40 @@ def main():
         Path('/kaggle/input/datasets/lowkieee/multiband-cache/kaggle/working/multiband_cache'),
         Path('/kaggle/input/multiband-cache/kaggle/working/multiband_cache'),
         Path('/kaggle/input/aasd-universal-cache-v1/kaggle/working/multiband_cache'),
+        Path('/kaggle/input/multiband-cache-full/kaggle/working/multiband_cache'),
+        Path('/kaggle/input/aasd-multiband-cache/kaggle/working/multiband_cache'),
         Path('/kaggle/working/multiband_cache')
     ]
     
     cache_dir = Path('/kaggle/working/multiband_cache')
     for p in possible_paths:
         if p.exists():
-            cache_dir = p
-            break
+            # Check if it actually contains files
+            if len(list(p.glob('*_multiband.pt'))) > 0:
+                cache_dir = p
+                break
             
     print(f"\n=======================================================")
     print(f" PHASE 103: ARCHITECTURE COMPARATIVE STUDY")
-    print(f" DeepMatchMismatchTCN on 4 Diverse Subjects (Syllabic < 4Hz)")
+    print(f" DeepMatchMismatchTCN on ALL Available Subjects (Syllabic < 4Hz)")
     print(f"=======================================================\n", flush=True)
     
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print(f"Training on Device: {device}\n", flush=True)
     
-    for subject in TEST_SUBJECTS:
+    cache_files = sorted(list(cache_dir.glob('*_multiband.pt')))
+    if len(cache_files) == 0:
+        print(f"No multiband cache files found in {cache_dir}. Please verify the Kaggle dataset path.")
+        return
+        
+    print(f"Found {len(cache_files)} subjects in {cache_dir}.")
+    
+    for cache_file in cache_files:
+        subj_name = cache_file.stem.split('_')[0]
         print(f"\n=======================================================")
-        print(f" SUBJECT {subject:02d}")
+        print(f" SUBJECT {subj_name}")
         print(f"=======================================================", flush=True)
-        cache_file = cache_dir / f"S{subject:02d}_multiband.pt"
-        if not cache_file.exists():
-            print("Cache not found.")
-            continue
-            
+        
         cached = torch.load(cache_file, map_location='cpu', weights_only=False)['raw']
         
         subj_trials = []
