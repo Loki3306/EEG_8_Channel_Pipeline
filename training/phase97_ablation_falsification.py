@@ -131,11 +131,8 @@ def main():
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print(f"Training on Device: {device}\n")
     
-    data = torch.load(cache_file, map_location='cpu')
-    if isinstance(data, list):
-        trials = data
-    else:
-        trials = data['trials']
+    data = torch.load(cache_file, map_location='cpu', weights_only=False)
+    trials = data['raw']
     
     split_idx = int(len(trials) * 0.8)
     train_trials = trials[:split_idx]
