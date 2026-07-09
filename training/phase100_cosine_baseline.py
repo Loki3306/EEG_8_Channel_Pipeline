@@ -182,6 +182,14 @@ def main():
                 })
                 
             seqs = extract_match_mismatch_sequences(subj_trials)
+            import random
+            
+            # CRITICAL FIX: Shuffle sequences to prevent block-design chronological leakage
+            # If we don't shuffle, the train set might be 100% "Attend Left", allowing the 
+            # network to learn an audio-only shortcut that perfectly inverts on the eval set!
+            random.seed(42)
+            random.shuffle(seqs)
+            
             split_idx = int(len(seqs) * 0.8)
             calib_pool = seqs[:split_idx]
             eval_set = seqs[split_idx:]
