@@ -1,31 +1,37 @@
-import os
 import torch
 import torch.nn as nn
 import torch.optim as optim
-import numpy as np
-from pathlib import Path
-from scipy import signal
+from torch.utils.data import Dataset, DataLoader
 from sklearn.metrics import roc_auc_score
-from torch.utils.data import DataLoader, TensorDataset
-
+import numpy as np
+from scipy import signal
+from pathlib import Path
 import sys
+import os
+
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from models.aad_tcn import TCNAADModel
 
-# Constants
-SR = 64
-WIN_LEN = 3.5
-HOP_LEN = 0.5
-WIN_SAMPLES = int(WIN_LEN * SR)
-HOP_SAMPLES = int(HOP_LEN * SR)
+# -------------------------------------------------------------------------
+# CONSTANTS (Copied exactly from Phase 96)
+# -------------------------------------------------------------------------
+SR = 128
+WIN_SEC = 2.0
+HOP_SEC = 0.5
+EXCLUSION_SEC = 1.5   
+SEQ_SEC = 3.5         
 
+WIN_SAMPLES = int(WIN_SEC * SR)
+HOP_SAMPLES = int(HOP_SEC * SR)
+EXCLUSION_SAMPLES = int(EXCLUSION_SEC * SR)
+SEQ_SAMPLES = int(SEQ_SEC * SR)
+
+EAR_CHANNEL_INDICES = [23, 31, 32, 40, 14, 22, 41, 49]
+BATCH_SIZE = 32
 TRAIN_EPOCHS = 10
 TRAIN_LR = 1e-3
-BATCH_SIZE = 32
 
 SUBJECT = 13
-
-# HPF > 16.0 Hz
 LOWCUT = 16.0
 HIGHCUT = None
 
@@ -43,65 +49,58 @@ def apply_modulation_filter(env, lowcut, highcut, fs, order=4):
     filtered = signal.filtfilt(b, a, env, axis=1)
     return filtered
 
-def extract_sequences(trials):
-    b_e, b_a, b_b, b_y = [], [], [], []
-    for tr in trials:
-        eeg = tr['eeg'].numpy()
-        env_l = tr['env_l'].numpy()
-        env_r = tr['env_r'].numpy()
-        
-        # Normalize BEFORE filtering
-        eeg = (eeg - np.mean(eeg, axis=1, keepdims=True)) / (np.std(eeg, axis=1, keepdims=True) + 1e-8)
-        env_l = (env_l - np.mean(env_l, axis=1, keepdims=True)) / (np.std(env_l, axis=1, keepdims=True) + 1e-8)
-        env_r = (env_r - np.mean(env_r, axis=1, keepdims=True)) / (np.std(env_r, axis=1, keepdims=True) + 1e-8)
+class SpectralDataset(Dataset):
+    def __init__(self, sequences):
+        self.seqs = sequences
+    def __len__(self): return len(self.seqs)
+    def __getitem__(self, idx):
+        e, a, b, y = self.seqs[idx]
+        return e, a, b, y[-1]
 
-        # Apply Temporal Modulation Filter
-        env_l = apply_modulation_filter(env_l, LOWCUT, HIGHCUT, SR)
-        env_r = apply_modulation_filter(env_r, LOWCUT, HIGHCUT, SR)
+def extract_sequences(trials):
+    sequences = []
+    seq_hop = int(0.5 * SR) 
+    
+    for tr in trials:
+        eeg = tr['eeg']
+        env_l = tr['env_l'] 
+        env_r = tr['env_r']
+        sp = tr['meta']['switch_points']
+        T = eeg.shape[1]
         
-        min_len = min(eeg.shape[1], env_l.shape[1])
-        eeg = eeg[:, :min_len]
-        env_l = env_l[:, :min_len]
-        env_r = env_r[:, :min_len]
-        
-        boundaries = tr['stable_attention_boundaries']
-        
-        for start_sec, end_sec in boundaries:
-            start_samp = int(start_sec * SR)
-            end_samp = int(end_sec * SR)
+        boundaries = [0]
+        boundaries.extend([idx for spk, idx in sp])
+        boundaries = sorted(set(boundaries))
+        if boundaries[-1] != T: boundaries.append(T)
             
-            if end_samp > min_len: end_samp = min_len
+        for i in range(len(boundaries) - 1):
+            start_idx = boundaries[i]
+            end_idx = boundaries[i+1]
+            current_spk = 'L'
+            for spk, idx in sp:
+                if idx <= start_idx: current_spk = spk
+                else: break
+                
+            label = 1.0 if current_spk == 'L' else 0.0
             
-            seq_len = end_samp - start_samp
-            if seq_len < WIN_SAMPLES: continue
+            safe_start = start_idx + EXCLUSION_SAMPLES
+            safe_end = end_idx
             
-            seq_hop = int(0.5 * SR) 
-            
-            for seq_start in range(start_samp, end_samp - WIN_SAMPLES + 1, seq_hop):
-                SEQ_SAMPLES = WIN_SAMPLES
-                e_seq = eeg[:, seq_start:seq_start + SEQ_SAMPLES]
-                al_seq = env_l[:, seq_start:seq_start + SEQ_SAMPLES]
-                ar_seq = env_r[:, seq_start:seq_start + SEQ_SAMPLES]
-                
-                e = torch.from_numpy(e_seq.copy()).unfold(-1, WIN_SAMPLES, HOP_SAMPLES).permute(1, 0, 2)
-                al = torch.from_numpy(al_seq.copy()).unfold(-1, WIN_SAMPLES, HOP_SAMPLES).permute(1, 0, 2)
-                ar = torch.from_numpy(ar_seq.copy()).unfold(-1, WIN_SAMPLES, HOP_SAMPLES).permute(1, 0, 2)
-                
-                label = 1.0 if tr['attended_ear'] == 'L' else 0.0
-                num_windows = e.shape[0]
-                y = torch.full((num_windows,), label, dtype=torch.float32)
-                
-                b_e.append(e)
-                b_a.append(al)
-                b_b.append(ar)
-                b_y.append(y)
-                
-    return (
-        torch.cat(b_e, dim=0),
-        torch.cat(b_a, dim=0),
-        torch.cat(b_b, dim=0),
-        torch.cat(b_y, dim=0)
-    )
+            if safe_end - safe_start >= SEQ_SAMPLES:
+                for seq_start in range(safe_start, safe_end - SEQ_SAMPLES + 1, seq_hop):
+                    e_seq = eeg[:, seq_start:seq_start + SEQ_SAMPLES]
+                    al_seq = env_l[:, seq_start:seq_start + SEQ_SAMPLES]
+                    ar_seq = env_r[:, seq_start:seq_start + SEQ_SAMPLES]
+                    
+                    e = torch.from_numpy(e_seq.copy()).unfold(-1, WIN_SAMPLES, HOP_SAMPLES).permute(1, 0, 2)
+                    al = torch.from_numpy(al_seq.copy()).unfold(-1, WIN_SAMPLES, HOP_SAMPLES).permute(1, 0, 2)
+                    ar = torch.from_numpy(ar_seq.copy()).unfold(-1, WIN_SAMPLES, HOP_SAMPLES).permute(1, 0, 2)
+                    
+                    num_windows = e.shape[0]
+                    y = torch.full((num_windows,), label, dtype=torch.float32)
+                    
+                    sequences.append((e, al, ar, y))
+    return sequences
 
 def main():
     possible_paths = [
@@ -117,7 +116,6 @@ def main():
             cache_dir = p
             break
             
-    # We will just evaluate S13
     cache_file = cache_dir / f"S{SUBJECT}_multiband.pt"
     if not cache_file.exists():
         print(f"Missing cache file! {cache_file}")
@@ -126,25 +124,47 @@ def main():
     print(f"\n=======================================================")
     print(f" PHASE 97: ABLATION FALSIFICATION SUITE")
     print(f" Testing S{SUBJECT} on HPF > 16.0 Hz")
-    print(f"=======================================================\n")
+    print(f"=======================================================\n", flush=True)
     
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    print(f"Training on Device: {device}\n")
+    print(f"Training on Device: {device}\n", flush=True)
     
-    data = torch.load(cache_file, map_location='cpu', weights_only=False)
-    trials = data['raw']
+    cached = torch.load(cache_file, map_location='cpu', weights_only=False)['raw']
     
-    split_idx = int(len(trials) * 0.8)
-    train_trials = trials[:split_idx]
-    eval_trials = trials[split_idx:]
+    subj_trials = []
+    for i in range(len(cached)):
+        tr = cached[i]
+        eeg = tr['eeg'].numpy()[EAR_CHANNEL_INDICES, :] 
+        env_l = tr['env_l'].numpy()
+        env_r = tr['env_r'].numpy()
+        
+        # Normalize BEFORE filtering to preserve the relative physical energy
+        eeg = (eeg - np.mean(eeg, axis=1, keepdims=True)) / (np.std(eeg, axis=1, keepdims=True) + 1e-8)
+        env_l = (env_l - np.mean(env_l, axis=1, keepdims=True)) / (np.std(env_l, axis=1, keepdims=True) + 1e-8)
+        env_r = (env_r - np.mean(env_r, axis=1, keepdims=True)) / (np.std(env_r, axis=1, keepdims=True) + 1e-8)
+
+        # Apply Temporal Modulation Filter
+        env_l = apply_modulation_filter(env_l, LOWCUT, HIGHCUT, SR)
+        env_r = apply_modulation_filter(env_r, LOWCUT, HIGHCUT, SR)
+        
+        min_len = min(eeg.shape[1], env_l.shape[1])
+        
+        subj_trials.append({
+            'eeg': eeg[:, :min_len], 
+            'env_l': env_l[:, :min_len], 
+            'env_r': env_r[:, :min_len], 
+            'meta': tr['meta']
+        })
+        
+    print("Extracting Sequences...")
+    seqs = extract_sequences(subj_trials)
+    split_idx = int(len(seqs) * 0.8)
+    calib_pool = seqs[:split_idx]
+    eval_set = seqs[split_idx:]
     
-    print("Extracting Training Sequences...")
-    tr_e, tr_a, tr_b, tr_y = extract_sequences(train_trials)
-    train_loader = DataLoader(TensorDataset(tr_e, tr_a, tr_b, tr_y), batch_size=BATCH_SIZE, shuffle=True, drop_last=True)
-    
-    print("Extracting Evaluation Sequences...")
-    ev_e, ev_a, ev_b, ev_y = extract_sequences(eval_trials)
-    eval_loader = DataLoader(TensorDataset(ev_e, ev_a, ev_b, ev_y), batch_size=BATCH_SIZE, shuffle=False)
+    train_loader = DataLoader(SpectralDataset(calib_pool), batch_size=BATCH_SIZE, shuffle=True, pin_memory=True, num_workers=2)
+    # Important: eval_loader should NOT shuffle initially, but we might want to pre-load all batches for ablation tests
+    eval_loader = DataLoader(SpectralDataset(eval_set), batch_size=BATCH_SIZE, shuffle=False, pin_memory=True, num_workers=2)
     
     model = TCNAADModel(encoder_type='baseline', audio_channels=16, use_wavlm=False, attention_type='none').to(device)
     optimizer = optim.Adam(model.parameters(), lr=TRAIN_LR, weight_decay=1e-4)
@@ -179,44 +199,69 @@ def main():
         "Shuffled EEG",
         "Zero Audio",
         "Shuffled Audio",
-        "Swapped Audio"
+        "Swapped Audio",
+        "Gaussian EEG"
     ]
     
+    # We load everything into RAM for perfect global shuffling (as GPT requested)
+    eval_e, eval_a, eval_b, eval_y = [], [], [], []
+    for b_e, b_a, b_b, b_y in eval_loader:
+        eval_e.append(b_e)
+        eval_a.append(b_a)
+        eval_b.append(b_b)
+        eval_y.append(b_y)
+        
+    eval_e = torch.cat(eval_e, dim=0)
+    eval_a = torch.cat(eval_a, dim=0)
+    eval_b = torch.cat(eval_b, dim=0)
+    eval_y = torch.cat(eval_y, dim=0)
+    
+    N = eval_e.size(0)
+    
     for ablation in ablations:
+        b_e = eval_e.clone()
+        b_a = eval_a.clone()
+        b_b = eval_b.clone()
+        
+        # Apply Ablation Logic across the ENTIRE dataset (as GPT requested)
+        if ablation == "Zero EEG":
+            b_e = torch.zeros_like(b_e)
+        elif ablation == "Shuffled EEG":
+            idx = torch.randperm(N)
+            b_e = b_e[idx]
+        elif ablation == "Zero Audio":
+            b_a = torch.zeros_like(b_a)
+            b_b = torch.zeros_like(b_b)
+        elif ablation == "Shuffled Audio":
+            idx = torch.randperm(N)
+            b_a = b_a[idx]
+            b_b = b_b[idx]
+        elif ablation == "Swapped Audio":
+            tmp = b_a.clone()
+            b_a = b_b
+            b_b = tmp
+        elif ablation == "Gaussian EEG":
+            mean = b_e.mean()
+            std = b_e.std()
+            b_e = torch.randn_like(b_e) * std + mean
+            
+        # Evaluate in batches
         all_preds, all_labels = [], []
         with torch.no_grad():
-            for b_e, b_a, b_b, b_y in eval_loader:
-                
-                # Apply Ablation Logic
-                if ablation == "Zero EEG":
-                    b_e = torch.zeros_like(b_e)
-                elif ablation == "Shuffled EEG":
-                    idx = torch.randperm(b_e.size(0))
-                    b_e = b_e[idx]
-                elif ablation == "Zero Audio":
-                    b_a = torch.zeros_like(b_a)
-                    b_b = torch.zeros_like(b_b)
-                elif ablation == "Shuffled Audio":
-                    idx = torch.randperm(b_a.size(0))
-                    b_a = b_a[idx]
-                    b_b = b_b[idx]
-                elif ablation == "Swapped Audio":
-                    tmp = b_a.clone()
-                    b_a = b_b
-                    b_b = tmp
-
-                b_e = b_e.to(device, non_blocking=True).float()
-                b_a = b_a.to(device, non_blocking=True).float()
-                b_b = b_b.to(device, non_blocking=True).float()
+            for i in range(0, N, BATCH_SIZE):
+                batch_e = b_e[i:i+BATCH_SIZE].to(device, non_blocking=True).float()
+                batch_a = b_a[i:i+BATCH_SIZE].to(device, non_blocking=True).float()
+                batch_b = b_b[i:i+BATCH_SIZE].to(device, non_blocking=True).float()
+                batch_y = eval_y[i:i+BATCH_SIZE]
                 
                 with torch.autocast(device_type='cuda', dtype=torch.float16):
-                    logits, _ = model(b_e, b_a, b_b)
+                    logits, _ = model(batch_e, batch_a, batch_b)
                     
                 all_preds.extend(torch.sigmoid(logits).cpu().numpy().flatten())
-                all_labels.extend(b_y.numpy().flatten())
+                all_labels.extend(batch_y.numpy().flatten())
         
         auc = roc_auc_score(all_labels, all_preds)
         print(f"[{ablation:15s}] AUROC : {auc:.4f}")
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()
