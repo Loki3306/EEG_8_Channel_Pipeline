@@ -32,6 +32,9 @@ BATCH_SIZE = 32
 TRAIN_EPOCHS = 12
 TRAIN_LR = 1e-3
 
+# Test on 4 biologically diverse subjects to save Kaggle GPU time
+TEST_SUBJECTS = [1, 5, 13, 16]
+
 def apply_modulation_filter(env, lowcut, highcut, fs, order=4):
     nyq = 0.5 * fs
     if lowcut is None and highcut is not None:
@@ -126,105 +129,115 @@ def main():
             
     print(f"\n=======================================================")
     print(f" PHASE 103: ARCHITECTURE COMPARATIVE STUDY")
-    print(f" DeepMatchMismatchTCN on Subject 13 (Syllabic < 4Hz)")
-    print(f" Baseline Target: > 0.6617 AUROC")
+    print(f" DeepMatchMismatchTCN on 4 Diverse Subjects (Syllabic < 4Hz)")
     print(f"=======================================================\n", flush=True)
     
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print(f"Training on Device: {device}\n", flush=True)
     
-    subject = 13
-    cache_file = cache_dir / f"S{subject:02d}_multiband.pt"
-    if not cache_file.exists():
-        print("Cache not found.")
-        return
+    for subject in TEST_SUBJECTS:
+        print(f"\n=======================================================")
+        print(f" SUBJECT {subject:02d}")
+        print(f"=======================================================", flush=True)
+        cache_file = cache_dir / f"S{subject:02d}_multiband.pt"
+        if not cache_file.exists():
+            print("Cache not found.")
+            continue
+            
+        cached = torch.load(cache_file, map_location='cpu', weights_only=False)['raw']
         
-    cached = torch.load(cache_file, map_location='cpu', weights_only=False)['raw']
-    
-    subj_trials = []
-    for i in range(len(cached)):
-        tr = cached[i]
-        eeg = tr['eeg'].numpy()[EAR_CHANNEL_INDICES, :] 
-        env_l = tr['env_l'].numpy()
-        env_r = tr['env_r'].numpy()
-        
-        eeg = (eeg - np.mean(eeg, axis=1, keepdims=True)) / (np.std(eeg, axis=1, keepdims=True) + 1e-8)
-        env_l = (env_l - np.mean(env_l, axis=1, keepdims=True)) / (np.std(env_l, axis=1, keepdims=True) + 1e-8)
-        env_r = (env_r - np.mean(env_r, axis=1, keepdims=True)) / (np.std(env_r, axis=1, keepdims=True) + 1e-8)
+        subj_trials = []
+        for i in range(len(cached)):
+            tr = cached[i]
+            eeg = tr['eeg'].numpy()[EAR_CHANNEL_INDICES, :] 
+            env_l = tr['env_l'].numpy()
+            env_r = tr['env_r'].numpy()
+            
+            eeg = (eeg - np.mean(eeg, axis=1, keepdims=True)) / (np.std(eeg, axis=1, keepdims=True) + 1e-8)
+            env_l = (env_l - np.mean(env_l, axis=1, keepdims=True)) / (np.std(env_l, axis=1, keepdims=True) + 1e-8)
+            env_r = (env_r - np.mean(env_r, axis=1, keepdims=True)) / (np.std(env_r, axis=1, keepdims=True) + 1e-8)
 
-        env_l = apply_modulation_filter(env_l, None, 4.0, SR)
-        env_r = apply_modulation_filter(env_r, None, 4.0, SR)
-        
-        min_len = min(eeg.shape[1], env_l.shape[1])
-        
-        subj_trials.append({
-            'eeg': eeg[:, :min_len], 
-            'env_l': env_l[:, :min_len], 
-            'env_r': env_r[:, :min_len], 
-            'meta': tr['meta']
-        })
-        
-    # TRIAL-LEVEL SPLIT
-    random.seed(42)
-    random.shuffle(subj_trials)
-    
-    split_idx = int(len(subj_trials) * 0.8)
-    train_trials = subj_trials[:split_idx]
-    eval_trials = subj_trials[split_idx:]
-    
-    calib_pool = extract_match_mismatch_sequences(train_trials)
-    eval_set = extract_match_mismatch_sequences(eval_trials)
-    random.shuffle(calib_pool)
-    
-    train_loader = DataLoader(MatchMismatchDataset(calib_pool), batch_size=BATCH_SIZE, shuffle=True, pin_memory=True, num_workers=2)
-    eval_loader = DataLoader(MatchMismatchDataset(eval_set), batch_size=BATCH_SIZE, shuffle=False, pin_memory=True, num_workers=2)
-    
-    # Phase 103 Model
-    model = DeepMatchMismatchTCN(eeg_channels=8, latent_dim=64, tcn_channels=[64, 64, 64], kernel_size=2, audio_channels=16).to(device)
-    optimizer = optim.Adam(model.parameters(), lr=TRAIN_LR, weight_decay=1e-4)
-    criterion = nn.BCEWithLogitsLoss()
-    scaler = torch.amp.GradScaler('cuda')
-    
-    print("Training DeepMatchMismatchTCN...", flush=True)
-    best_auc = 0
-    
-    for epoch in range(TRAIN_EPOCHS):
-        model.train()
-        for b_e, b_a, b_y in train_loader:
-            b_e = b_e.to(device, non_blocking=True).float()
-            b_a = b_a.to(device, non_blocking=True).float()
-            b_y = b_y.to(device, non_blocking=True).float()
-            if b_e.size(0) == 1: continue 
-            optimizer.zero_grad()
+            env_l = apply_modulation_filter(env_l, None, 4.0, SR)
+            env_r = apply_modulation_filter(env_r, None, 4.0, SR)
             
-            with torch.autocast(device_type='cuda', dtype=torch.float16):
-                logits, _ = model(b_e, b_a)
-                loss = criterion(logits, b_y)
-                
-            scaler.scale(loss).backward()
-            scaler.step(optimizer)
-            scaler.update()
+            min_len = min(eeg.shape[1], env_l.shape[1])
             
-        model.eval()
-        all_preds, all_labels = [], []
-        with torch.no_grad():
-            for b_e, b_a, b_y in eval_loader:
+            subj_trials.append({
+                'eeg': eeg[:, :min_len], 
+                'env_l': env_l[:, :min_len], 
+                'env_r': env_r[:, :min_len], 
+                'meta': tr['meta']
+            })
+            
+        # TRIAL-LEVEL SPLIT
+        random.seed(42)
+        random.shuffle(subj_trials)
+        
+        split_idx = int(len(subj_trials) * 0.8)
+        train_trials = subj_trials[:split_idx]
+        eval_trials = subj_trials[split_idx:]
+        
+        calib_pool = extract_match_mismatch_sequences(train_trials)
+        eval_set = extract_match_mismatch_sequences(eval_trials)
+        random.shuffle(calib_pool)
+        
+        if len(eval_set) == 0 or len(calib_pool) == 0:
+            continue
+            
+        train_loader = DataLoader(MatchMismatchDataset(calib_pool), batch_size=BATCH_SIZE, shuffle=True, pin_memory=True, num_workers=2)
+        eval_loader = DataLoader(MatchMismatchDataset(eval_set), batch_size=BATCH_SIZE, shuffle=False, pin_memory=True, num_workers=2)
+        
+        # Phase 103 Model
+        model = DeepMatchMismatchTCN(eeg_channels=8, latent_dim=64, tcn_channels=[64, 64, 64], kernel_size=2, audio_channels=16).to(device)
+        optimizer = optim.Adam(model.parameters(), lr=TRAIN_LR, weight_decay=1e-4)
+        criterion = nn.BCEWithLogitsLoss()
+        scaler = torch.amp.GradScaler('cuda')
+        
+        print("Training DeepMatchMismatchTCN...", flush=True)
+        best_auc = 0
+        
+        for epoch in range(TRAIN_EPOCHS):
+            model.train()
+            for b_e, b_a, b_y in train_loader:
                 b_e = b_e.to(device, non_blocking=True).float()
                 b_a = b_a.to(device, non_blocking=True).float()
+                b_y = b_y.to(device, non_blocking=True).float()
+                if b_e.size(0) == 1: continue 
+                optimizer.zero_grad()
                 
                 with torch.autocast(device_type='cuda', dtype=torch.float16):
                     logits, _ = model(b_e, b_a)
+                    loss = criterion(logits, b_y)
                     
-                all_preds.extend(torch.sigmoid(logits).cpu().numpy().flatten())
-                all_labels.extend(b_y.numpy().flatten())
+                scaler.scale(loss).backward()
+                scaler.step(optimizer)
+                scaler.update()
                 
-        if len(np.unique(all_labels)) > 1:
-            auc = roc_auc_score(all_labels, all_preds)
-            best_auc = max(best_auc, auc)
-        print(f"  Epoch {epoch+1:02d}/{TRAIN_EPOCHS} - Val AUROC: {auc:.4f} (Best: {best_auc:.4f})")
-            
-    print(f"\n--- Training Complete ---", flush=True)
-    print(f"Final Best AUROC: {best_auc:.4f} (Target to beat: 0.6617)")
+            model.eval()
+            all_preds, all_labels, all_logits = [], [], []
+            with torch.no_grad():
+                for b_e, b_a, b_y in eval_loader:
+                    b_e = b_e.to(device, non_blocking=True).float()
+                    b_a = b_a.to(device, non_blocking=True).float()
+                    
+                    with torch.autocast(device_type='cuda', dtype=torch.float16):
+                        logits, _ = model(b_e, b_a)
+                        
+                    all_preds.extend(torch.sigmoid(logits).cpu().numpy().flatten())
+                    all_labels.extend(b_y.numpy().flatten())
+                    all_logits.extend(logits.cpu().numpy().flatten())
+                    
+            if len(np.unique(all_labels)) > 1:
+                auc = roc_auc_score(all_labels, all_preds)
+                best_auc = max(best_auc, auc)
+                
+                # Check for inversion
+                if auc < 0.5 and epoch == TRAIN_EPOCHS - 1:
+                    inverted_auc = roc_auc_score(all_labels, -np.array(all_logits))
+                    print(f"    -> [Diagnostic] INVERTED AUROC: {inverted_auc:.4f}")
+            print(f"  Epoch {epoch+1:02d}/{TRAIN_EPOCHS} - Val AUROC: {auc:.4f} (Best: {best_auc:.4f})")
+                
+        print(f"Final Best AUROC: {best_auc:.4f}\n")
 
 if __name__ == "__main__":
     main()
