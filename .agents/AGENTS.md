@@ -102,3 +102,11 @@ When utilizing external classes, objects, or modules, always verify the availabl
 3. **Explicitly Allow Contradiction:** Any previous conclusion may be wrong. If repository evidence contradicts previous discussion, discard the previous discussion immediately. Never defend earlier conclusions.
 4. **Justify Conclusions:** Force every conclusion to follow: FACT -> Evidence -> Inference -> Confidence. Never say "I think... therefore it is true."
 5. **Research Checklist:** Every debugging session must start by answering: What failed? What was measured? Could metric/preprocessing/evaluation/implementation be wrong? What evidence rules each out?
+
+---
+
+## Script Re-use Rule
+
+When creating a new training or evaluation script (e.g., `phase97.py`), you MUST reuse the exact module imports, `sys.path.append` configurations, and dataset loading logic from the immediately preceding successful script (e.g., `phase96.py`). 
+
+Do not write boilerplate data loading logic from memory. Identify the working script, view its contents, and strictly copy-paste the setup code to avoid trivial Kaggle execution failures (such as `ModuleNotFoundError` or `KeyError`).
