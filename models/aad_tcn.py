@@ -608,10 +608,14 @@ class DeepMatchMismatchTCN(nn.Module):
         # We reuse the LocalEncoder since it internally uses 1D Convolutions
         self.eeg_encoder = LocalEncoder(in_channels=eeg_channels, out_dim=latent_dim)
         
+        self.encoder_type = encoder_type
+        
         if encoder_type == 'fast':
             self.audio_encoder = FastAudioEncoder(in_channels=audio_channels, out_dim=latent_dim)
         elif encoder_type == 'slow':
             self.audio_encoder = SlowAudioEncoder(in_channels=audio_channels, out_dim=latent_dim)
+        elif encoder_type == 'wavlm':
+            self.audio_encoder = WavLMEncoder(in_channels=768, out_dim=latent_dim)
         else:
             self.audio_encoder = LocalEncoder(in_channels=audio_channels, out_dim=latent_dim)
                 
@@ -627,13 +631,18 @@ class DeepMatchMismatchTCN(nn.Module):
     def forward(self, eeg_seq, aud_seq):
         """
         eeg_seq: [B, SeqLen, EEG_Channels, Time]
-        aud_seq: [B, SeqLen, Audio_Channels, Time]
+        aud_seq: [B, SeqLen, Audio_Channels, Time] or [B, SeqLen, Time, 768] for WavLM
         """
         B, SeqLen, C_e, T_e = eeg_seq.shape
         eeg_flat = eeg_seq.reshape(B * SeqLen, C_e, T_e)
         
-        C_a, T_a = aud_seq.shape[2], aud_seq.shape[3]
-        aud_flat = aud_seq.reshape(B * SeqLen, C_a, T_a)
+        if self.encoder_type == 'wavlm':
+            # WavLM aud_seq comes as [B, SeqLen, Time, 768]
+            T_a = aud_seq.shape[2]
+            aud_flat = aud_seq.reshape(B * SeqLen, T_a, 768).transpose(1, 2) # -> [B*SeqLen, 768, Time]
+        else:
+            C_a, T_a = aud_seq.shape[2], aud_seq.shape[3]
+            aud_flat = aud_seq.reshape(B * SeqLen, C_a, T_a)
         
         # Stage 1: Window-Level Encoding
         eeg_latent_raw = self.eeg_encoder(eeg_flat)
