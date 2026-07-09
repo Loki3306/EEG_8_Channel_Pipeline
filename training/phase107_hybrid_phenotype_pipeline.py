@@ -42,6 +42,8 @@ TARGET_SUBJECTS = ['S05', 'S08', 'S10', 'S11', 'S13', 'S16']
 CANDIDATE_BANDS = [
     ("Syllabic (<4Hz)", None, 4.0),
     ("Phonemic (4-8Hz)", 4.0, 8.0),
+    ("Cortical (8-16Hz)", 8.0, 16.0),
+    ("Transients (>16Hz)", 16.0, None),
     ("Broadband (0.5-32Hz)", 0.5, 32.0)
 ]
 
@@ -198,20 +200,23 @@ def fast_clinical_calibration(raw_train_trials, device):
             
             if len(np.unique(all_labels)) > 1:
                 auc = roc_auc_score(all_labels, all_preds)
-                # Account for inverted subjects mathematically
-                effective_auc = auc if auc > 0.5 else (1.0 - auc)
-                band_best_auc = max(band_best_auc, effective_auc)
+                is_inverted = (auc < 0.5)
+                effective_auc = (1.0 - auc) if is_inverted else auc
+                if effective_auc > band_best_auc:
+                    band_best_auc = effective_auc
+                    band_invert = is_inverted
                 
         band_results[band_name] = band_best_auc
-        print(f"    - {band_name}: {band_best_auc:.4f}")
+        print(f"    - {band_name}: {band_best_auc:.4f} {'(Inverted)' if band_invert else ''}")
         
         if band_best_auc > best_val_auc:
             best_val_auc = band_best_auc
             best_band = (band_name, lowcut, highcut)
+            calibration_invert = band_invert
             
     print(f"  [Calibration] Complete in {time.time()-start_time:.1f}s.")
-    print(f"  [Calibration] Winner: >> {best_band[0]} <<", flush=True)
-    return best_band
+    print(f"  [Calibration] Winner: >> {best_band[0]} << (Invert: {calibration_invert})", flush=True)
+    return best_band, calibration_invert
 
 def main():
     possible_paths = [
@@ -257,10 +262,9 @@ def main():
             env_l = tr['env_l'].numpy()
             env_r = tr['env_r'].numpy()
             
-            # Normalize BEFORE filtering to preserve relative physical energy
-            eeg = (eeg - np.mean(eeg, axis=1, keepdims=True)) / (np.std(eeg, axis=1, keepdims=True) + 1e-8)
-            env_l = (env_l - np.mean(env_l, axis=1, keepdims=True)) / (np.std(env_l, axis=1, keepdims=True) + 1e-8)
-            env_r = (env_r - np.mean(env_r, axis=1, keepdims=True)) / (np.std(env_r, axis=1, keepdims=True) + 1e-8)
+            # Apply Temporal Modulation Filter FIRST (Phase 107 GPT Fix)
+            # We don't filter raw_trials yet because candidate bands will dynamically filter them.
+            # So just store raw pristine arrays, but we don't normalize here anymore!
             
             min_len = min(eeg.shape[1], env_l.shape[1])
             raw_trials.append({
@@ -283,7 +287,8 @@ def main():
         raw_eval_trials = [raw_trials[i] for i in eval_indices]
         
         # 1. FAST CLINICAL CALIBRATION
-        best_band_name, lowcut, highcut = fast_clinical_calibration(raw_train_trials, device)
+        best_band_info, calibration_invert = fast_clinical_calibration(raw_train_trials, device)
+        best_band_name, lowcut, highcut = best_band_info
         
         # 2. APPLY WINNING PHENOTYPE
         print(f"\n  [Deployment] Extracting {best_band_name} sequences for deployment...", flush=True)
@@ -294,12 +299,23 @@ def main():
             eeg = tr['eeg']
             env_l = apply_modulation_filter(tr['env_l'], lowcut, highcut, SR)
             env_r = apply_modulation_filter(tr['env_r'], lowcut, highcut, SR)
+            
+            # Normalize AFTER filtering (GPT Methodological Fix)
+            eeg = (eeg - np.mean(eeg, axis=1, keepdims=True)) / (np.std(eeg, axis=1, keepdims=True) + 1e-8)
+            env_l = (env_l - np.mean(env_l, axis=1, keepdims=True)) / (np.std(env_l, axis=1, keepdims=True) + 1e-8)
+            env_r = (env_r - np.mean(env_r, axis=1, keepdims=True)) / (np.std(env_r, axis=1, keepdims=True) + 1e-8)
+            
             final_train_trials.append({'eeg': eeg, 'env_l': env_l, 'env_r': env_r, 'meta': tr['meta']})
             
         for tr in raw_eval_trials:
             eeg = tr['eeg']
             env_l = apply_modulation_filter(tr['env_l'], lowcut, highcut, SR)
             env_r = apply_modulation_filter(tr['env_r'], lowcut, highcut, SR)
+            
+            eeg = (eeg - np.mean(eeg, axis=1, keepdims=True)) / (np.std(eeg, axis=1, keepdims=True) + 1e-8)
+            env_l = (env_l - np.mean(env_l, axis=1, keepdims=True)) / (np.std(env_l, axis=1, keepdims=True) + 1e-8)
+            env_r = (env_r - np.mean(env_r, axis=1, keepdims=True)) / (np.std(env_r, axis=1, keepdims=True) + 1e-8)
+            
             final_eval_trials.append({'eeg': eeg, 'env_l': env_l, 'env_r': env_r, 'meta': tr['meta']})
             
         train_seqs = extract_match_mismatch_sequences(final_train_trials)
@@ -333,26 +349,28 @@ def main():
                     loss = criterion(logits, b_y)
                 scaler.scale(loss).backward()
                 scaler.step(optimizer)
-                scaler.update()
-                
-            model.eval()
-            all_preds, all_labels = [], []
-            with torch.no_grad():
-                for b_e, b_a, b_y in eval_loader:
-                    b_e, b_a = b_e.to(device, non_blocking=True).float(), b_a.to(device, non_blocking=True).float()
-                    with torch.autocast(device_type=device.type, dtype=torch.float16, enabled=(device.type == 'cuda')):
-                        logits, _ = model(b_e, b_a)
-                    all_preds.extend(torch.sigmoid(logits).cpu().numpy().flatten())
-                    all_labels.extend(b_y.numpy().flatten())
+            # We only evaluate on the eval set AFTER all epochs finish to prevent optimistic bias!
+            # The final epoch is the true deployment model checkpoint.
+            pass
             
-            if len(np.unique(all_labels)) > 1:
-                auc = roc_auc_score(all_labels, all_preds)
-                effective_auc = auc if auc > 0.5 else (1.0 - auc)
-                if effective_auc > deployment_best_auc:
-                    deployment_best_auc = effective_auc
-                    inverted_diagnostic = (auc < 0.5)
-                    
-        print(f"  [Deployment] Final Best AUROC: {deployment_best_auc:.4f} {'(INVERTED POLARITY)' if inverted_diagnostic else ''}")
+        # 4. FINAL DEPLOYMENT EVALUATION (Strictly 1 look)
+        model.eval()
+        all_preds, all_labels = [], []
+        with torch.no_grad():
+            for b_e, b_a, b_y in eval_loader:
+                b_e, b_a = b_e.to(device, non_blocking=True).float(), b_a.to(device, non_blocking=True).float()
+                with torch.autocast(device_type=device.type, dtype=torch.float16, enabled=(device.type == 'cuda')):
+                    logits, _ = model(b_e, b_a)
+                all_preds.extend(torch.sigmoid(logits).cpu().numpy().flatten())
+                all_labels.extend(b_y.numpy().flatten())
+                
+        deployment_best_auc = 0
+        if len(np.unique(all_labels)) > 1:
+            auc = roc_auc_score(all_labels, all_preds)
+            # Apply strictly the inversion policy learned during calibration!
+            deployment_best_auc = (1.0 - auc) if calibration_invert else auc
+            
+        print(f"  [Deployment] Final Deployment AUROC: {deployment_best_auc:.4f} {'(Inverted via Calibration)' if calibration_invert else ''}")
         final_results[subj_name] = {'Band': best_band_name, 'AUROC': deployment_best_auc}
 
     print("\n\n=======================================================")
