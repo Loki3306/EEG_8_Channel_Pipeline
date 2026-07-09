@@ -234,7 +234,7 @@ def main():
     print(f"=======================================================\n", flush=True)
     
     cache_files = sorted(list(cache_dir.glob('*_multiband.pt')))
-    filtered_files = [f for f in cache_files if f.stem.split('_')[0] in TARGET_SUBJECTS]
+    filtered_files = cache_files
     
     final_results = {}
     
