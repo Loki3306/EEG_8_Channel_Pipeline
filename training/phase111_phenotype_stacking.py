@@ -196,7 +196,7 @@ def evaluate_filterbank_mtrf_features(W_dict, trials):
                             r_L, _ = pearsonr(Y_hat, Y_l_eff)
                             r_R, _ = pearsonr(Y_hat, Y_r_eff)
                         
-                        seq_features.extend([r_L, r_R, r_L - r_R])
+                        seq_features.append(r_L - r_R)
                     
                     label_L = 1.0 if current_spk == 'L' else 0.0
                     
@@ -317,10 +317,8 @@ def main():
         # Print learned weights for intuition
         print("    Learned Phenotype Weights:")
         for band_idx, band_name in enumerate(BANDS.keys()):
-            w_rL = clf.coef_[0][band_idx * 3]
-            w_rR = clf.coef_[0][band_idx * 3 + 1]
-            w_diff = clf.coef_[0][band_idx * 3 + 2]
-            print(f"      {band_name:5s}: rL={w_rL:+.3f}, rR={w_rR:+.3f}, Δr={w_diff:+.3f}")
+            w_diff = clf.coef_[0][band_idx]
+            print(f"      {band_name:5s}: Δr Weight = {w_diff:+.3f}")
             
         # ---------------------------------------------------------
         # STAGE 3: FULL mTRF TRAINING
