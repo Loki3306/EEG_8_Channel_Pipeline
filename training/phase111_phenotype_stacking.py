@@ -5,7 +5,7 @@ import torch
 from pathlib import Path
 from sklearn.metrics import roc_auc_score
 from sklearn.linear_model import LogisticRegression
-from sklearn.model_selection import KFold
+from sklearn.model_selection import KFold, StratifiedKFold
 import random
 from scipy import signal
 
@@ -283,12 +283,14 @@ def main():
         # STAGE 1: OUT-OF-FOLD (OOF) PREDICTIONS ON TRAIN SET
         # ---------------------------------------------------------
         print("  [Stage 1] Generating Unbiased OOF Features (5-Fold CV)...", flush=True)
-        kf = KFold(n_splits=5, shuffle=True, random_state=42)
+        skf = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
+        
+        train_labels = [get_trial_dominant_speaker(tr) for tr in raw_train_trials]
         
         X_meta_train_list = []
         Y_meta_train_list = []
         
-        for fold, (kf_train_idx, kf_val_idx) in enumerate(kf.split(raw_train_trials)):
+        for fold, (kf_train_idx, kf_val_idx) in enumerate(skf.split(raw_train_trials, train_labels)):
             fold_train_trials = [raw_train_trials[i] for i in kf_train_idx]
             fold_val_trials = [raw_train_trials[i] for i in kf_val_idx]
             
