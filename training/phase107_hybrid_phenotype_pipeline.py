@@ -173,21 +173,17 @@ def stratified_trial_split(trials, train_ratio=0.8):
     
     return train_indices, eval_indices
 
-def fast_clinical_calibration(raw_train_trials, device):
+def fast_clinical_calibration(raw_train_trials, calib_train_idx, calib_val_idx, device):
     """
     Simulates a 60-second clinical hearing-aid fitting session.
-    Automatically evaluates the candidate modulation bands on the train set
-    to identify the subject's mathematically optimal biological phenotype.
+    Sweeps through candidate frequency bands using a tiny 2-epoch training run.
     """
     print(f"\n  [Calibration] Initiating fast phenotype sweep...", flush=True)
     start_time = time.time()
     
-    # Internal split for calibration validation using Strict Stratification!
-    calib_train_idx, calib_val_idx = stratified_trial_split(raw_train_trials, train_ratio=0.8)
-    
     best_band = None
     best_val_auc = 0
-    band_results = {}
+    calibration_invert = False
     
     for band_name, lowcut, highcut in CANDIDATE_BANDS:
         # 1. Filter the raw data to the candidate band
@@ -331,7 +327,10 @@ def main():
         raw_eval_trials = [raw_trials[i] for i in eval_indices]
         
         # 1. FAST CLINICAL CALIBRATION
-        best_band_info, calibration_invert = fast_clinical_calibration(raw_train_trials, device)
+        # Pre-calculate the internal validation split so we can reuse it for Early Stopping!
+        calib_train_idx, calib_val_idx = stratified_trial_split(raw_train_trials, train_ratio=0.8)
+        
+        best_band_info, calibration_invert = fast_clinical_calibration(raw_train_trials, calib_train_idx, calib_val_idx, device)
         best_band_name, lowcut, highcut = best_band_info
         
         # 2. APPLY WINNING PHENOTYPE
@@ -362,7 +361,12 @@ def main():
             
             final_eval_trials.append({'eeg': eeg, 'env_l': env_l, 'env_r': env_r, 'meta': tr['meta']})
             
-        train_seqs = extract_match_mismatch_sequences(final_train_trials)
+        # Split the Deployment Training Set into Train and Val (using the exact same indices as calibration)
+        deploy_train_trials = [final_train_trials[i] for i in calib_train_idx]
+        deploy_val_trials = [final_train_trials[i] for i in calib_val_idx]
+            
+        train_seqs = extract_match_mismatch_sequences(deploy_train_trials)
+        val_seqs = extract_match_mismatch_sequences(deploy_val_trials)
         eval_seqs = extract_match_mismatch_sequences(final_eval_trials)
         
         if len(train_seqs) == 0 or len(eval_seqs) == 0:
@@ -370,19 +374,22 @@ def main():
             continue
             
         train_loader = DataLoader(MatchMismatchDataset(train_seqs), batch_size=BATCH_SIZE, shuffle=True, pin_memory=True, num_workers=2)
+        val_loader = DataLoader(MatchMismatchDataset(val_seqs), batch_size=BATCH_SIZE, shuffle=False, pin_memory=True, num_workers=2)
         eval_loader = DataLoader(MatchMismatchDataset(eval_seqs), batch_size=BATCH_SIZE, shuffle=False, pin_memory=True, num_workers=2)
         
-        # 3. DEPLOYMENT TRAINING
+        # 3. DEPLOYMENT TRAINING (With Validation Early Stopping)
         print(f"  [Deployment] Training Full TCN on chosen phenotype...", flush=True)
-        model = DeepMatchMismatchTCN(eeg_channels=8, latent_dim=64, tcn_channels=[64, 64, 64], kernel_size=2, dropout=0.2, encoder_type='baseline', audio_channels=16).to(device)
-        optimizer = optim.Adam(model.parameters(), lr=1e-3, weight_decay=1e-4)
+        model = DeepMatchMismatchTCN(eeg_channels=8, latent_dim=64, tcn_channels=[64, 64, 64], kernel_size=2, dropout=0.5, encoder_type='baseline', audio_channels=16).to(device)
+        optimizer = optim.Adam(model.parameters(), lr=1e-3, weight_decay=1e-3)
         criterion = nn.BCEWithLogitsLoss()
         scaler = torch.amp.GradScaler(device.type, enabled=(device.type == 'cuda'))
         
-        deployment_best_auc = 0
-        inverted_diagnostic = False
+        best_val_auc = 0
+        best_model_state = None
+        patience = 3
+        patience_counter = 0
         
-        for epoch in range(TRAIN_EPOCHS):
+        for epoch in range(15):
             model.train()
             for b_e, b_a, b_y in train_loader:
                 b_e, b_a, b_y = b_e.to(device, non_blocking=True).float(), b_a.to(device, non_blocking=True).float(), b_y.to(device, non_blocking=True).float()
@@ -394,10 +401,36 @@ def main():
                 scaler.scale(loss).backward()
                 scaler.step(optimizer)
                 scaler.update()
-            # We only evaluate on the eval set AFTER all epochs finish to prevent optimistic bias!
-            # The final epoch is the true deployment model checkpoint.
+                
+            # Evaluate on Internal Validation Set to prevent catastrophic overfitting
+            model.eval()
+            val_preds, val_labels = [], []
+            with torch.no_grad():
+                for b_e, b_a, b_y in val_loader:
+                    b_e, b_a = b_e.to(device, non_blocking=True).float(), b_a.to(device, non_blocking=True).float()
+                    with torch.autocast(device_type=device.type, dtype=torch.float16, enabled=(device.type == 'cuda')):
+                        logits, _ = model(b_e, b_a)
+                    val_preds.extend(torch.sigmoid(logits).cpu().numpy().flatten())
+                    val_labels.extend(b_y.numpy().flatten())
             
-        # 4. FINAL DEPLOYMENT EVALUATION (Strictly 1 look)
+            if len(np.unique(val_labels)) > 1:
+                auc = roc_auc_score(val_labels, val_preds)
+                effective_auc = (1.0 - auc) if calibration_invert else auc
+                
+                if effective_auc > best_val_auc:
+                    best_val_auc = effective_auc
+                    best_model_state = model.state_dict().copy()
+                    patience_counter = 0
+                else:
+                    patience_counter += 1
+                    
+            if patience_counter >= patience:
+                break
+                
+        # 4. FINAL DEPLOYMENT EVALUATION (Strictly 1 look on Unseen Eval Set)
+        if best_model_state is not None:
+            model.load_state_dict(best_model_state)
+            
         model.eval()
         all_preds, all_labels = [], []
         with torch.no_grad():
