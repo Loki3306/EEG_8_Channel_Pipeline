@@ -123,6 +123,56 @@ def extract_match_mismatch_sequences(trials):
                     
     return sequences
 
+def get_trial_dominant_speaker(tr):
+    sp = tr['meta']['switch_points']
+    T = tr['eeg'].shape[1]
+    
+    boundaries = [0]
+    boundaries.extend([idx for spk, idx in sp])
+    boundaries = sorted(set(boundaries))
+    if boundaries[-1] != T: boundaries.append(T)
+        
+    l_duration = 0
+    r_duration = 0
+    
+    for i in range(len(boundaries) - 1):
+        start_idx = boundaries[i]
+        end_idx = boundaries[i+1]
+        current_spk = 'L'
+        for spk, idx in sp:
+            if idx <= start_idx: current_spk = spk
+            else: break
+            
+        if current_spk == 'L': l_duration += (end_idx - start_idx)
+        else: r_duration += (end_idx - start_idx)
+        
+    return 'L' if l_duration >= r_duration else 'R'
+
+def stratified_trial_split(trials, train_ratio=0.8):
+    l_trials = []
+    r_trials = []
+    
+    for i, tr in enumerate(trials):
+        if get_trial_dominant_speaker(tr) == 'L':
+            l_trials.append(i)
+        else:
+            r_trials.append(i)
+            
+    random.seed(42)
+    random.shuffle(l_trials)
+    random.shuffle(r_trials)
+    
+    l_split = int(len(l_trials) * train_ratio)
+    r_split = int(len(r_trials) * train_ratio)
+    
+    train_indices = l_trials[:l_split] + r_trials[:r_split]
+    eval_indices = l_trials[l_split:] + r_trials[r_split:]
+    
+    random.shuffle(train_indices)
+    random.shuffle(eval_indices)
+    
+    return train_indices, eval_indices
+
 def fast_clinical_calibration(raw_train_trials, device):
     """
     Simulates a 60-second clinical hearing-aid fitting session.
@@ -132,14 +182,8 @@ def fast_clinical_calibration(raw_train_trials, device):
     print(f"\n  [Calibration] Initiating fast phenotype sweep...", flush=True)
     start_time = time.time()
     
-    # Internal split for calibration validation
-    random.seed(42)
-    indices = list(range(len(raw_train_trials)))
-    random.shuffle(indices)
-    calib_split = int(len(indices) * 0.8)
-    
-    calib_train_idx = indices[:calib_split]
-    calib_val_idx = indices[calib_split:]
+    # Internal split for calibration validation using Strict Stratification!
+    calib_train_idx, calib_val_idx = stratified_trial_split(raw_train_trials, train_ratio=0.8)
     
     best_band = None
     best_val_auc = 0
@@ -279,14 +323,9 @@ def main():
                 'meta': tr['meta']
             })
             
-        # TRIAL-LEVEL SPLIT (Strict Isolation)
-        random.seed(42)
-        indices = list(range(len(raw_trials)))
-        random.shuffle(indices)
-        
-        split_idx = int(len(raw_trials) * 0.8)
-        train_indices = indices[:split_idx]
-        eval_indices = indices[split_idx:]
+        # STRICT STRATIFIED TRIAL-LEVEL SPLIT
+        # This absolutely guarantees equal L/R representation in Train and Eval
+        train_indices, eval_indices = stratified_trial_split(raw_trials, train_ratio=0.8)
         
         raw_train_trials = [raw_trials[i] for i in train_indices]
         raw_eval_trials = [raw_trials[i] for i in eval_indices]
