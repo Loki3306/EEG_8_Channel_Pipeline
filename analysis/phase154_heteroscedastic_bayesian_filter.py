@@ -360,7 +360,7 @@ def main():
             
     cache_files = sorted(list(cache_dir.glob('*_multiband.pt')))
     num_gpus = torch.cuda.device_count()
-    num_workers = min(mp.cpu_count(), num_gpus if num_gpus > 0 else mp.cpu_count())
+    num_workers = mp.cpu_count()
     
     all_metrics = []
     
