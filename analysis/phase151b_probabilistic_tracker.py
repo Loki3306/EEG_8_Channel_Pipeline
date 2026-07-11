@@ -20,7 +20,8 @@ SEQ_HOP = int(0.5 * SR)
 
 BROADBAND = (0.5, 8.0)
 RIDGE_LAMBDA = 100.0
-FORGETTING_FACTOR = 0.98  # roughly 50 windows memory (25 seconds)
+FORGETTING_FACTOR_BASE = 0.98  # Base forgetting factor (memory ~ 50 windows)
+ALPHA_BASE = 1.0 - FORGETTING_FACTOR_BASE
 
 SOFTMAX_BETA = 15.0 # Temperature for probabilistic updates
 
@@ -124,101 +125,142 @@ def process_subject(cache_file, device_id):
     
     F = windows[0]['X'].shape[1]
     
-    # 1. CALIBRATION
-    Rxx_calib = torch.zeros((F, F), device=device)
-    Rxy_calib = torch.zeros((F,), device=device)
+    # ---------------------------------------------------------
+    # 1. DUAL CALIBRATION
+    # ---------------------------------------------------------
+    Rxx_calib_L = torch.zeros((F, F), device=device)
+    Rxy_calib_L = torch.zeros((F,), device=device)
+    count_L = 0
+    
+    Rxx_calib_R = torch.zeros((F, F), device=device)
+    Rxy_calib_R = torch.zeros((F,), device=device)
+    count_R = 0
     
     for w in calib_set:
         X = w['X']
-        Y_true = w['Y_L'] if w['label'] == 1 else w['Y_R']
-        Rxx_calib += X.T @ X
-        Rxy_calib += X.T @ Y_true
+        if w['label'] == 1:
+            Rxx_calib_L += X.T @ X
+            Rxy_calib_L += X.T @ w['Y_L']
+            count_L += 1
+        else:
+            Rxx_calib_R += X.T @ X
+            Rxy_calib_R += X.T @ w['Y_R']
+            count_R += 1
+            
+    # Normalize to equivalent 50-window scale (1 / (1 - 0.98))
+    EFFECTIVE_WINDOWS = 1.0 / ALPHA_BASE
+    
+    if count_L > 0:
+        Rxx_calib_L = (Rxx_calib_L / count_L) * EFFECTIVE_WINDOWS
+        Rxy_calib_L = (Rxy_calib_L / count_L) * EFFECTIVE_WINDOWS
+    if count_R > 0:
+        Rxx_calib_R = (Rxx_calib_R / count_R) * EFFECTIVE_WINDOWS
+        Rxy_calib_R = (Rxy_calib_R / count_R) * EFFECTIVE_WINDOWS
         
     I = torch.eye(F, device=device)
-    W_0 = torch.linalg.solve(Rxx_calib + RIDGE_LAMBDA * I, Rxy_calib)
+    W_L_0 = torch.linalg.solve(Rxx_calib_L + RIDGE_LAMBDA * I, Rxy_calib_L) if count_L > 0 else torch.zeros(F, device=device)
+    W_R_0 = torch.linalg.solve(Rxx_calib_R + RIDGE_LAMBDA * I, Rxy_calib_R) if count_R > 0 else torch.zeros(F, device=device)
+    
+    if count_L == 0: W_L_0 = W_R_0.clone()
+    if count_R == 0: W_R_0 = W_L_0.clone()
     
     labels = [w['label'] for w in track_set]
     
     # ---------------------------------------------------------
-    # BRANCH 1: ORACLE ADAPTIVE (Upper Bound)
+    # BRANCH 1: ORACLE DUAL-TRACKER (Upper Bound)
     # ---------------------------------------------------------
-    Rxx_o = Rxx_calib.clone()
-    Rxy_o = Rxy_calib.clone()
-    W_o = W_0.clone()
+    Rxx_oL, Rxy_oL, W_oL = Rxx_calib_L.clone(), Rxy_calib_L.clone(), W_L_0.clone()
+    Rxx_oR, Rxy_oR, W_oR = Rxx_calib_R.clone(), Rxy_calib_R.clone(), W_R_0.clone()
     scores_o = []
     
     for w in track_set:
-        Y_hat = w['X'] @ W_o
-        c_L = batch_pearsonr_pt(Y_hat, w['Y_L']).item()
-        c_R = batch_pearsonr_pt(Y_hat, w['Y_R']).item()
+        c_L = batch_pearsonr_pt(w['X'] @ W_oL, w['Y_L']).item()
+        c_R = batch_pearsonr_pt(w['X'] @ W_oR, w['Y_R']).item()
         scores_o.append(c_L - c_R)
         
-        Y_true = w['Y_L'] if w['label'] == 1 else w['Y_R']
-        Rxx_o = FORGETTING_FACTOR * Rxx_o + w['X'].T @ w['X']
-        Rxy_o = FORGETTING_FACTOR * Rxy_o + w['X'].T @ Y_true
-        W_o = torch.linalg.solve(Rxx_o + RIDGE_LAMBDA * I, Rxy_o)
-        
+        # Oracle knows truth. It ONLY updates the attended decoder.
+        # The unattended decoder PERFECTLY FREEZES.
+        if w['label'] == 1:
+            Rxx_oL = FORGETTING_FACTOR_BASE * Rxx_oL + w['X'].T @ w['X']
+            Rxy_oL = FORGETTING_FACTOR_BASE * Rxy_oL + w['X'].T @ w['Y_L']
+            W_oL = torch.linalg.solve(Rxx_oL + RIDGE_LAMBDA * I, Rxy_oL)
+        else:
+            Rxx_oR = FORGETTING_FACTOR_BASE * Rxx_oR + w['X'].T @ w['X']
+            Rxy_oR = FORGETTING_FACTOR_BASE * Rxy_oR + w['X'].T @ w['Y_R']
+            W_oR = torch.linalg.solve(Rxx_oR + RIDGE_LAMBDA * I, Rxy_oR)
+            
     auc_o = roc_auc_score(labels, scores_o)
     
     # ---------------------------------------------------------
-    # BRANCH 2: HARD DECISION-DIRECTED (Collapse Baseline)
+    # BRANCH 2: HARD DECISION DUAL-TRACKER (Collapse Baseline)
     # ---------------------------------------------------------
-    Rxx_h = Rxx_calib.clone()
-    Rxy_h = Rxy_calib.clone()
-    W_h = W_0.clone()
+    Rxx_hL, Rxy_hL, W_hL = Rxx_calib_L.clone(), Rxy_calib_L.clone(), W_L_0.clone()
+    Rxx_hR, Rxy_hR, W_hR = Rxx_calib_R.clone(), Rxy_calib_R.clone(), W_R_0.clone()
     scores_h = []
     
     for w in track_set:
-        Y_hat = w['X'] @ W_h
-        c_L = batch_pearsonr_pt(Y_hat, w['Y_L']).item()
-        c_R = batch_pearsonr_pt(Y_hat, w['Y_R']).item()
+        c_L = batch_pearsonr_pt(w['X'] @ W_hL, w['Y_L']).item()
+        c_R = batch_pearsonr_pt(w['X'] @ W_hR, w['Y_R']).item()
         scores_h.append(c_L - c_R)
         
         pred_label = 1 if c_L > c_R else 0
-        Y_obs = w['Y_L'] if pred_label == 1 else w['Y_R']
         
-        Rxx_h = FORGETTING_FACTOR * Rxx_h + w['X'].T @ w['X']
-        Rxy_h = FORGETTING_FACTOR * Rxy_h + w['X'].T @ Y_obs
-        W_h = torch.linalg.solve(Rxx_h + RIDGE_LAMBDA * I, Rxy_h)
-        
+        if pred_label == 1:
+            Rxx_hL = FORGETTING_FACTOR_BASE * Rxx_hL + w['X'].T @ w['X']
+            Rxy_hL = FORGETTING_FACTOR_BASE * Rxy_hL + w['X'].T @ w['Y_L']
+            W_hL = torch.linalg.solve(Rxx_hL + RIDGE_LAMBDA * I, Rxy_hL)
+        else:
+            Rxx_hR = FORGETTING_FACTOR_BASE * Rxx_hR + w['X'].T @ w['X']
+            Rxy_hR = FORGETTING_FACTOR_BASE * Rxy_hR + w['X'].T @ w['Y_R']
+            W_hR = torch.linalg.solve(Rxx_hR + RIDGE_LAMBDA * I, Rxy_hR)
+            
     auc_h = roc_auc_score(labels, scores_h)
     
     # ---------------------------------------------------------
-    # BRANCH 3: SOFT PROBABILISTIC UPDATE (The Cure)
+    # BRANCH 3: BAYESIAN DUAL-TRACKER (The Cure)
     # ---------------------------------------------------------
-    Rxx_s = Rxx_calib.clone()
-    Rxy_s = Rxy_calib.clone()
-    W_s = W_0.clone()
-    scores_s = []
+    Rxx_bL, Rxy_bL, W_bL = Rxx_calib_L.clone(), Rxy_calib_L.clone(), W_L_0.clone()
+    Rxx_bR, Rxy_bR, W_bR = Rxx_calib_R.clone(), Rxy_calib_R.clone(), W_R_0.clone()
+    scores_b = []
     
     for w in track_set:
-        Y_hat = w['X'] @ W_s
-        c_L = batch_pearsonr_pt(Y_hat, w['Y_L']).item()
-        c_R = batch_pearsonr_pt(Y_hat, w['Y_R']).item()
-        scores_s.append(c_L - c_R)
+        c_L = batch_pearsonr_pt(w['X'] @ W_bL, w['Y_L']).item()
+        c_R = batch_pearsonr_pt(w['X'] @ W_bR, w['Y_R']).item()
+        scores_b.append(c_L - c_R)
         
-        # Softmax Probability
-        exp_L = np.exp(SOFTMAX_BETA * c_L)
-        exp_R = np.exp(SOFTMAX_BETA * c_R)
+        # 1. Posterior Probabilities
+        max_c = max(c_L, c_R)
+        exp_L = np.exp(SOFTMAX_BETA * (c_L - max_c))
+        exp_R = np.exp(SOFTMAX_BETA * (c_R - max_c))
         p_L = exp_L / (exp_L + exp_R + 1e-8)
         p_R = 1.0 - p_L
         
-        # Probabilistic Blend of targets
-        Y_soft = p_L * w['Y_L'] + p_R * w['Y_R']
+        # 2. Dynamic Freezing (Variable Forgetting Factors)
+        alpha_L = p_L * ALPHA_BASE
+        lambda_L = 1.0 - alpha_L
         
-        Rxx_s = FORGETTING_FACTOR * Rxx_s + w['X'].T @ w['X']
-        Rxy_s = FORGETTING_FACTOR * Rxy_s + w['X'].T @ Y_soft
-        W_s = torch.linalg.solve(Rxx_s + RIDGE_LAMBDA * I, Rxy_s)
+        alpha_R = p_R * ALPHA_BASE
+        lambda_R = 1.0 - alpha_R
         
-    auc_s = roc_auc_score(labels, scores_s)
+        # 3. Probabilistic Updates
+        XX = w['X'].T @ w['X']
+        Rxx_bL = lambda_L * Rxx_bL + p_L * XX
+        Rxy_bL = lambda_L * Rxy_bL + p_L * (w['X'].T @ w['Y_L'])
+        W_bL = torch.linalg.solve(Rxx_bL + RIDGE_LAMBDA * I, Rxy_bL)
+        
+        Rxx_bR = lambda_R * Rxx_bR + p_R * XX
+        Rxy_bR = lambda_R * Rxy_bR + p_R * (w['X'].T @ w['Y_R'])
+        W_bR = torch.linalg.solve(Rxx_bR + RIDGE_LAMBDA * I, Rxy_bR)
+        
+    auc_b = roc_auc_score(labels, scores_b)
     
-    return subj_name, auc_o, auc_h, auc_s
+    return subj_name, auc_o, auc_h, auc_b
 
 def main():
     mp.set_start_method('spawn', force=True)
     
     print("=======================================================")
-    print(" PHASE 151b: SOFT PROBABILISTIC ADAPTIVE TRACKER")
+    print(" PHASE 151b: BAYESIAN DUAL-TRACKER")
     print("=======================================================\n")
     
     cache_dir = Path('/kaggle/working/multiband_cache')
@@ -238,7 +280,8 @@ def main():
     num_workers = min(mp.cpu_count(), num_gpus if num_gpus > 0 else mp.cpu_count())
     
     print(f"Softmax Temperature (Beta): {SOFTMAX_BETA}")
-    print(f"Forgetting Factor: {FORGETTING_FACTOR}\n")
+    print(f"Base Forgetting Factor: {FORGETTING_FACTOR_BASE}")
+    print("Architecture: Independent Left and Right Decoders with dynamic probabilistic freezing.\n")
     
     start_time = time.time()
     results = []
@@ -246,31 +289,31 @@ def main():
     with concurrent.futures.ProcessPoolExecutor(max_workers=num_workers) as executor:
         futures = {executor.submit(process_subject, cf, idx % max(1, num_gpus)): cf for idx, cf in enumerate(cache_files)}
         for future in concurrent.futures.as_completed(futures):
-            subj, auc_o, auc_h, auc_s = future.result()
-            results.append((subj, auc_o, auc_h, auc_s))
-            print(f"[{subj:3s}] Oracle: {auc_o:.3f} | Hard Decision: {auc_h:.3f} | Soft Prob: {auc_s:.3f}")
+            subj, auc_o, auc_h, auc_b = future.result()
+            results.append((subj, auc_o, auc_h, auc_b))
+            print(f"[{subj:3s}] Oracle Dual: {auc_o:.3f} | Hard Dual: {auc_h:.3f} | Bayes Dual: {auc_b:.3f}")
 
     print("\n=======================================================")
     print(" FINAL RESULTS")
     print("=======================================================")
-    print(f"{'Subj':<5} | {'Oracle':<8} | {'Hard':<8} | {'Soft':<8}")
+    print(f"{'Subj':<5} | {'Oracle':<8} | {'Hard':<8} | {'Bayes':<8}")
     print("-" * 37)
     
     results = sorted(results, key=lambda x: int(x[0][1:]))
-    for subj, auc_o, auc_h, auc_s in results:
-        print(f"{subj:<5} | {auc_o:<8.3f} | {auc_h:<8.3f} | {auc_s:<8.3f}")
+    for subj, auc_o, auc_h, auc_b in results:
+        print(f"{subj:<5} | {auc_o:<8.3f} | {auc_h:<8.3f} | {auc_b:<8.3f}")
         
     print("-" * 37)
     mean_o = np.mean([x[1] for x in results])
     mean_h = np.mean([x[2] for x in results])
-    mean_s = np.mean([x[3] for x in results])
-    print(f"{'MEAN':<5} | {mean_o:<8.3f} | {mean_h:<8.3f} | {mean_s:<8.3f}")
+    mean_b = np.mean([x[3] for x in results])
+    print(f"{'MEAN':<5} | {mean_o:<8.3f} | {mean_h:<8.3f} | {mean_b:<8.3f}")
     
-    if mean_s > mean_h + 0.05:
-        print("\n[MASSIVE SUCCESS] Soft Probabilistic Updating breaks the Positive Feedback Loop!")
-        print("We have successfully implemented a stable Unsupervised Adaptive Tracker.")
+    if mean_b > mean_h + 0.05:
+        print("\n[MASSIVE SUCCESS] Bayesian Dual-Tracker breaks the Positive Feedback Loop!")
+        print("We have successfully implemented a mathematically sound Unsupervised Adaptive Tracker.")
     else:
-        print("\n[FAILURE] Soft Updating is insufficient to break the collapse.")
+        print("\n[FAILURE] The dual-hypothesis tracker is still insufficient to break the collapse.")
 
 if __name__ == '__main__':
     main()
