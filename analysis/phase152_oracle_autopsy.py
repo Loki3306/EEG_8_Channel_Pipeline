@@ -3,7 +3,6 @@ import time
 import numpy as np
 import torch
 from pathlib import Path
-from sklearn.metrics import roc_auc_score
 from sklearn.decomposition import PCA
 from scipy import signal
 import multiprocessing as mp
@@ -37,14 +36,24 @@ def create_toeplitz_features_pt(eeg, max_lag_samples):
         X[:, tau*C : (tau+1)*C] = eeg[:, tau : tau+T_eff].T
     return X
 
-def batch_pearsonr_pt(x, y):
-    x_mean = x - x.mean(dim=0, keepdim=True)
-    y_mean = y - y.mean(dim=0, keepdim=True)
-    num = (x_mean * y_mean).sum(dim=0)
-    den = torch.sqrt((x_mean**2).sum(dim=0) * (y_mean**2).sum(dim=0))
-    return num / (den + 1e-8)
+def compute_participation_ratio(M):
+    """
+    Computes the Participation Ratio (intrinsic dimensionality) from a matrix M.
+    PR = (sum(eigenvalues))^2 / sum(eigenvalues^2)
+    """
+    pca = PCA()
+    pca.fit(M)
+    eigenvalues = pca.explained_variance_
+    pr = (np.sum(eigenvalues))**2 / np.sum(eigenvalues**2)
+    return pr, pca.explained_variance_ratio_
 
-def prepare_subject_windows(cache_file, device):
+def cosine_distance(W_t, W_prev):
+    """Computes 1 - cosine_similarity"""
+    num = np.dot(W_t, W_prev)
+    den = np.linalg.norm(W_t) * np.linalg.norm(W_prev)
+    return 1.0 - (num / (den + 1e-8))
+
+def prepare_subject_windows_continuous(cache_file, device):
     cached = torch.load(cache_file, map_location='cpu', weights_only=False)['raw']
     windows = []
     
@@ -70,7 +79,6 @@ def prepare_subject_windows(cache_file, device):
         env_l = torch.tensor(env_l_f[0], dtype=torch.float32, device=device)
         env_r = torch.tensor(env_r_f[0], dtype=torch.float32, device=device)
         
-        T = eeg.shape[1]
         X_trial = create_toeplitz_features_pt(eeg, MAX_LAG_SAMPLES)
         T_eff = X_trial.shape[0]
         
@@ -78,50 +86,49 @@ def prepare_subject_windows(cache_file, device):
         Y_r_eff = env_r[:T_eff]
         
         sp = tr['meta']['switch_points']
-        boundaries = [0] + [idx for spk, idx in sp]
-        boundaries = sorted(set(boundaries))
-        if boundaries[-1] != T: boundaries.append(T)
+        switch_indices = [idx for spk, idx in sp]
+        
+        # Determine continuous labels
+        current_spk = 'L'
+        sp_idx = 0
+        labels_eff = np.zeros(T_eff, dtype=int)
+        for t in range(T_eff):
+            if sp_idx < len(sp) and t >= sp[sp_idx][1]:
+                current_spk = sp[sp_idx][0]
+                sp_idx += 1
+            labels_eff[t] = 1 if current_spk == 'L' else 0
             
-        for i in range(len(boundaries) - 1):
-            start_idx = boundaries[i]
-            end_idx = boundaries[i+1]
+        # Extract continuous windows
+        for seq_start in range(0, T_eff - SEQ_SAMPLES + 1, SEQ_HOP):
+            seq_end = seq_start + SEQ_SAMPLES
+            X_win = X_trial[seq_start:seq_end]
+            Y_L_win = Y_l_eff[seq_start:seq_end]
+            Y_R_win = Y_r_eff[seq_start:seq_end]
             
-            current_spk = 'L'
-            for spk, idx in sp:
-                if idx <= start_idx: current_spk = spk
-                else: break
-                
-            safe_start = start_idx + int(1.5 * SR)
-            safe_end = end_idx
+            # The label is the majority label in this window
+            win_labels = labels_eff[seq_start:seq_end]
+            label = 1 if np.mean(win_labels) >= 0.5 else 0
             
-            first_win_in_block = True
-            if safe_end - safe_start >= SEQ_SAMPLES:
-                for seq_start in range(safe_start, safe_end - SEQ_SAMPLES + 1, SEQ_HOP):
-                    if seq_start + SEQ_SAMPLES <= T_eff:
-                        X_win = X_trial[seq_start:seq_start + SEQ_SAMPLES]
-                        Y_L_win = Y_l_eff[seq_start:seq_start + SEQ_SAMPLES]
-                        Y_R_win = Y_r_eff[seq_start:seq_start + SEQ_SAMPLES]
-                        label = 1 if current_spk == 'L' else 0
-                        
-                        is_switch = first_win_in_block and (i > 0) # True for the first window after a real switch
-                        
-                        windows.append({
-                            'X': X_win,
-                            'Y_L': Y_L_win,
-                            'Y_R': Y_R_win,
-                            'label': label,
-                            'is_switch': is_switch
-                        })
-                        first_win_in_block = False
+            # Check if any switch point falls inside this window
+            has_switch = any(seq_start <= s < seq_end for s in switch_indices)
+            
+            windows.append({
+                'X': X_win,
+                'Y_L': Y_L_win,
+                'Y_R': Y_R_win,
+                'label': label,
+                'has_switch': has_switch
+            })
+            
     return windows
 
 def process_subject(cache_file, device_id):
     device = torch.device(f'cuda:{device_id}' if torch.cuda.is_available() else 'cpu')
     subj_name = cache_file.stem.split('_')[0]
     
-    windows = prepare_subject_windows(cache_file, device)
-    if len(windows) < 200:
-        return subj_name, None, None, None
+    windows = prepare_subject_windows_continuous(cache_file, device)
+    if len(windows) < 400:
+        return subj_name, None, None, None, None
         
     CALIB_WINDOWS = 240
     calib_set = windows[:CALIB_WINDOWS]
@@ -145,58 +152,92 @@ def process_subject(cache_file, device_id):
     W_0 = torch.linalg.solve(Rxx_calib + RIDGE_LAMBDA * I, Rxy_calib)
     
     # ---------------------------------------------------------
-    # 2. ORACLE TRACKER & FORENSIC COLLECTION
+    # 2. THE ORACLE AUTOPSY (REAL LABELS)
     # ---------------------------------------------------------
-    Rxx = Rxx_calib.clone()
-    Rxy = Rxy_calib.clone()
-    W = W_0.clone()
+    Rxx_real = Rxx_calib.clone()
+    Rxy_real = Rxy_calib.clone()
+    W_real = W_0.clone()
     
-    W_history = []
-    switch_indices = []
+    M_real = []
+    real_switch_indices = []
     
     for idx, w in enumerate(track_set):
-        if w['is_switch']:
-            switch_indices.append(idx)
+        if w['has_switch']:
+            real_switch_indices.append(idx)
             
-        W_history.append(W.cpu().numpy())
+        M_real.append(W_real.cpu().numpy())
         
-        # Oracle Update
+        # Oracle Update (Real Label)
         Y_true = w['Y_L'] if w['label'] == 1 else w['Y_R']
-        Rxx = FORGETTING_FACTOR * Rxx + w['X'].T @ w['X']
-        Rxy = FORGETTING_FACTOR * Rxy + w['X'].T @ Y_true
-        W = torch.linalg.solve(Rxx + RIDGE_LAMBDA * I, Rxy)
+        Rxx_real = FORGETTING_FACTOR * Rxx_real + w['X'].T @ w['X']
+        Rxy_real = FORGETTING_FACTOR * Rxy_real + w['X'].T @ Y_true
+        W_real = torch.linalg.solve(Rxx_real + RIDGE_LAMBDA * I, Rxy_real)
         
-    M = np.array(W_history) # Shape: (T, F)
+    M_real = np.array(M_real)
     
     # ---------------------------------------------------------
-    # ANALYSIS A: SVD MANIFOLD (PCA)
+    # 3. THE "FAKE SWITCH" CONTROL (SHUFFLED LABELS)
     # ---------------------------------------------------------
-    pca = PCA()
-    pca.fit(M)
-    variance_explained = np.cumsum(pca.explained_variance_ratio_)
+    # Create a synthetic label sequence by circularly shifting the real labels
+    # by exactly half the track_set length.
+    SHIFT = len(track_set) // 2
+    real_labels = [w['label'] for w in track_set]
+    fake_labels = real_labels[SHIFT:] + real_labels[:SHIFT]
     
-    # ---------------------------------------------------------
-    # ANALYSIS B: DECODER VELOCITY AROUND SWITCHES
-    # ---------------------------------------------------------
-    # Compute velocity: || W_t - W_{t-1} ||_2
-    diffs = np.diff(M, axis=0)
-    velocities = np.linalg.norm(diffs, axis=1) # Length: T-1
-    # Pad first element to make it length T
-    velocities = np.insert(velocities, 0, velocities[0])
-    
-    WINDOW_SIZE = 20 # 20 windows before, 20 after
-    switch_trajectories = []
-    for s_idx in switch_indices:
-        if s_idx - WINDOW_SIZE >= 0 and s_idx + WINDOW_SIZE < len(velocities):
-            switch_trajectories.append(velocities[s_idx - WINDOW_SIZE : s_idx + WINDOW_SIZE + 1])
+    # We define fake switches as points where fake_labels changes
+    fake_switch_indices = []
+    for idx in range(1, len(fake_labels)):
+        if fake_labels[idx] != fake_labels[idx-1]:
+            fake_switch_indices.append(idx)
             
-    return subj_name, variance_explained, switch_trajectories, M
+    Rxx_fake = Rxx_calib.clone()
+    Rxy_fake = Rxy_calib.clone()
+    W_fake = W_0.clone()
+    
+    M_fake = []
+    
+    for idx, (w, fake_label) in enumerate(zip(track_set, fake_labels)):
+        M_fake.append(W_fake.cpu().numpy())
+        
+        # Oracle Update (Fake Label)
+        Y_true = w['Y_L'] if fake_label == 1 else w['Y_R']
+        Rxx_fake = FORGETTING_FACTOR * Rxx_fake + w['X'].T @ w['X']
+        Rxy_fake = FORGETTING_FACTOR * Rxy_fake + w['X'].T @ Y_true
+        W_fake = torch.linalg.solve(Rxx_fake + RIDGE_LAMBDA * I, Rxy_fake)
+        
+    M_fake = np.array(M_fake)
+    
+    # ---------------------------------------------------------
+    # ANALYSIS A: PARTICIPATION RATIO
+    # ---------------------------------------------------------
+    pr_real, var_ratio = compute_participation_ratio(M_real)
+    
+    # ---------------------------------------------------------
+    # ANALYSIS B: DECODER ROTATION (COSINE DISTANCE)
+    # ---------------------------------------------------------
+    def extract_trajectories(M, switch_indices):
+        cos_dists = [0.0]
+        for t in range(1, len(M)):
+            cos_dists.append(cosine_distance(M[t], M[t-1]))
+        cos_dists = np.array(cos_dists)
+        
+        WINDOW_SIZE = 40 # 40 windows before, 40 after (spanning 20s left, 20s right)
+        trajectories = []
+        for s_idx in switch_indices:
+            if s_idx - WINDOW_SIZE >= 0 and s_idx + WINDOW_SIZE < len(cos_dists):
+                trajectories.append(cos_dists[s_idx - WINDOW_SIZE : s_idx + WINDOW_SIZE + 1])
+        return trajectories
+        
+    real_trajectories = extract_trajectories(M_real, real_switch_indices)
+    fake_trajectories = extract_trajectories(M_fake, fake_switch_indices)
+            
+    return subj_name, pr_real, real_trajectories, fake_trajectories, var_ratio
 
 def main():
     mp.set_start_method('spawn', force=True)
     
     print("=======================================================")
-    print(" PHASE 152: THE ORACLE AUTOPSY")
+    print(" PHASE 152: THE RIGOROUS ORACLE AUTOPSY")
     print("=======================================================\n")
     
     cache_dir = Path('/kaggle/working/multiband_cache')
@@ -215,83 +256,90 @@ def main():
     num_gpus = torch.cuda.device_count()
     num_workers = min(mp.cpu_count(), num_gpus if num_gpus > 0 else mp.cpu_count())
     
-    start_time = time.time()
-    
-    global_variances = []
-    all_switch_trajectories = []
+    global_prs = []
+    global_vars = []
+    all_real_trajectories = []
+    all_fake_trajectories = []
     
     with concurrent.futures.ProcessPoolExecutor(max_workers=num_workers) as executor:
         futures = {executor.submit(process_subject, cf, idx % max(1, num_gpus)): cf for idx, cf in enumerate(cache_files)}
         for future in concurrent.futures.as_completed(futures):
-            subj, var_expl, sw_traj, M = future.result()
-            if var_expl is not None:
-                global_variances.append(var_expl)
-                all_switch_trajectories.extend(sw_traj)
+            subj, pr, real_traj, fake_traj, var_ratio = future.result()
+            if pr is not None:
+                global_prs.append(pr)
+                global_vars.append(var_ratio)
+                all_real_trajectories.extend(real_traj)
+                all_fake_trajectories.extend(fake_traj)
                 
-                # Print individual PCA stats
-                print(f"[{subj:3s}] Variance Explained - 1 PC: {var_expl[0]*100:4.1f}% | 3 PCs: {var_expl[2]*100:4.1f}% | 10 PCs: {var_expl[9]*100:4.1f}%")
+                print(f"[{subj:3s}] Participation Ratio: {pr:5.1f} | PC1+PC2 Var: {(var_ratio[0]+var_ratio[1])*100:4.1f}%")
 
     print("\n=======================================================")
     print(" GLOBAL MANIFOLD DIMENSIONALITY")
     print("=======================================================")
-    # Pad variances with 1.0s if different lengths to average them
-    max_len = max([len(v) for v in global_variances])
-    padded_variances = np.array([np.pad(v, (0, max_len - len(v)), constant_values=1.0) for v in global_variances])
-    mean_variances = np.mean(padded_variances, axis=0) * 100
+    mean_pr = np.mean(global_prs)
+    print(f"Mean Participation Ratio: {mean_pr:.2f} Dimensions (out of 408)")
     
-    print(f"PC 1 : {mean_variances[0]:5.1f}%")
-    print(f"PC 2 : {mean_variances[1]:5.1f}%")
-    print(f"PC 3 : {mean_variances[2]:5.1f}%")
-    print(f"PC 5 : {mean_variances[4]:5.1f}%")
-    print(f"PC 10: {mean_variances[9]:5.1f}%")
-    print(f"PC 20: {mean_variances[19]:5.1f}%")
-    
-    if mean_variances[2] > 90.0:
-        print("\n[MASSIVE DISCOVERY] The Oracle Decoder lives on a tiny < 3D manifold!")
-        print("We do not need 408 weights. We just need to track 3 parameters.")
+    if mean_pr < 10.0:
+        print("\n[MASSIVE DISCOVERY] The Oracle Decoder lives on a tiny, low-dimensional manifold!")
+        print(f"It effectively uses only {mean_pr:.1f} degrees of freedom out of 408.")
     else:
-        print("\n[OBSERVATION] The Oracle requires many degrees of freedom to track the environment.")
+        print("\n[OBSERVATION] The Oracle intrinsically uses a large number of degrees of freedom.")
 
     print("\n=======================================================")
-    print(" DECODER VELOCITY DYNAMICS")
+    print(" DECODER ROTATION DYNAMICS (REAL VS FAKE)")
     print("=======================================================")
     
     os.makedirs('/kaggle/working/plots', exist_ok=True)
     
-    if len(all_switch_trajectories) > 0:
-        trajs = np.array(all_switch_trajectories) # (N, 41)
-        mean_traj = np.mean(trajs, axis=0)
-        std_traj = np.std(trajs, axis=0)
+    if len(all_real_trajectories) > 0 and len(all_fake_trajectories) > 0:
+        real_trajs = np.array(all_real_trajectories) # (N, 81)
+        fake_trajs = np.array(all_fake_trajectories) # (N, 81)
         
-        x_axis = np.arange(-20, 21) * 0.5 # Windows to seconds (approx, 0.5s hop)
+        mean_real = np.mean(real_trajs, axis=0)
+        std_real = np.std(real_trajs, axis=0)
         
-        plt.figure(figsize=(10, 6))
-        plt.plot(x_axis, mean_traj, 'b-', linewidth=2, label='Mean Decoder Velocity')
-        plt.fill_between(x_axis, mean_traj - std_traj*0.5, mean_traj + std_traj*0.5, color='b', alpha=0.2)
-        plt.axvline(x=0, color='r', linestyle='--', linewidth=2, label='True Attention Switch')
+        mean_fake = np.mean(fake_trajs, axis=0)
+        std_fake = np.std(fake_trajs, axis=0)
+        
+        x_axis = np.arange(-40, 41) * 0.5 # Windows to seconds (approx, 0.5s hop)
+        
+        plt.figure(figsize=(12, 6))
+        
+        plt.plot(x_axis, mean_fake, 'r--', linewidth=2, label='FAKE Switch (Control)')
+        plt.fill_between(x_axis, mean_fake - std_fake*0.2, mean_fake + std_fake*0.2, color='r', alpha=0.1)
+        
+        plt.plot(x_axis, mean_real, 'b-', linewidth=2, label='REAL Switch (Biology)')
+        plt.fill_between(x_axis, mean_real - std_real*0.2, mean_real + std_real*0.2, color='b', alpha=0.2)
+        
+        plt.axvline(x=0, color='k', linestyle=':', linewidth=2, label='Switch Event')
+        
         plt.xlabel("Time relative to switch (seconds)")
-        plt.ylabel("Decoder Velocity || W_t - W_{t-1} ||_2")
-        plt.title("Oracle Decoder Velocity Around Attention Switches")
+        plt.ylabel("Decoder Rotation (1 - Cosine Similarity)")
+        plt.title("Oracle Decoder Rotation: Biology vs Update Rule")
         plt.legend()
         plt.grid(True)
         
-        plot_path = '/kaggle/working/plots/phase152_decoder_velocity.png'
+        plot_path = '/kaggle/working/plots/phase152_decoder_rotation.png'
         plt.savefig(plot_path, dpi=300, bbox_inches='tight')
         plt.close()
-        print(f"Saved Decoder Velocity plot to: {plot_path}")
+        print(f"Saved Decoder Rotation plot to: {plot_path}")
         
-        # Determine if it's event-driven
-        pre_switch_vel = np.mean(mean_traj[:15])
-        switch_vel = np.mean(mean_traj[18:23])
-        if switch_vel > pre_switch_vel * 1.5:
-            print("\n[DISCOVERY] The Oracle experiences violent weight jumps exactly during attention switches.")
-            print("This proves the adaptation is EVENT-DRIVEN, not just tracking slow drift.")
+        # Determine if it's biology or the update rule
+        real_spike = np.max(mean_real[35:45]) - np.mean(mean_real[:20])
+        fake_spike = np.max(mean_fake[35:45]) - np.mean(mean_fake[:20])
+        
+        print(f"Real Spike Magnitude: {real_spike:.6f}")
+        print(f"Fake Spike Magnitude: {fake_spike:.6f}")
+        
+        if real_spike > fake_spike * 1.5:
+            print("\n[DISCOVERY] The Oracle rotates significantly more during REAL switches than FAKE switches.")
+            print("This proves we are capturing genuine Neural Spatial Geometry rotation!")
         else:
-            print("\n[DISCOVERY] The Oracle velocity is smooth and independent of attention switches.")
-            print("This proves the adaptation is primarily tracking BACKGROUND DRIFT, not the switches.")
+            print("\n[DISCOVERY] The Oracle rotates identically during FAKE and REAL switches.")
+            print("This proves the rotation is just an artifact of the supervised mathematical update rule.")
             
     else:
-        print("No switch trajectories found.")
+        print("Not enough switch trajectories found.")
 
 if __name__ == '__main__':
     main()
