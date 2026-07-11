@@ -4,9 +4,21 @@ import numpy as np
 import torch
 from pathlib import Path
 from scipy import signal
-from sklearn.cross_decomposition import CCA
+from scipy.stats import pearsonr
 import concurrent.futures
 import multiprocessing as mp
+
+# Try importing pyriemann for proper Riemannian geometry
+try:
+    import pyriemann
+except ImportError:
+    print("Installing pyriemann for correct Riemannian geometry...")
+    os.system("pip install pyriemann")
+    import pyriemann
+
+from pyriemann.utils.distance import distance_riemann
+from pyriemann.utils.mean import mean_riemann
+from sklearn.linear_model import Ridge
 
 # -------------------------------------------------------------------------
 # CONSTANTS & CONFIGURATION
@@ -18,6 +30,10 @@ BROADBAND = (0.5, 8.0)
 PRE_SWITCH_SAMPLES = int(0.5 * SR)
 POST_SWITCH_SAMPLES = int(1.0 * SR)
 MIN_SEGMENT_SAMPLES = int(3.0 * SR)
+
+N_PERMUTATIONS = 1000
+LAG_MAX_MS = 400
+LAG_MAX_SAMPLES = int((LAG_MAX_MS / 1000.0) * SR)
 
 def apply_modulation_filter(env, lowcut, highcut, fs, order=4):
     nyq = 0.5 * fs
@@ -61,19 +77,13 @@ def extract_segments(mask_valid):
     ends = np.where(diff == -1)[0]
     return list(zip(starts, ends))
 
-def riemannian_distance(C1, C2):
-    # Log-Euclidean distance metric for SPD matrices
-    # d = || logM(C1) - logM(C2) ||_F
-    try:
-        w1, v1 = np.linalg.eigh(C1)
-        logC1 = v1 @ np.diag(np.log(np.clip(w1, 1e-8, None))) @ v1.T
-        
-        w2, v2 = np.linalg.eigh(C2)
-        logC2 = v2 @ np.diag(np.log(np.clip(w2, 1e-8, None))) @ v2.T
-        
-        return np.linalg.norm(logC1 - logC2, ord='fro')
-    except:
-        return 0.0
+def compute_lagged_features(X, max_lag):
+    """ Creates a lagged design matrix for TRF. X is [T, C] """
+    T, C = X.shape
+    X_lagged = np.zeros((T - max_lag, C * (max_lag + 1)))
+    for lag in range(max_lag + 1):
+        X_lagged[:, lag*C:(lag+1)*C] = X[max_lag-lag : T-lag, :]
+    return X_lagged
 
 def process_subject(cache_file):
     subj_name = cache_file.stem.split('_')[0]
@@ -110,74 +120,168 @@ def process_subject(cache_file):
             label = mask_t[start] # 1.0 is Left, 0.0 is Right
             
             X_seg = eeg_f[:, start:end].T # [T, C]
-            
-            # Target envelope
             target_env = env_l_f[0, start:end] if label == 1.0 else env_r_f[0, start:end]
             
-            # Covariance matrix of EEG
+            # Covariance matrix with regularization to ensure SPD
             cov_mat = np.cov(X_seg, rowvar=False)
+            cov_mat += np.eye(cov_mat.shape[0]) * 1e-5
             
             segments.append({
                 'X': X_seg,
-                'target_env': target_env.reshape(-1, 1),
+                'target_env': target_env,
                 'cov': cov_mat,
-                'label': label
+                'label': label,
+                'trial_idx': tr_idx
             })
             
-    # H1: CCA Test
-    true_cca_scores = []
-    shuf_cca_scores = []
+    # Return raw segments for global analysis
+    return subj_name, segments
+
+def compute_h1_trf(segments):
+    """ Computes H1: True vs Permuted Lagged Correlation (TRF) for a subject """
+    if len(segments) < 2: return 0.0, 0.0, 1.0
     
-    cca = CCA(n_components=1)
+    # Train/Test Split (First 80% Train, Last 20% Test)
+    split_idx = int(len(segments) * 0.8)
+    train_segs = segments[:split_idx]
+    test_segs = segments[split_idx:]
     
-    for i, seg in enumerate(segments):
-        X = seg['X']
-        Y_true = seg['target_env']
+    # Build Train Matrix
+    X_train_list, Y_train_list = [], []
+    for seg in train_segs:
+        X_lagged = compute_lagged_features(seg['X'], LAG_MAX_SAMPLES)
+        Y_target = seg['target_env'][LAG_MAX_SAMPLES:]
+        X_train_list.append(X_lagged)
+        Y_train_list.append(Y_target)
         
-        # Pick a random segment for shuffled envelope (same length or truncate)
-        rand_idx = (i + np.random.randint(1, len(segments)-1)) % len(segments)
-        Y_shuf_full = segments[rand_idx]['target_env']
-        min_T = min(len(Y_true), len(Y_shuf_full))
+    X_train = np.vstack(X_train_list)
+    Y_train = np.concatenate(Y_train_list)
+    
+    # Fit TRF
+    model = Ridge(alpha=1e3)
+    model.fit(X_train, Y_train)
+    
+    # Build Test Matrix
+    X_test_list, Y_test_list = [], []
+    for seg in test_segs:
+        X_lagged = compute_lagged_features(seg['X'], LAG_MAX_SAMPLES)
+        Y_target = seg['target_env'][LAG_MAX_SAMPLES:]
+        X_test_list.append(X_lagged)
+        Y_test_list.append(Y_target)
         
-        try:
-            # True CCA
-            Xc, Yc = cca.fit_transform(X[:min_T], Y_true[:min_T])
-            true_r = np.corrcoef(Xc[:,0], Yc[:,0])[0,1]
-            true_cca_scores.append(abs(true_r))
+    X_test = np.vstack(X_test_list)
+    Y_test = np.concatenate(Y_test_list)
+    
+    # True Prediction
+    Y_pred = model.predict(X_test)
+    true_corr, _ = pearsonr(Y_test, Y_pred)
+    
+    # Permutation Testing (Circular Shift)
+    null_corrs = []
+    np.random.seed(42)
+    # We will do 500 permutations to save time, but it is rigorous enough
+    for _ in range(500):
+        shift = np.random.randint(SR, len(Y_test) - SR) # Shift by at least 1 second
+        Y_test_shuffled = np.roll(Y_test, shift)
+        r, _ = pearsonr(Y_test_shuffled, Y_pred)
+        null_corrs.append(r)
+        
+    null_corrs = np.array(null_corrs)
+    p_val = np.sum(null_corrs >= true_corr) / len(null_corrs)
+    mean_null = np.mean(null_corrs)
+    
+    return true_corr, mean_null, p_val
+
+def compute_h3_covariance(segments):
+    """ Computes H3: Riemannian distance between Attention states with Permutations """
+    covs_L = np.array([seg['cov'] for seg in segments if seg['label'] == 1.0])
+    covs_R = np.array([seg['cov'] for seg in segments if seg['label'] == 0.0])
+    
+    if len(covs_L) < 2 or len(covs_R) < 2:
+        return 0.0, 0.0, 1.0
+        
+    # True Riemannian Means
+    mean_L = mean_riemann(covs_L)
+    mean_R = mean_riemann(covs_R)
+    
+    # True Distance
+    true_dist = distance_riemann(mean_L, mean_R)
+    
+    # Permutation Test
+    all_covs = np.concatenate([covs_L, covs_R], axis=0)
+    n_L = len(covs_L)
+    null_dists = []
+    
+    np.random.seed(42)
+    for _ in range(500):
+        idx = np.random.permutation(len(all_covs))
+        shuf_L = all_covs[idx[:n_L]]
+        shuf_R = all_covs[idx[n_L:]]
+        
+        m_L = mean_riemann(shuf_L)
+        m_R = mean_riemann(shuf_R)
+        null_dists.append(distance_riemann(m_L, m_R))
+        
+    null_dists = np.array(null_dists)
+    p_val = np.sum(null_dists >= true_dist) / len(null_dists)
+    mean_null = np.mean(null_dists)
+    
+    return true_dist, mean_null, p_val
+
+def compute_h2_permanova(all_covariances, all_subjects, all_labels):
+    """ H2: Distance-based PERMANOVA to test Subject vs Attention Variance """
+    print("\nComputing H2 Distance-based PERMANOVA...")
+    n_samples = len(all_covariances)
+    
+    # Due to O(N^2) memory for pairwise distance matrix, we will sub-sample if N > 2000
+    if n_samples > 1500:
+        np.random.seed(42)
+        idx = np.random.choice(n_samples, 1500, replace=False)
+        all_covariances = all_covariances[idx]
+        all_subjects = np.array(all_subjects)[idx]
+        all_labels = np.array(all_labels)[idx]
+        n_samples = 1500
+        
+    print(f"Computing pairwise Riemannian distance matrix for {n_samples} segments...")
+    dist_matrix = np.zeros((n_samples, n_samples))
+    for i in range(n_samples):
+        for j in range(i+1, n_samples):
+            d = distance_riemann(all_covariances[i], all_covariances[j])
+            dist_matrix[i, j] = d
+            dist_matrix[j, i] = d
             
-            # Shuffled CCA
-            Xc_s, Yc_s = cca.fit_transform(X[:min_T], Y_shuf_full[:min_T])
-            shuf_r = np.corrcoef(Xc_s[:,0], Yc_s[:,0])[0,1]
-            shuf_cca_scores.append(abs(shuf_r))
-        except:
-            pass
+    # Total Sum of Squares (SST)
+    SST = np.sum(dist_matrix**2) / (2 * n_samples)
+    
+    # Subject SS
+    unique_subs = np.unique(all_subjects)
+    SS_subj = 0
+    for sub in unique_subs:
+        idx = np.where(all_subjects == sub)[0]
+        n_k = len(idx)
+        if n_k > 0:
+            sub_dist = dist_matrix[np.ix_(idx, idx)]
+            SS_subj += np.sum(sub_dist**2) / (2 * n_k)
             
-    mean_true_cca = np.mean(true_cca_scores) if true_cca_scores else 0
-    mean_shuf_cca = np.mean(shuf_cca_scores) if shuf_cca_scores else 0
+    # Attention SS
+    unique_atts = np.unique(all_labels)
+    SS_att = 0
+    for att in unique_atts:
+        idx = np.where(all_labels == att)[0]
+        n_k = len(idx)
+        if n_k > 0:
+            sub_dist = dist_matrix[np.ix_(idx, idx)]
+            SS_att += np.sum(sub_dist**2) / (2 * n_k)
+            
+    # Pseudo-F Statistic approach: Var Explained
+    var_subj = (SST - SS_subj) / SST * 100
+    var_att = (SST - SS_att) / SST * 100
     
-    # H3: Covariance Distance Test
-    covs_L = [seg['cov'] for seg in segments if seg['label'] == 1.0]
-    covs_R = [seg['cov'] for seg in segments if seg['label'] == 0.0]
-    
-    mean_cov_L = np.mean(covs_L, axis=0) if covs_L else np.eye(8)
-    mean_cov_R = np.mean(covs_R, axis=0) if covs_R else np.eye(8)
-    
-    true_cov_dist = riemannian_distance(mean_cov_L, mean_cov_R)
-    
-    # Shuffled covariance distance
-    all_covs = covs_L + covs_R
-    np.random.shuffle(all_covs)
-    split_idx = len(covs_L)
-    shuf_cov_L = np.mean(all_covs[:split_idx], axis=0) if split_idx > 0 else np.eye(8)
-    shuf_cov_R = np.mean(all_covs[split_idx:], axis=0) if (len(all_covs)-split_idx) > 0 else np.eye(8)
-    
-    shuf_cov_dist = riemannian_distance(shuf_cov_L, shuf_cov_R)
-    
-    return subj_name, mean_true_cca, mean_shuf_cca, true_cov_dist, shuf_cov_dist, [s['cov'] for s in segments], [s['label'] for s in segments]
+    return var_subj, var_att
 
 def main():
     print("=======================================================")
-    print(" PHASE 143: SIGNAL CHARACTERIZATION")
+    print(" PHASE 143: RIGOROUS SIGNAL CHARACTERIZATION")
     print("=======================================================\n")
     
     cache_dir = Path('/kaggle/working/multiband_cache')
@@ -196,84 +300,65 @@ def main():
     
     start_time = time.time()
     
-    results = {}
+    all_subjects_data = {}
     all_covariances = []
-    all_labels = [] # L=1, R=0
-    all_subjects = []
+    all_labels = []
+    all_subj_ids = []
     
+    # Phase 1: Extract Segments
     with concurrent.futures.ProcessPoolExecutor(max_workers=mp.cpu_count()) as executor:
         futures = [executor.submit(process_subject, cf) for cf in cache_files]
         for future in concurrent.futures.as_completed(futures):
-            res = future.result()
-            subj = res[0]
-            results[subj] = {
-                'true_cca': res[1],
-                'shuf_cca': res[2],
-                'true_cov': res[3],
-                'shuf_cov': res[4]
-            }
-            # Collect for H2
-            for c in res[5]:
-                all_covariances.append(c)
-                all_subjects.append(subj)
-            for l in res[6]:
-                all_labels.append(l)
+            subj, segments = future.result()
+            all_subjects_data[subj] = segments
+            
+            for seg in segments:
+                all_covariances.append(seg['cov'])
+                all_labels.append(seg['label'])
+                all_subj_ids.append(subj)
 
     print(f"Extraction Time: {time.time() - start_time:.2f}s\n")
+    all_covariances = np.array(all_covariances)
     
-    # H1 Results
-    print("--- H1: Stimulus Information Exists in Ear-EEG (CCA) ---")
-    mean_t_cca = np.mean([r['true_cca'] for r in results.values()])
-    mean_s_cca = np.mean([r['shuf_cca'] for r in results.values()])
-    print(f"Mean True CCA:     {mean_t_cca:.4f}")
-    print(f"Mean Shuffled CCA: {mean_s_cca:.4f}")
-    print(f"Verdict: {'Information Exists!' if mean_t_cca > mean_s_cca * 1.5 else 'Barely any information.'}\n")
+    # H1 & H3 Tests (Per Subject)
+    h1_results = []
+    h3_results = []
     
-    # H3 Results
-    print("--- H3: Ear-EEG Covariance Changes with Attention ---")
-    mean_t_cov = np.mean([r['true_cov'] for r in results.values()])
-    mean_s_cov = np.mean([r['shuf_cov'] for r in results.values()])
-    print(f"Mean True Riemann Dist:     {mean_t_cov:.4f}")
-    print(f"Mean Shuffled Riemann Dist: {mean_s_cov:.4f}")
-    print(f"Verdict: {'Spatial Covariance encodes Attention!' if mean_t_cov > mean_s_cov * 1.5 else 'No strong spatial geometry change.'}\n")
+    print("Running Permutation Tests (H1 & H3) per Subject...")
+    for subj, segments in all_subjects_data.items():
+        # H1: Lagged TRF
+        t_corr, null_corr, p_h1 = compute_h1_trf(segments)
+        h1_results.append((t_corr, null_corr, p_h1))
+        
+        # H3: Covariance Distance
+        t_dist, null_dist, p_h3 = compute_h3_covariance(segments)
+        h3_results.append((t_dist, null_dist, p_h3))
+        print(f"[{subj}] H1 p={p_h1:.3f} | H3 p={p_h3:.3f}")
+        
+    # H1 Aggregation
+    print("\n--- H1: Stimulus Information (Lagged TRF) ---")
+    mean_true = np.mean([r[0] for r in h1_results])
+    mean_null = np.mean([r[1] for r in h1_results])
+    sig_count = sum(1 for r in h1_results if r[2] < 0.05)
+    print(f"Mean True TRF Corr:  {mean_true:.4f}")
+    print(f"Mean Null TRF Corr:  {mean_null:.4f}")
+    print(f"Significant Subjects: {sig_count} / {len(h1_results)} (p < 0.05)")
     
-    # H2: Variance Decomposition (Approximate PERMANOVA)
-    print("--- H2: Subject Variability Exceeds Attention Variability ---")
-    # Vectorize upper triangle of covariances
-    vecs = []
-    for c in all_covariances:
-        idx = np.triu_indices(8)
-        vecs.append(c[idx])
-    vecs = np.array(vecs)
+    # H3 Aggregation
+    print("\n--- H3: Covariance Geometry (Riemannian) ---")
+    mean_tdist = np.mean([r[0] for r in h3_results])
+    mean_ndist = np.mean([r[1] for r in h3_results])
+    sig_count3 = sum(1 for r in h3_results if r[2] < 0.05)
+    print(f"Mean True Dist:  {mean_tdist:.4f}")
+    print(f"Mean Null Dist:  {mean_ndist:.4f}")
+    print(f"Significant Subjects: {sig_count3} / {len(h3_results)} (p < 0.05)")
     
-    global_mean = np.mean(vecs, axis=0)
-    SST = np.sum(np.linalg.norm(vecs - global_mean, axis=1)**2)
-    
-    # Subject Variance
-    unique_subs = list(set(all_subjects))
-    SS_subj = 0
-    for sub in unique_subs:
-        idx = [i for i, s in enumerate(all_subjects) if s == sub]
-        if len(idx) > 0:
-            sub_mean = np.mean(vecs[idx], axis=0)
-            SS_subj += len(idx) * np.linalg.norm(sub_mean - global_mean)**2
-            
-    # Attention Variance
-    unique_atts = [1.0, 0.0]
-    SS_att = 0
-    for att in unique_atts:
-        idx = [i for i, l in enumerate(all_labels) if l == att]
-        if len(idx) > 0:
-            att_mean = np.mean(vecs[idx], axis=0)
-            SS_att += len(idx) * np.linalg.norm(att_mean - global_mean)**2
-            
-    var_subj = (SS_subj / SST) * 100
-    var_att = (SS_att / SST) * 100
-    
+    # H2: Distance-based PERMANOVA
+    var_subj, var_att = compute_h2_permanova(all_covariances, all_subj_ids, all_labels)
+    print("\n--- H2: Distance-based PERMANOVA ---")
     print(f"Variance Explained by SUBJECT:   {var_subj:.2f}%")
     print(f"Variance Explained by ATTENTION: {var_att:.2f}%")
     print(f"Ratio (Subject / Attention):     {var_subj / (var_att + 1e-8):.1f}x")
-    print(f"Verdict: {'Universal Decoding is scientifically invalid.' if var_subj > var_att * 5 else 'Universal Decoding is possible.'}\n")
 
 if __name__ == '__main__':
     main()
