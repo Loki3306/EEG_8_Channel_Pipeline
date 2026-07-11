@@ -13,9 +13,24 @@ except ImportError:
     os.system("pip install pyriemann")
     import pyriemann
 
-from pyriemann.utils.distance import distance_riemann
-from pyriemann.utils.mean import mean_riemann
-from pyriemann.utils.variance import variance_riemann
+try:
+    # Older pyriemann versions
+    from pyriemann.utils.distance import distance_riemann
+    from pyriemann.utils.mean import mean_riemann
+except ImportError:
+    pass
+
+try:
+    # Newer pyriemann versions (>= 0.14.0)
+    from pyriemann.utils.distance import distance as distance_riemann
+    from pyriemann.utils.mean import mean_covariance as mean_riemann
+except ImportError:
+    pass
+
+# Custom variance function since it was removed
+def variance_riemann(covmats, Cref):
+    return np.mean([distance_riemann(C, Cref)**2 for C in covmats])
+
 from pyriemann.utils.tangentspace import tangent_space
 
 # -------------------------------------------------------------------------
