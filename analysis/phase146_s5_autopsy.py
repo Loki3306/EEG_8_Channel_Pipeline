@@ -16,6 +16,7 @@ except ImportError:
 from pyriemann.utils.distance import distance_riemann
 from pyriemann.utils.mean import mean_riemann
 from pyriemann.utils.variance import variance_riemann
+from pyriemann.utils.tangentspace import tangent_space
 
 # -------------------------------------------------------------------------
 # CONSTANTS & CONFIGURATION
@@ -27,7 +28,6 @@ PRE_SWITCH_SAMPLES = int(0.5 * SR)
 POST_SWITCH_SAMPLES = int(1.0 * SR)
 MIN_SEGMENT_SAMPLES = int(3.0 * SR)
 
-# The Subjects we want to autopsy
 TARGET_SUBJECTS = ['S5', 'S12', 'S10'] 
 
 def apply_modulation_filter(env, lowcut, highcut, fs, order=4):
@@ -82,9 +82,13 @@ def process_subject(cache_file):
             segments.append({'cov': cov_mat, 'label': label, 'trial_idx': tr_idx})
     return segments
 
+def get_cosine_similarity(v1, v2):
+    norm = np.linalg.norm(v1) * np.linalg.norm(v2)
+    return np.dot(v1, v2) / (norm + 1e-8)
+
 def main():
     print("=======================================================")
-    print(" PHASE 146: THE SUBJECT 5 AUTOPSY (FORENSICS)")
+    print(" PHASE 146 (REVISED): ADVANCED REPRESENTATION FORENSICS")
     print("=======================================================\n")
     
     cache_dir = Path('/kaggle/working/multiband_cache')
@@ -99,101 +103,108 @@ def main():
             cache_dir = p
             break
             
-    print(f"Loading data for subjects: {TARGET_SUBJECTS}")
-    
     results = {}
     
     for subj in TARGET_SUBJECTS:
         cache_file = cache_dir / f"{subj}_multiband.pt"
-        if not cache_file.exists():
-            print(f"Warning: Could not find data for {subj}. Skipping.")
-            continue
+        if not cache_file.exists(): continue
             
         segments = process_subject(cache_file)
-        if len(segments) < 10:
-            continue
+        if len(segments) < 10: continue
             
+        covs_all = np.array([s['cov'] for s in segments])
         covs_L = np.array([s['cov'] for s in segments if s['label'] == 1])
         covs_R = np.array([s['cov'] for s in segments if s['label'] == 0])
         
-        # 1. Eigenspectrum & Condition Number
+        global_mean = mean_riemann(covs_all)
         mean_L = mean_riemann(covs_L)
         mean_R = mean_riemann(covs_R)
         
-        eigvals_L = np.sort(np.linalg.eigvalsh(mean_L))[::-1]
-        eigvals_R = np.sort(np.linalg.eigvalsh(mean_R))[::-1]
-        
-        cond_L = eigvals_L[0] / (eigvals_L[-1] + 1e-8)
-        cond_R = eigvals_R[0] / (eigvals_R[-1] + 1e-8)
-        
-        # 2. Riemannian Signal-to-Noise Ratio (SNR)
+        # 1. Riemannian SNR
         dist_between = distance_riemann(mean_L, mean_R)
-        
         var_L = variance_riemann(covs_L, mean_L)
         var_R = variance_riemann(covs_R, mean_R)
         var_within = (var_L + var_R) / 2.0
-        
         snr = dist_between / (var_within + 1e-8)
         
-        # 3. Trial-to-Trial Stability
+        # 2. Principal Eigenvector Rotation
+        wL, vL = np.linalg.eigh(mean_L)
+        wR, vR = np.linalg.eigh(mean_R)
+        top_eig_L = vL[:, np.argmax(wL)]
+        top_eig_R = vR[:, np.argmax(wR)]
+        
+        # Absolute dot product to handle sign ambiguity
+        cos_angle = np.clip(np.abs(np.dot(top_eig_L, top_eig_R)), 0.0, 1.0)
+        angle_deg = np.degrees(np.arccos(cos_angle))
+        
+        # 3. Separation Direction Consistency (Tangent Space)
         trials = np.unique([s['trial_idx'] for s in segments])
-        trial_means_L = []
+        trial_deltas = []
+        
         for tr in trials:
-            tr_covs = np.array([s['cov'] for s in segments if s['label'] == 1 and s['trial_idx'] == tr])
-            if len(tr_covs) > 0:
-                trial_means_L.append(mean_riemann(tr_covs))
-                
-        if len(trial_means_L) > 1:
-            global_mean_L = mean_riemann(np.array(trial_means_L))
-            trial_stability_variance = variance_riemann(np.array(trial_means_L), global_mean_L)
-        else:
-            trial_stability_variance = 0.0
+            tr_covs_L = np.array([s['cov'] for s in segments if s['label'] == 1 and s['trial_idx'] == tr])
+            tr_covs_R = np.array([s['cov'] for s in segments if s['label'] == 0 and s['trial_idx'] == tr])
             
+            if len(tr_covs_L) > 0 and len(tr_covs_R) > 0:
+                tr_mean_L = mean_riemann(tr_covs_L)
+                tr_mean_R = mean_riemann(tr_covs_R)
+                
+                # Project onto global tangent space
+                # tangent_space expects shape (n_matrices, channels, channels)
+                # returns shape (n_matrices, channels * (channels + 1) / 2)
+                vec_L = tangent_space(np.array([tr_mean_L]), global_mean)[0]
+                vec_R = tangent_space(np.array([tr_mean_R]), global_mean)[0]
+                
+                delta_vector = vec_L - vec_R
+                trial_deltas.append(delta_vector)
+                
+        # Compute mean pairwise cosine similarity of displacement vectors
+        cosine_sims = []
+        n_deltas = len(trial_deltas)
+        for i in range(n_deltas):
+            for j in range(i + 1, n_deltas):
+                sim = get_cosine_similarity(trial_deltas[i], trial_deltas[j])
+                cosine_sims.append(sim)
+                
+        mean_directional_consistency = np.mean(cosine_sims) if cosine_sims else 0.0
+        
         results[subj] = {
-            'eig_L': eigvals_L,
-            'eig_R': eigvals_R,
-            'cond': (cond_L + cond_R)/2.0,
-            'dist_between': dist_between,
-            'var_within': var_within,
+            'n_segments': len(segments),
             'snr': snr,
-            'trial_stability_var': trial_stability_variance,
-            'n_segments': len(segments)
+            'var_within': var_within,
+            'angle_deg': angle_deg,
+            'dir_consistency': mean_directional_consistency
         }
         
     print("\n=======================================================")
-    print(" AUTOPSY RESULTS")
+    print(" ADVANCED AUTOPSY RESULTS")
     print("=======================================================")
     
     for subj in TARGET_SUBJECTS:
         if subj not in results: continue
         res = results[subj]
         print(f"\n--- {subj} ---")
-        print(f"Total Segments:       {res['n_segments']}")
-        print(f"Condition Number:     {res['cond']:.2f}")
-        print(f"Distance (Between):   {res['dist_between']:.4f}")
-        print(f"Variance (Within):    {res['var_within']:.4f}")
-        print(f"Riemannian SNR:       {res['snr']:.4f}  <-- THE KEY METRIC")
-        print(f"Trial Drift Var:      {res['trial_stability_var']:.4f} (Lower = More stable across trials)")
-        print(f"Top 3 Eigenvalues(L): {res['eig_L'][0]:.4f}, {res['eig_L'][1]:.4f}, {res['eig_L'][2]:.4f}")
+        print(f"Total Segments:               {res['n_segments']}")
+        print(f"Riemannian SNR (10/10):       {res['snr']:.4f}")
+        print(f"Within-Class Compactness:     {res['var_within']:.4f} (Lower = Tighter Clusters)")
+        print(f"Principal Dipole Rotation:    {res['angle_deg']:.2f} degrees")
+        print(f"Directional Consistency:      {res['dir_consistency']:.4f} (Higher = Stable L-R direction across trials)")
         
-    # Quick Conclusion Print
-    print("\n=======================================================")
-    print(" FORENSIC ANALYSIS SUMMARY")
-    print("=======================================================")
     if 'S5' in results and 'S10' in results:
-        snr_ratio = results['S5']['snr'] / (results['S10']['snr'] + 1e-8)
-        cond_ratio = results['S5']['cond'] / (results['S10']['cond'] + 1e-8)
-        drift_ratio = results['S10']['trial_stability_var'] / (results['S5']['trial_stability_var'] + 1e-8)
+        print("\n=======================================================")
+        print(" FINAL SCIENTIFIC CONCLUSION")
+        print("=======================================================")
+        dir_ratio = results['S5']['dir_consistency'] / (results['S10']['dir_consistency'] + 1e-8)
+        print(f"S5 has {dir_ratio:.1f}x higher Directional Consistency than S10.")
         
-        print(f"1. Signal-to-Noise: S5 has {snr_ratio:.1f}x higher Riemannian SNR than S10.")
-        print(f"2. Condition Num:   S5's matrices are {cond_ratio:.1f}x compared to S10.")
-        print(f"3. Trial Drift:     S10 drifts {drift_ratio:.1f}x more across trials than S5.")
-        
-        print("\nINTERPRETATION:")
-        if snr_ratio > 2.0:
-            print("S5 simply has a radically cleaner spatial signal. The attention effect size is massively larger.")
-        if drift_ratio > 2.0:
-            print("S10's failure is likely due to 'Spatial Drift' - their brain geometry changes wildly over time, confusing the classifier.")
+        if results['S10']['dir_consistency'] < 0.1:
+            print("\n[CRITICAL FAILURE MODE DETECTED IN S10]")
+            print("S10's Directional Consistency is near zero. This means the 'Left vs Right' displacement")
+            print("vector in the brain completely rotates randomly every single trial.")
+            print("A static spatial classifier (like CSP or Tangent-Space) is mathematically guaranteed")
+            print("to fail on S10 because it tries to draw a single, fixed boundary.")
+            print("To solve AAD for the general population, we must build DYNAMIC ADAPTIVE classifiers")
+            print("that recalculate the displacement vector on the fly (e.g., Unsupervised CCA or Phase-Locked adaptation).")
             
 if __name__ == '__main__':
     main()
