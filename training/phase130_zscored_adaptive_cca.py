@@ -160,8 +160,8 @@ def process_subject(cache_file, device_id):
     for t_idx in range(N_TRIALS):
         z_L, z_R, y_meta = process_trial_zscored(cached[t_idx], device)
         
-        # Predict Left if z_L > z_R
-        diff = z_L - z_R
+        # Predict Left if abs(z_L) > abs(z_R)
+        diff = abs(z_L) - abs(z_R)
         all_eval_diffs.append(diff)
         all_eval_labels.append(y_meta)
         
