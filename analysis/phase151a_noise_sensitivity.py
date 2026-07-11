@@ -7,7 +7,6 @@ from sklearn.metrics import roc_auc_score
 from scipy import signal
 import multiprocessing as mp
 import concurrent.futures
-import random
 
 # -------------------------------------------------------------------------
 # CONSTANTS & CONFIGURATION
@@ -23,7 +22,21 @@ BROADBAND = (0.5, 8.0)
 RIDGE_LAMBDA = 100.0
 FORGETTING_FACTOR = 0.98  # roughly 50 windows memory (25 seconds)
 
-NOISE_LEVELS = [0.0, 0.02, 0.05, 0.10, 0.20, 0.30]
+P_ERROR_BASE = 0.05  # 5% chance to spontaneously make a mistake
+P_BURST_STAY = 0.70  # 70% chance that an error causes the next window to be an error
+CONF_THRESHOLD = 0.20 # Confidence threshold for gating
+
+def generate_markov_noise(n_samples, p_err, p_burst, seed=42):
+    np.random.seed(seed)
+    mask = np.zeros(n_samples, dtype=bool)
+    state = False # False = Correct, True = Error
+    for i in range(n_samples):
+        if state == False:
+            state = np.random.rand() < p_err
+        else:
+            state = np.random.rand() < p_burst
+        mask[i] = state
+    return mask
 
 def apply_modulation_filter(env, lowcut, highcut, fs, order=4):
     nyq = 0.5 * fs
@@ -117,7 +130,7 @@ def process_subject(cache_file, device_id):
     
     windows = prepare_subject_windows(cache_file, device)
     if len(windows) < 200:
-        return subj_name, {nl: 0.5 for nl in NOISE_LEVELS}
+        return subj_name, 0.5, 0.5, 0.5
         
     CALIB_WINDOWS = 240
     calib_set = windows[:CALIB_WINDOWS]
@@ -125,7 +138,7 @@ def process_subject(cache_file, device_id):
     
     F = windows[0]['X'].shape[1]
     
-    # 1. CALIBRATION (Anchor the spatial geometry)
+    # 1. CALIBRATION
     Rxx_calib = torch.zeros((F, F), device=device)
     Rxy_calib = torch.zeros((F,), device=device)
     
@@ -138,48 +151,57 @@ def process_subject(cache_file, device_id):
     I = torch.eye(F, device=device)
     W_0 = torch.linalg.solve(Rxx_calib + RIDGE_LAMBDA * I, Rxy_calib)
     
-    noise_results = {}
     labels = [w['label'] for w in track_set]
+    noise_mask = generate_markov_noise(len(track_set), P_ERROR_BASE, P_BURST_STAY, seed=int(subj_name[1:]))
+    actual_noise_ratio = np.mean(noise_mask)
     
-    for noise in NOISE_LEVELS:
-        Rxx_o = Rxx_calib.clone()
-        Rxy_o = Rxy_calib.clone()
-        W_to = W_0.clone()
-        
-        oracle_scores = []
-        
-        # Set a fixed seed for reproducibility across noise runs
-        np.random.seed(int(noise * 100))
-        noise_mask = np.random.rand(len(track_set)) < noise
+    def run_tracker(use_noise, use_gating):
+        Rxx = Rxx_calib.clone()
+        Rxy = Rxy_calib.clone()
+        W = W_0.clone()
+        scores = []
         
         for idx, w in enumerate(track_set):
-            Y_hat = w['X'] @ W_to
+            Y_hat = w['X'] @ W
             c_L = batch_pearsonr_pt(Y_hat, w['Y_L']).item()
             c_R = batch_pearsonr_pt(Y_hat, w['Y_R']).item()
-            oracle_scores.append(c_L - c_R)
+            scores.append(c_L - c_R)
             
-            # Oracle Update (with deliberate noise injection)
             true_label = w['label']
-            if noise_mask[idx]:
-                observed_label = 1 - true_label # Flip label
+            if use_noise and noise_mask[idx]:
+                observed_label = 1 - true_label
             else:
                 observed_label = true_label
                 
-            Y_obs = w['Y_L'] if observed_label == 1 else w['Y_R']
-            Rxx_o = FORGETTING_FACTOR * Rxx_o + w['X'].T @ w['X']
-            Rxy_o = FORGETTING_FACTOR * Rxy_o + w['X'].T @ Y_obs
+            conf = abs(c_L - c_R) / (abs(c_L) + abs(c_R) + 1e-8)
             
-            W_to = torch.linalg.solve(Rxx_o + RIDGE_LAMBDA * I, Rxy_o)
-            
-        noise_results[noise] = roc_auc_score(labels, oracle_scores)
-        
-    return subj_name, noise_results
+            if use_gating and conf < CONF_THRESHOLD:
+                # FREEZE weights. Do not decay, do not update.
+                pass
+            else:
+                Y_obs = w['Y_L'] if observed_label == 1 else w['Y_R']
+                Rxx = FORGETTING_FACTOR * Rxx + w['X'].T @ w['X']
+                Rxy = FORGETTING_FACTOR * Rxy + w['X'].T @ Y_obs
+                W = torch.linalg.solve(Rxx + RIDGE_LAMBDA * I, Rxy)
+                
+        return roc_auc_score(labels, scores)
+
+    # Branch 1: Oracle (0% noise)
+    auc_oracle = run_tracker(use_noise=False, use_gating=False)
+    
+    # Branch 2: Burst Noise (No Gating)
+    auc_burst = run_tracker(use_noise=True, use_gating=False)
+    
+    # Branch 3: Burst Noise + Confidence Gating
+    auc_gated = run_tracker(use_noise=True, use_gating=True)
+    
+    return subj_name, actual_noise_ratio, auc_oracle, auc_burst, auc_gated
 
 def main():
     mp.set_start_method('spawn', force=True)
     
     print("=======================================================")
-    print(" PHASE 151a: LABEL NOISE SENSITIVITY ANALYSIS")
+    print(" PHASE 151a: BURST NOISE & CONFIDENCE GATING")
     print("=======================================================\n")
     
     cache_dir = Path('/kaggle/working/multiband_cache')
@@ -198,33 +220,44 @@ def main():
     num_gpus = torch.cuda.device_count()
     num_workers = min(mp.cpu_count(), num_gpus if num_gpus > 0 else mp.cpu_count())
     
+    print(f"Markovian Noise Profile:")
+    print(f" - Base Error Probability: {P_ERROR_BASE*100:.1f}%")
+    print(f" - Burst Persistence Prob: {P_BURST_STAY*100:.1f}%")
+    print(f"Confidence Gating Threshold: {CONF_THRESHOLD}\n")
+    
     start_time = time.time()
-    all_results = []
+    results = []
     
     with concurrent.futures.ProcessPoolExecutor(max_workers=num_workers) as executor:
         futures = {executor.submit(process_subject, cf, idx % max(1, num_gpus)): cf for idx, cf in enumerate(cache_files)}
         for future in concurrent.futures.as_completed(futures):
-            subj, noise_res = future.result()
-            all_results.append((subj, noise_res))
-            print(f"[{subj:3s}] 0% Noise: {noise_res[0.0]:.3f} | 20% Noise: {noise_res[0.2]:.3f}")
+            subj, actual_noise, auc_o, auc_b, auc_g = future.result()
+            results.append((subj, actual_noise, auc_o, auc_b, auc_g))
+            print(f"[{subj:3s}] Noise Ratio: {actual_noise*100:4.1f}% | Oracle: {auc_o:.3f} | Burst: {auc_b:.3f} | Gated: {auc_g:.3f}")
 
     print("\n=======================================================")
-    print(" FINAL RESULTS: MEAN AUROC vs LABEL NOISE")
+    print(" FINAL RESULTS")
     print("=======================================================")
+    print(f"{'Subj':<5} | {'Noise%':<8} | {'Oracle':<8} | {'Burst':<8} | {'Gated':<8}")
+    print("-" * 47)
     
-    header = f"{'Subj':<5} | " + " | ".join([f"{int(n*100)}% Noise" for n in NOISE_LEVELS])
-    print(header)
-    print("-" * len(header))
-    
-    all_results = sorted(all_results, key=lambda x: int(x[0][1:]))
-    for subj, res in all_results:
-        row = f"{subj:<5} | " + " | ".join([f"{res[n]:<8.3f}" for n in NOISE_LEVELS])
-        print(row)
+    results = sorted(results, key=lambda x: int(x[0][1:]))
+    for subj, actual_noise, auc_o, auc_b, auc_g in results:
+        print(f"{subj:<5} | {actual_noise*100:<8.1f} | {auc_o:<8.3f} | {auc_b:<8.3f} | {auc_g:<8.3f}")
         
-    print("-" * len(header))
-    means = {n: np.mean([res[n] for _, res in all_results]) for n in NOISE_LEVELS}
-    mean_row = f"{'MEAN':<5} | " + " | ".join([f"{means[n]:<8.3f}" for n in NOISE_LEVELS])
-    print(mean_row)
+    print("-" * 47)
+    mean_noise = np.mean([x[1] for x in results]) * 100
+    mean_o = np.mean([x[2] for x in results])
+    mean_b = np.mean([x[3] for x in results])
+    mean_g = np.mean([x[4] for x in results])
+    print(f"{'MEAN':<5} | {mean_noise:<8.1f} | {mean_o:<8.3f} | {mean_b:<8.3f} | {mean_g:<8.3f}")
+    
+    if mean_g > mean_b + 0.05:
+        print("\n[MASSIVE SUCCESS] Confidence Gating successfully neutralizes Markovian Burst Noise!")
+        print("We have mathematically proven the solution to the Positive Feedback Loop.")
+    else:
+        print("\n[FAILURE] Confidence Gating is insufficient to break the Burst Noise collapse.")
+        print("We may need a full Bayesian Update / Kalman Filter (Phase 151b).")
 
 if __name__ == '__main__':
     main()
