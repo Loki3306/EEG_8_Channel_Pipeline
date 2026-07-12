@@ -260,8 +260,8 @@ def main():
             
     cache_files = sorted(list(cache_dir.glob('*_multiband.pt')))
     num_gpus = torch.cuda.device_count()
-    # Limit max_workers to prevent OOM
-    num_workers = min(mp.cpu_count(), 2)
+    # Limit max_workers to exactly the number of GPUs to prevent OOM
+    num_workers = max(1, num_gpus)
     
     results = []
     with concurrent.futures.ProcessPoolExecutor(max_workers=num_workers) as executor:
