@@ -147,7 +147,7 @@ def run_bayesian_tracking(track_set, C_xx_calib, C_xy_calib, I, anchor_interval_
     total = 0
     
     windows_per_sec = 2 # 0.5s hop
-    interval_windows = int(anchor_interval_sec * windows_per_sec) if anchor_interval_sec else None
+    interval_windows = int(anchor_interval_sec * windows_per_sec) if anchor_interval_sec is not None else None
     
     for i, w in enumerate(track_set):
         # 1. Predict with current frozen W
