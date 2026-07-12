@@ -127,9 +127,8 @@ def run_tracking_simulation(track_set, Rxx_calib, Rxy_calib, I, anchor_interval_
     Rxx = Rxx_calib.clone()
     Rxy = Rxy_calib.clone()
     
-    # When jumping time, we decay memory slowly
-    # E.g. we want the past anchor to decay by 0.90
-    JUMP_FORGET = 0.90 
+    # When jumping time, we decay memory exactly by the base factor to the power of skipped windows
+    BASE_LAMBDA = 0.98
     
     F = Rxx.shape[0]
     W = torch.linalg.solve(Rxx + RIDGE_LAMBDA * I, Rxy)
@@ -152,7 +151,7 @@ def run_tracking_simulation(track_set, Rxx_calib, Rxy_calib, I, anchor_interval_
                 Y_true = w['Y_L'] if w['label'] == 1 else w['Y_R']
                 
                 # Update tracking matrices
-                forget_factor = 0.98 if interval_windows == 0 else JUMP_FORGET
+                forget_factor = BASE_LAMBDA if interval_windows == 0 else (BASE_LAMBDA ** interval_windows)
                 
                 Rxx = forget_factor * Rxx + X.T @ X
                 Rxy = forget_factor * Rxy + X.T @ Y_true
