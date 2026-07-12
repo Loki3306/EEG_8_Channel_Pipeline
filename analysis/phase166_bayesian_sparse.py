@@ -25,7 +25,7 @@ SEQ_SAMPLES = int(3.0 * SR)
 SEQ_HOP = int(0.5 * SR)
 
 BROADBAND = (0.5, 8.0)
-RIDGE_LAMBDA = 100.0
+RIDGE_LAMBDA = 2.0
 
 # Base parameters for initial calibration
 CALIB_MINUTES = 2.0
