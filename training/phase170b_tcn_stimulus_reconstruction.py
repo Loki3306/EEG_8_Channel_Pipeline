@@ -41,20 +41,18 @@ class TemporalBlock(nn.Module):
         super(TemporalBlock, self).__init__()
         self.conv1 = nn.Conv1d(n_inputs, n_outputs, kernel_size,
                                stride=stride, padding=padding, dilation=dilation)
-        self.chomp1 = Chomp1d(padding)
         self.bn1 = nn.BatchNorm1d(n_outputs)
         self.relu1 = nn.ReLU()
         self.dropout1 = nn.Dropout(dropout)
 
         self.conv2 = nn.Conv1d(n_outputs, n_outputs, kernel_size,
                                stride=stride, padding=padding, dilation=dilation)
-        self.chomp2 = Chomp1d(padding)
         self.bn2 = nn.BatchNorm1d(n_outputs)
         self.relu2 = nn.ReLU()
         self.dropout2 = nn.Dropout(dropout)
 
-        self.net = nn.Sequential(self.conv1, self.chomp1, self.bn1, self.relu1, self.dropout1,
-                                 self.conv2, self.chomp2, self.bn2, self.relu2, self.dropout2)
+        self.net = nn.Sequential(self.conv1, self.bn1, self.relu1, self.dropout1,
+                                 self.conv2, self.bn2, self.relu2, self.dropout2)
         self.downsample = nn.Conv1d(n_inputs, n_outputs, 1) if n_inputs != n_outputs else None
         self.relu = nn.ReLU()
         self.init_weights()
@@ -79,8 +77,10 @@ class TemporalConvNet(nn.Module):
             dilation_size = 2 ** i
             in_channels = num_inputs if i == 0 else num_channels[i-1]
             out_channels = num_channels[i]
+            # Acausal symmetric padding
+            sym_padding = (kernel_size - 1) * dilation_size // 2
             layers += [TemporalBlock(in_channels, out_channels, kernel_size, stride=1, dilation=dilation_size,
-                                     padding=(kernel_size-1) * dilation_size, dropout=dropout)]
+                                     padding=sym_padding, dropout=dropout)]
         self.network = nn.Sequential(*layers)
 
     def forward(self, x):
@@ -106,11 +106,11 @@ class DiscriminativePearsonLoss(nn.Module):
     def __init__(self):
         super().__init__()
     def forward(self, pred, target_att, target_unatt):
-        # Skip the receptive field (6 seconds)
-        skip = int(6.0 * SR)
-        p = pred[:, 0, skip:]
-        t_a = target_att[:, 0, skip:]
-        t_u = target_unatt[:, 0, skip:]
+        # Acausal TCN: Skip half the receptive field (3 seconds) from BOTH ends
+        skip = int(3.0 * SR)
+        p = pred[:, 0, skip:-skip]
+        t_a = target_att[:, 0, skip:-skip]
+        t_u = target_unatt[:, 0, skip:-skip]
         
         def calc_corr(pred_c, target_c):
             p_mean = pred_c.mean(dim=1, keepdim=True)
@@ -200,10 +200,10 @@ def extract_sequences(cache_file):
     return sequences_X, sequences_Y_att, sequences_Y_unatt
 
 def calculate_pearsonr(pred, target):
-    # Skip receptive field of 6s
-    skip = int(6.0 * SR)
-    p = pred[skip:]
-    t = target[skip:]
+    # Skip half receptive field of 3s from BOTH ends
+    skip = int(3.0 * SR)
+    p = pred[skip:-skip]
+    t = target[skip:-skip]
     p = p - np.mean(p)
     t = t - np.mean(t)
     num = np.sum(p * t)
