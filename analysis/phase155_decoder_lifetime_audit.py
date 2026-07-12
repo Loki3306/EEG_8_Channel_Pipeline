@@ -56,7 +56,7 @@ def prepare_subject_windows_continuous(cache_file, device):
     cached = torch.load(cache_file, map_location='cpu', weights_only=False)['raw']
     windows = []
     
-    for tr in cached:
+    for tr_idx, tr in enumerate(cached):
         eeg_raw = tr['eeg'].numpy()[EAR_CHANNEL_INDICES, :] 
         env_l_raw = tr['env_l'].numpy()
         env_r_raw = tr['env_r'].numpy()
@@ -102,6 +102,15 @@ def prepare_subject_windows_continuous(cache_file, device):
             
             win_labels = labels_eff[seq_start:seq_end]
             label = 1 if np.mean(win_labels) >= 0.5 else 0
+            
+            # CRITICAL FIX: The AASD dataset swaps Male/Female speakers between left and right ears 
+            # after the first 30 trials. 
+            # 179 ('L') means "Attended Male". 184 ('R') means "Attended Female".
+            # Trials 0-29: Male is Left. So 'L' (179) means Attended Left. label=1 is correct.
+            # Trials 30-59: Male is Right, Female is Left. So 'R' (184) means Attended Left!
+            # Therefore, we must invert the label in the second half so that label=1 ALWAYS means "Attending Left Ear".
+            if tr_idx >= 30:
+                label = 1 - label
             
             windows.append({
                 'X': X_win,
