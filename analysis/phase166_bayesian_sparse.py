@@ -176,7 +176,12 @@ def run_bayesian_tracking(track_set, C_xx_calib, C_xy_calib, I, anchor_interval_
                 P_UNCERTAINTY = (1.0 - K) * P_UNCERTAINTY
                 
         # Re-solve for W (only necessary if C_xx or C_xy changed)
+        W_old = W.clone()
         W = torch.linalg.solve(C_xx + RIDGE_LAMBDA * I, C_xy)
+        
+        if i % 100 == 0:
+            print(f"  [Win {i}] ||W||: {torch.norm(W):.4f}, K: {K if 'K' in locals() else 0:.4f}, ||Z_xy - C_xy||: {torch.norm(Z_xy - C_xy) if 'Z_xy' in locals() else 0:.4f}")
+
                 
     return correct / total
 
