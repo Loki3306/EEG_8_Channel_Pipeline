@@ -5,7 +5,7 @@ import scipy.signal
 import scipy.stats
 import random
 
-CACHE_DIR = "/kaggle/input/datasets/lokeshgile/aasd-universal-cache-v1"
+CACHE_DIR = "/kaggle/input/datasets/lowkieee/multiband-cache/kaggle/working/multiband_cache"
 SR = 128
 EAR_CHANNEL_INDICES = [0, 1, 2, 3, 27, 28, 29, 30]
 BROADBAND = (0.5, 8.0)

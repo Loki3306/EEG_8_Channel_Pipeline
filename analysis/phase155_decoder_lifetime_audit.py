@@ -296,9 +296,8 @@ def main():
     
     cache_dir = Path('/kaggle/working/multiband_cache')
     possible_paths = [
+        Path('/kaggle/input/datasets/lokeshgile/aasd-universal-cache-v1'),
         Path('/kaggle/input/datasets/lowkieee/multiband-cache/kaggle/working/multiband_cache'),
-        Path('/kaggle/input/multiband-cache/kaggle/working/multiband_cache'),
-        Path('/kaggle/input/aasd-universal-cache-v1/kaggle/working/multiband_cache'),
         cache_dir
     ]
     for p in possible_paths:
