@@ -176,6 +176,8 @@ def process_subject(cache_file, device_id):
     
     # Pre-invert the regularized Rxx for all t
     Rxx_inv = torch.linalg.inv(Rxx_smoothed + lambda_term)    # [N, 408, 408]
+    del Rxx_smoothed, Rxx_tau, lambda_term, dist_matrix
+    torch.cuda.empty_cache()
     
     # ---------------------------------------------------------
     # 3. EXPECTATION-MAXIMIZATION (EM) ITERATIONS
@@ -258,7 +260,8 @@ def main():
             
     cache_files = sorted(list(cache_dir.glob('*_multiband.pt')))
     num_gpus = torch.cuda.device_count()
-    num_workers = mp.cpu_count()
+    # Limit max_workers to prevent OOM
+    num_workers = min(mp.cpu_count(), 2)
     
     results = []
     with concurrent.futures.ProcessPoolExecutor(max_workers=num_workers) as executor:
