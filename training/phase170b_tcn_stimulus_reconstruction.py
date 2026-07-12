@@ -152,8 +152,8 @@ def extract_sequences(cache_file):
     
     for tr in cached:
         eeg_raw = tr['eeg'].numpy()[EAR_CHANNEL_INDICES, :]
-        env_L = tr['env_L'].numpy().flatten()
-        env_R = tr['env_R'].numpy().flatten()
+        env_L = tr['env_l'].numpy().flatten()
+        env_R = tr['env_r'].numpy().flatten()
         
         eeg_f = apply_modulation_filter(eeg_raw, BROADBAND[0], BROADBAND[1], SR)
         env_L = apply_modulation_filter(np.expand_dims(env_L, 0), BROADBAND[0], BROADBAND[1], SR).flatten()
