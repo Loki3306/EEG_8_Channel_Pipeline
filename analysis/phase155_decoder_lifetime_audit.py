@@ -6,6 +6,7 @@ from scipy import signal
 import multiprocessing as mp
 import concurrent.futures
 import pandas as pd
+from sklearn.metrics import roc_auc_score
 
 # -------------------------------------------------------------------------
 # CONSTANTS & CONFIGURATION
@@ -21,15 +22,15 @@ BROADBAND = (0.5, 8.0)
 RIDGE_LAMBDA = 100.0
 
 WINDOWS_PER_MIN = 120
-CALIB_MINUTES = [1, 2, 5, 10, 20]
+CALIB_MINUTES = [1, 2, 5, 10, 20, 40]
 CALIB_SIZES = [m * WINDOWS_PER_MIN for m in CALIB_MINUTES]
 HOLDOUT_MINUTES = 20
 HOLDOUT_WINDOWS = HOLDOUT_MINUTES * WINDOWS_PER_MIN
 
-HALF_LIFE_TRAIN_MIN = 10
-HALF_LIFE_TRAIN_WIN = HALF_LIFE_TRAIN_MIN * WINDOWS_PER_MIN
-HALF_LIFE_BLOCK_MIN = 5
-HALF_LIFE_BLOCK_WIN = HALF_LIFE_BLOCK_MIN * WINDOWS_PER_MIN
+LIFETIME_TRAIN_MIN = 10
+LIFETIME_TRAIN_WIN = LIFETIME_TRAIN_MIN * WINDOWS_PER_MIN
+LIFETIME_BLOCK_MIN = 5
+LIFETIME_BLOCK_WIN = LIFETIME_BLOCK_MIN * WINDOWS_PER_MIN
 
 def apply_modulation_filter(env, lowcut, highcut, fs, order=4):
     nyq = 0.5 * fs
@@ -70,18 +71,20 @@ def prepare_subject_windows_continuous(cache_file, device):
         env_r_f = apply_modulation_filter(env_r_raw, BROADBAND[0], BROADBAND[1], SR)
         
         eeg_f = (eeg_f - np.mean(eeg_f, axis=1, keepdims=True)) / (np.std(eeg_f, axis=1, keepdims=True) + 1e-8)
-        env_l_f = (env_l_f - np.mean(env_l_f, axis=1, keepdims=True)) / (np.std(env_l_f, axis=1, keepdims=True) + 1e-8)
-        env_r_f = (env_r_f - np.mean(env_r_f, axis=1, keepdims=True)) / (np.std(env_r_f, axis=1, keepdims=True) + 1e-8)
+        env_l_f_z = (env_l_f - np.mean(env_l_f, axis=1, keepdims=True)) / (np.std(env_l_f, axis=1, keepdims=True) + 1e-8)
+        env_r_f_z = (env_r_f - np.mean(env_r_f, axis=1, keepdims=True)) / (np.std(env_r_f, axis=1, keepdims=True) + 1e-8)
         
         eeg = torch.tensor(eeg_f, dtype=torch.float32, device=device)
-        env_l = torch.tensor(env_l_f[0], dtype=torch.float32, device=device)
-        env_r = torch.tensor(env_r_f[0], dtype=torch.float32, device=device)
+        env_l = torch.tensor(env_l_f_z[0], dtype=torch.float32, device=device)
+        env_r = torch.tensor(env_r_f_z[0], dtype=torch.float32, device=device)
         
         X_trial = create_toeplitz_features_pt(eeg, MAX_LAG_SAMPLES)
         T_eff = X_trial.shape[0]
         
         Y_l_eff = env_l[:T_eff]
         Y_r_eff = env_r[:T_eff]
+        Y_l_raw_eff = env_l_raw[0, :T_eff]
+        Y_r_raw_eff = env_r_raw[0, :T_eff]
         
         sp = tr['meta']['switch_points']
         current_spk = 'L'
@@ -96,16 +99,16 @@ def prepare_subject_windows_continuous(cache_file, device):
         for seq_start in range(0, T_eff - SEQ_SAMPLES + 1, SEQ_HOP):
             seq_end = seq_start + SEQ_SAMPLES
             X_win = X_trial[seq_start:seq_end]
-            Y_L_win = Y_l_eff[seq_start:seq_end]
-            Y_R_win = Y_r_eff[seq_start:seq_end]
             
             win_labels = labels_eff[seq_start:seq_end]
             label = 1 if np.mean(win_labels) >= 0.5 else 0
             
             windows.append({
                 'X': X_win,
-                'Y_L': Y_L_win,
-                'Y_R': Y_R_win,
+                'Y_L': Y_l_eff[seq_start:seq_end],
+                'Y_R': Y_r_eff[seq_start:seq_end],
+                'Y_L_raw': Y_l_raw_eff[seq_start:seq_end],
+                'Y_R_raw': Y_r_raw_eff[seq_start:seq_end],
                 'label': label
             })
             
@@ -128,21 +131,54 @@ def train_ridge_decoder(windows, device):
 
 def evaluate_decoder(W, windows):
     if not windows or W is None:
-        return 0.5
+        return {'acc': 0.5, 'auroc': 0.5, 'mean_margin': 0.0, 'mean_mod': 0.0, 'mean_sim': 0.0}
+        
     correct = 0
+    margins = []
+    mods = []
+    sims = []
+    preds_L = []
+    labels = []
+    
     for w in windows:
         X_cpu = w['X'].cpu().numpy()
         YL_cpu = w['Y_L'].cpu().numpy()
         YR_cpu = w['Y_R'].cpu().numpy()
+        YL_raw = w['Y_L_raw']
+        YR_raw = w['Y_R_raw']
         label = w['label']
         
         preds = X_cpu @ W
         c_L = get_pearsonr(preds, YL_cpu)
         c_R = get_pearsonr(preds, YR_cpu)
-        pred_label = 1 if c_L > c_R else 0
-        if pred_label == label:
+        
+        margin = c_L - c_R if label == 1 else c_R - c_L
+        margins.append(margin)
+        preds_L.append(c_L - c_R) # Use evidence for AUROC
+        labels.append(label)
+        
+        mod = np.var(YL_raw) + np.var(YR_raw)
+        sim = get_pearsonr(YL_cpu, YR_cpu)
+        mods.append(mod)
+        sims.append(sim)
+        
+        if (c_L > c_R and label == 1) or (c_R > c_L and label == 0):
             correct += 1
-    return correct / len(windows)
+            
+    acc = correct / len(windows)
+    
+    try:
+        auroc = roc_auc_score(labels, preds_L)
+    except:
+        auroc = 0.5
+        
+    return {
+        'acc': acc, 
+        'auroc': auroc,
+        'mean_margin': np.mean(margins),
+        'mean_mod': np.mean(mods),
+        'mean_sim': np.mean(sims)
+    }
 
 def process_subject(cache_file, device_id):
     device = torch.device(f'cuda:{device_id}' if torch.cuda.is_available() else 'cpu')
@@ -153,39 +189,74 @@ def process_subject(cache_file, device_id):
     
     expA_results = []
     expB_results = []
+    expC_results = []
     
-    # Require at least 40 minutes of data for meaningful test
-    if total_windows < 4800:
-        return subj_name, expA_results, expB_results
+    # Require at least 60 minutes (7200 windows) of data
+    if total_windows < 7200:
+        return subj_name, expA_results, expB_results, expC_results
         
-    # --- EXPERIMENT A: CALIBRATION CURVE ---
-    holdout_start = total_windows - HOLDOUT_WINDOWS
-    holdout_set = windows[holdout_start:]
+    # --- EXPERIMENT A: CALIBRATION CURVE (Fixed End, Expanding Start) ---
+    # We fix the end of calibration at Minute 40 (window 4800).
+    # This ensures the gap to the Test Set (Minute 40-60) is exactly 0 for all sweep sizes!
+    CALIB_END_WIN = 40 * WINDOWS_PER_MIN
+    TEST_END_WIN = 60 * WINDOWS_PER_MIN
+    holdout_set = windows[CALIB_END_WIN:TEST_END_WIN]
     
     for c_min, c_win in zip(CALIB_MINUTES, CALIB_SIZES):
-        if c_win >= holdout_start:
-            continue
-        calib_set = windows[:c_win]
+        calib_start_win = CALIB_END_WIN - c_win
+        calib_set = windows[calib_start_win:CALIB_END_WIN]
         W = train_ridge_decoder(calib_set, device)
-        acc = evaluate_decoder(W, holdout_set)
-        expA_results.append({'subject': subj_name, 'calib_min': c_min, 'accuracy': acc})
+        res = evaluate_decoder(W, holdout_set)
+        expA_results.append({
+            'subject': subj_name, 
+            'calib_min': c_min, 
+            'acc': res['acc'],
+            'auroc': res['auroc'],
+            'mean_margin': res['mean_margin']
+        })
         
-    # --- EXPERIMENT B: DECODER HALF-LIFE ---
-    hl_calib_set = windows[:HALF_LIFE_TRAIN_WIN]
-    W_hl = train_ridge_decoder(hl_calib_set, device)
+    # --- EXPERIMENT B: DECODER LIFETIME (Train First 10, Test Rest) ---
+    lt_calib_set = windows[:LIFETIME_TRAIN_WIN]
+    W_lt = train_ridge_decoder(lt_calib_set, device)
     
-    current_idx = HALF_LIFE_TRAIN_WIN
+    current_idx = LIFETIME_TRAIN_WIN
     block_idx = 0
-    while current_idx + HALF_LIFE_BLOCK_WIN <= total_windows:
-        test_block = windows[current_idx : current_idx + HALF_LIFE_BLOCK_WIN]
-        acc = evaluate_decoder(W_hl, test_block)
-        delta_t_min = HALF_LIFE_TRAIN_MIN + block_idx * HALF_LIFE_BLOCK_MIN
-        expB_results.append({'subject': subj_name, 'delta_t_min': delta_t_min, 'accuracy': acc})
-        
-        current_idx += HALF_LIFE_BLOCK_WIN
+    while current_idx + LIFETIME_BLOCK_WIN <= total_windows:
+        test_block = windows[current_idx : current_idx + LIFETIME_BLOCK_WIN]
+        res = evaluate_decoder(W_lt, test_block)
+        delta_t_min = LIFETIME_TRAIN_MIN + block_idx * LIFETIME_BLOCK_MIN
+        expB_results.append({
+            'subject': subj_name, 
+            'delta_t_min': delta_t_min, 
+            'acc': res['acc'],
+            'auroc': res['auroc'],
+            'mean_margin': res['mean_margin'],
+            'mean_mod': res['mean_mod'],
+            'mean_sim': res['mean_sim']
+        })
+        current_idx += LIFETIME_BLOCK_WIN
         block_idx += 1
         
-    return subj_name, expA_results, expB_results
+    # --- EXPERIMENT C: SLIDING LOCAL CALIBRATION ---
+    SLIDING_WIN = 10 * WINDOWS_PER_MIN
+    current_idx = 0
+    while current_idx + 2 * SLIDING_WIN <= total_windows:
+        calib_block = windows[current_idx : current_idx + SLIDING_WIN]
+        test_block = windows[current_idx + SLIDING_WIN : current_idx + 2 * SLIDING_WIN]
+        W_sl = train_ridge_decoder(calib_block, device)
+        res = evaluate_decoder(W_sl, test_block)
+        
+        train_start_min = current_idx // WINDOWS_PER_MIN
+        expC_results.append({
+            'subject': subj_name,
+            'train_start_min': train_start_min,
+            'acc': res['acc'],
+            'auroc': res['auroc'],
+            'mean_margin': res['mean_margin']
+        })
+        current_idx += SLIDING_WIN
+        
+    return subj_name, expA_results, expB_results, expC_results
 
 def main():
     mp.set_start_method('spawn', force=True)
@@ -209,39 +280,46 @@ def main():
     num_gpus = torch.cuda.device_count()
     num_workers = mp.cpu_count()
     
-    all_expA = []
-    all_expB = []
+    all_expA, all_expB, all_expC = [], [], []
     
     with concurrent.futures.ProcessPoolExecutor(max_workers=num_workers) as executor:
         futures = {executor.submit(process_subject, cf, idx % max(1, num_gpus)): cf for idx, cf in enumerate(cache_files)}
         for future in concurrent.futures.as_completed(futures):
-            subj, expA, expB = future.result()
+            subj, expA, expB, expC = future.result()
             all_expA.extend(expA)
             all_expB.extend(expB)
-            print(f"[{subj}] Processed {len(expA)} calib sweeps and {len(expB)} half-life blocks.")
+            all_expC.extend(expC)
+            print(f"[{subj}] Processed: ExpA {len(expA)}, ExpB {len(expB)}, ExpC {len(expC)}")
 
-    if all_expA and all_expB:
+    if all_expA:
         dfA = pd.DataFrame(all_expA)
         dfB = pd.DataFrame(all_expB)
+        dfC = pd.DataFrame(all_expC)
         
         dfA.to_csv("phase155_experimentA_calibration.csv", index=False)
-        dfB.to_csv("phase155_experimentB_halflife.csv", index=False)
+        dfB.to_csv("phase155_experimentB_lifetime.csv", index=False)
+        dfC.to_csv("phase155_experimentC_sliding.csv", index=False)
         
         print("\n=======================================================")
-        print(" EXPERIMENT A: MEAN CALIBRATION CURVE (Holdout = Last 20 Min)")
+        print(" EXPERIMENT A: CALIBRATION CURVE (Fixed Test 40-60m)")
         print("=======================================================")
-        meanA = dfA.groupby('calib_min')['accuracy'].mean().reset_index()
+        meanA = dfA.groupby('calib_min')[['acc', 'auroc']].mean().reset_index()
         for _, row in meanA.iterrows():
-            print(f"  Train: {int(row['calib_min']):2d} minutes  ->  Accuracy: {row['accuracy']*100:.1f}%")
+            print(f"  Train: {int(row['calib_min']):2d} min  ->  Acc: {row['acc']*100:.1f}% | AUROC: {row['auroc']:.3f}")
             
         print("\n=======================================================")
-        print(" EXPERIMENT B: MEAN DECODER HALF-LIFE (Train = First 10 Min)")
+        print(" EXPERIMENT B: LIFETIME CURVE (Train 0-10m)")
         print("=======================================================")
-        meanB = dfB.groupby('delta_t_min')['accuracy'].mean().reset_index()
+        meanB = dfB.groupby('delta_t_min')[['acc', 'auroc', 'mean_mod', 'mean_sim']].mean().reset_index()
         for _, row in meanB.iterrows():
-            print(f"  Evaluate @ Minute {int(row['delta_t_min']):3d}  ->  Accuracy: {row['accuracy']*100:.1f}%")
+            print(f"  Eval @ Min {int(row['delta_t_min']):3d}  ->  Acc: {row['acc']*100:.1f}% | AUROC: {row['auroc']:.3f} | Mod: {row['mean_mod']:.2f}")
             
-        print("\nPhase 155 Complete! Results saved to CSV.")
+        print("\n=======================================================")
+        print(" EXPERIMENT C: SLIDING CALIBRATION (Train 10m, Test next 10m)")
+        print("=======================================================")
+        meanC = dfC.groupby('train_start_min')[['acc', 'auroc']].mean().reset_index()
+        for _, row in meanC.iterrows():
+            print(f"  Train {int(row['train_start_min']):2d}-{int(row['train_start_min'])+10:2d}m  ->  Acc: {row['acc']*100:.1f}% | AUROC: {row['auroc']:.3f}")
 
 if __name__ == '__main__':
     main()
