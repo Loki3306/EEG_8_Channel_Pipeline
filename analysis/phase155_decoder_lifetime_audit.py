@@ -104,8 +104,9 @@ def prepare_subject_windows_continuous(cache_file, device):
             win_labels = labels_eff[seq_start:seq_end]
             
             # Skip transition windows that contain a speaker switch
+            valid_win = True
             if np.mean(win_labels) != 0 and np.mean(win_labels) != 1:
-                continue
+                valid_win = False
                 
             label = int(win_labels[0])
             
@@ -121,6 +122,7 @@ def prepare_subject_windows_continuous(cache_file, device):
             X_win = X_trial[seq_start:seq_end]
             
             windows.append({
+                'valid': valid_win,
                 'X': X_win,
                 'Y_L': Y_l_eff[seq_start:seq_end],
                 'Y_R': Y_r_eff[seq_start:seq_end],
@@ -140,6 +142,7 @@ def train_ridge_decoder(windows, device):
     
     total_samples = 0
     for w in windows:
+        if not w['valid']: continue
         X = w['X']
         Y_true = w['Y_L'] if w['label'] == 1 else w['Y_R']
         Rxx += X.T @ X
@@ -166,6 +169,7 @@ def evaluate_decoder(W, windows):
     labels = []
     
     for w in windows:
+        if not w['valid']: continue
         X_cpu = w['X'].cpu().numpy()
         YL_cpu = w['Y_L'].cpu().numpy()
         YR_cpu = w['Y_R'].cpu().numpy()
@@ -190,7 +194,8 @@ def evaluate_decoder(W, windows):
         if (c_L > c_R and label == 1) or (c_R > c_L and label == 0):
             correct += 1
             
-    acc = correct / len(windows)
+    valid_count = len(labels)
+    acc = correct / valid_count if valid_count > 0 else 0.5
     
     try:
         auroc = roc_auc_score(labels, preds_L)
@@ -200,9 +205,9 @@ def evaluate_decoder(W, windows):
     return {
         'acc': acc, 
         'auroc': auroc,
-        'mean_margin': np.mean(margins),
-        'mean_mod': np.mean(mods),
-        'mean_sim': np.mean(sims)
+        'mean_margin': np.mean(margins) if margins else 0.0,
+        'mean_mod': np.mean(mods) if mods else 0.0,
+        'mean_sim': np.mean(sims) if sims else 0.0
     }
 
 def process_subject(cache_file, device_id):
