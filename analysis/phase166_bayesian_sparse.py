@@ -246,6 +246,8 @@ def process_subject(cache_file):
     # Scenario D: Oracle Upper Bound (Every window - 0.5s)
     acc_oracle = run_bayesian_tracking(track_set, C_xx_calib, C_xy_calib, I, anchor_interval_sec=0, device=device, Q_DRIFT=Q_DRIFT, R_NOISE=R_NOISE)
     
+    print(f"[{subj_name}] Finished! (Oracle: {acc_oracle*100:.2f}%)")
+    
     return subj_name, {
         'fixed': acc_fixed,
         'sparse_1m': acc_sparse_1m,
