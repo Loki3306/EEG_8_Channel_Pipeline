@@ -165,18 +165,27 @@ def process_subject(cache_file, device_id):
     t_idx = torch.arange(N, device=device).float()
     dist_matrix = torch.abs(t_idx.unsqueeze(0) - t_idx.unsqueeze(1))
     K = (GAMMA ** dist_matrix)                                # [N, N]
+    del t_idx, dist_matrix
     
     # Pre-smooth Rxx (since it doesn't depend on latent labels)
-    Rxx_smoothed = torch.einsum('tn,nij->tij', K, Rxx_tau)    # [N, 408, 408]
+    Rxx_smoothed = torch.matmul(K, Rxx_tau.view(N, -1)).view(N, F, F)
+    del Rxx_tau
+    torch.cuda.empty_cache()
     
-    # Ridge Penalty
-    I_F = torch.eye(F, device=device).unsqueeze(0).expand(N, F, F)
-    EFFECTIVE_WINDOWS_SMOOTHED = K.sum(dim=1).view(N, 1, 1)   # [N, 1, 1]
-    lambda_term = RIDGE_LAMBDA * EFFECTIVE_WINDOWS_SMOOTHED * I_F
+    # Add Ridge Penalty in-place to diagonal
+    EFFECTIVE_WINDOWS_SMOOTHED = K.sum(dim=1).view(N)         # [N]
+    ridge_penalties = RIDGE_LAMBDA * EFFECTIVE_WINDOWS_SMOOTHED
+    # Rxx_smoothed has shape [N, 408, 408]. Add penalty to diagonal.
+    idx = torch.arange(F, device=device)
+    Rxx_smoothed[:, idx, idx] += ridge_penalties.unsqueeze(1)
     
-    # Pre-invert the regularized Rxx for all t
-    Rxx_inv = torch.linalg.inv(Rxx_smoothed + lambda_term)    # [N, 408, 408]
-    del Rxx_smoothed, Rxx_tau, lambda_term, dist_matrix
+    # Pre-invert the regularized Rxx in chunks to avoid OOM
+    Rxx_inv = torch.empty_like(Rxx_smoothed)
+    CHUNK = 500
+    for i in range(0, N, CHUNK):
+        Rxx_inv[i:i+CHUNK] = torch.linalg.inv(Rxx_smoothed[i:i+CHUNK])
+        
+    del Rxx_smoothed
     torch.cuda.empty_cache()
     
     # ---------------------------------------------------------
