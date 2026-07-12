@@ -71,8 +71,15 @@ def extract_trials(cache_file, num_trials=5, permute_audio=False):
             np.random.shuffle(Y_l_eff)
             np.random.shuffle(Y_r_eff)
             
-        labels_raw = tr['labels'].numpy()
-        labels_eff = labels_raw[:T_eff]
+        sp = tr['meta']['switch_points']
+        current_spk = 'L'
+        sp_idx = 0
+        labels_eff = np.zeros(T_eff, dtype=int)
+        for t in range(T_eff):
+            if sp_idx < len(sp) and t >= sp[sp_idx][1]:
+                current_spk = sp[sp_idx][0]
+                sp_idx += 1
+            labels_eff[t] = 1 if current_spk == 'L' else 0
         
         for seq_start in range(0, T_eff - SEQ_SAMPLES + 1, SEQ_SAMPLES):
             seq_end = seq_start + SEQ_SAMPLES
