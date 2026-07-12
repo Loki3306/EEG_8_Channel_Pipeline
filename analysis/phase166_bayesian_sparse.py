@@ -1,4 +1,11 @@
 import os
+# MUST set before importing torch or numpy to prevent thread thrashing in multiprocessing!
+os.environ["OMP_NUM_THREADS"] = "1"
+os.environ["MKL_NUM_THREADS"] = "1"
+os.environ["OPENBLAS_NUM_THREADS"] = "1"
+os.environ["VECLIB_MAXIMUM_THREADS"] = "1"
+os.environ["NUMEXPR_NUM_THREADS"] = "1"
+
 import time
 import numpy as np
 import torch
@@ -246,6 +253,8 @@ def process_subject(cache_file):
     }
 
 def main():
+    torch.set_num_threads(1)
+    
     print("=======================================================")
     print(" PHASE 166: BAYESIAN SPARSE ANCHORING (KALMAN FILTER)")
     print(" Decoupling unsupervised C_xx from sparsely supervised C_xy")
