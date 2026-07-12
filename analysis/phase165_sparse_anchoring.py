@@ -117,21 +117,21 @@ def evaluate_window(w, W):
     pred_label = 1 if corr_L > corr_R else 0
     return 1 if pred_label == w['label'] else 0
 
-def run_tracking_simulation(track_set, Rxx_calib, Rxy_calib, I, anchor_interval_sec, device):
+def run_tracking_simulation(track_set, C_xx_calib, C_xy_calib, I, anchor_interval_sec, device):
     """
     Runs tracking with intermittent anchors.
     anchor_interval_sec = 0 means full Oracle (update every window).
     anchor_interval_sec = None means Fixed (never update).
     Otherwise, we update the decoder every `anchor_interval_sec` seconds.
     """
-    Rxx = Rxx_calib.clone()
-    Rxy = Rxy_calib.clone()
+    C_xx = C_xx_calib.clone()
+    C_xy = C_xy_calib.clone()
     
-    # When jumping time, we decay memory exactly by the base factor to the power of skipped windows
-    BASE_LAMBDA = 0.98
+    # Base EMA factor for 1 window
+    BASE_ALPHA = 0.02
     
-    F = Rxx.shape[0]
-    W = torch.linalg.solve(Rxx + RIDGE_LAMBDA * I, Rxy)
+    F = C_xx.shape[0]
+    W = torch.linalg.solve(C_xx + RIDGE_LAMBDA * I, C_xy)
     
     correct = 0
     total = 0
@@ -150,14 +150,17 @@ def run_tracking_simulation(track_set, Rxx_calib, Rxy_calib, I, anchor_interval_
                 X = w['X']
                 Y_true = w['Y_L'] if w['label'] == 1 else w['Y_R']
                 
-                # Update tracking matrices
-                forget_factor = BASE_LAMBDA if interval_windows == 0 else (BASE_LAMBDA ** interval_windows)
+                # Update tracking matrices (EMA)
+                if interval_windows == 0:
+                    alpha = BASE_ALPHA
+                else:
+                    alpha = 1.0 - ((1.0 - BASE_ALPHA) ** interval_windows)
                 
-                Rxx = forget_factor * Rxx + X.T @ X
-                Rxy = forget_factor * Rxy + X.T @ Y_true
+                C_xx = alpha * (X.T @ X) + (1.0 - alpha) * C_xx
+                C_xy = alpha * (X.T @ Y_true) + (1.0 - alpha) * C_xy
                 
                 # Re-solve for W
-                W = torch.linalg.solve(Rxx + RIDGE_LAMBDA * I, Rxy)
+                W = torch.linalg.solve(C_xx + RIDGE_LAMBDA * I, C_xy)
                 
     return correct / total
 
@@ -190,25 +193,25 @@ def process_subject(cache_file):
         count += 1
         
     if count > 0:
-        # Scale to avoid exploding magnitudes, simulating effective memory of ~50 windows
-        Rxx_calib = (Rxx_calib / count) * 50.0
-        Rxy_calib = (Rxy_calib / count) * 50.0
+        # True mean covariance to keep scale exactly at 1.0
+        C_xx_calib = Rxx_calib / count
+        C_xy_calib = Rxy_calib / count
         
     # ---------------------------------------------------------
     # 2. TRACKING SCENARIOS
     # ---------------------------------------------------------
     
     # Scenario A: Fixed Baseline (No updates)
-    acc_fixed = run_tracking_simulation(track_set, Rxx_calib, Rxy_calib, I, anchor_interval_sec=None, device=device)
+    acc_fixed = run_tracking_simulation(track_set, C_xx_calib, C_xy_calib, I, anchor_interval_sec=None, device=device)
     
     # Scenario B: Sparse Anchor (1 min)
-    acc_sparse_1m = run_tracking_simulation(track_set, Rxx_calib, Rxy_calib, I, anchor_interval_sec=60, device=device)
+    acc_sparse_1m = run_tracking_simulation(track_set, C_xx_calib, C_xy_calib, I, anchor_interval_sec=60, device=device)
     
     # Scenario C: Sparse Anchor (5 min)
-    acc_sparse_5m = run_tracking_simulation(track_set, Rxx_calib, Rxy_calib, I, anchor_interval_sec=300, device=device)
+    acc_sparse_5m = run_tracking_simulation(track_set, C_xx_calib, C_xy_calib, I, anchor_interval_sec=300, device=device)
     
     # Scenario D: Oracle Upper Bound (Every window - 0.5s)
-    acc_oracle = run_tracking_simulation(track_set, Rxx_calib, Rxy_calib, I, anchor_interval_sec=0, device=device)
+    acc_oracle = run_tracking_simulation(track_set, C_xx_calib, C_xy_calib, I, anchor_interval_sec=0, device=device)
     
     return subj_name, {
         'fixed': acc_fixed,
