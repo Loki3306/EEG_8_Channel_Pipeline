@@ -181,6 +181,7 @@ def run_bayesian_tracking(track_set, C_xx_calib, C_xy_calib, I, anchor_interval_
     return correct / total
 
 def process_subject(cache_file):
+    torch.set_num_threads(1)
     device = torch.device('cpu')
     subj_name = cache_file.stem.split('_')[0]
     
@@ -253,8 +254,6 @@ def process_subject(cache_file):
     }
 
 def main():
-    torch.set_num_threads(1)
-    
     print("=======================================================")
     print(" PHASE 166: BAYESIAN SPARSE ANCHORING (KALMAN FILTER)")
     print(" Decoupling unsupervised C_xx from sparsely supervised C_xy")
