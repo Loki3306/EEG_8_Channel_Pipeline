@@ -58,8 +58,10 @@ def prepare_subject_windows_continuous(cache_file, device):
     
     for tr_idx, tr in enumerate(cached):
         eeg_raw = tr['eeg'].numpy()[EAR_CHANNEL_INDICES, :] 
-        env_l_raw = tr['env_l'].numpy()
-        env_r_raw = tr['env_r'].numpy()
+        
+        # 1. Average across the 16 Gammatone bands to get the true Broadband Envelope
+        env_l_raw = tr['env_l'].numpy().mean(axis=0, keepdims=True)
+        env_r_raw = tr['env_r'].numpy().mean(axis=0, keepdims=True)
         
         min_len = min(eeg_raw.shape[1], env_l_raw.shape[1])
         eeg_raw = eeg_raw[:, :min_len]
@@ -98,10 +100,14 @@ def prepare_subject_windows_continuous(cache_file, device):
             
         for seq_start in range(0, T_eff - SEQ_SAMPLES + 1, SEQ_HOP):
             seq_end = seq_start + SEQ_SAMPLES
-            X_win = X_trial[seq_start:seq_end]
             
             win_labels = labels_eff[seq_start:seq_end]
-            label = 1 if np.mean(win_labels) >= 0.5 else 0
+            
+            # Skip transition windows that contain a speaker switch
+            if np.mean(win_labels) != 0 and np.mean(win_labels) != 1:
+                continue
+                
+            label = int(win_labels[0])
             
             # CRITICAL FIX: The AASD dataset swaps Male/Female speakers between left and right ears 
             # after the first 30 trials. 
@@ -111,6 +117,8 @@ def prepare_subject_windows_continuous(cache_file, device):
             # Therefore, we must invert the label in the second half so that label=1 ALWAYS means "Attending Left Ear".
             if tr_idx >= 30:
                 label = 1 - label
+            
+            X_win = X_trial[seq_start:seq_end]
             
             windows.append({
                 'X': X_win,
@@ -129,11 +137,19 @@ def train_ridge_decoder(windows, device):
     F = windows[0]['X'].shape[1]
     Rxx = torch.zeros((F, F), device=device)
     Rxy = torch.zeros((F,), device=device)
+    
+    total_samples = 0
     for w in windows:
         X = w['X']
         Y_true = w['Y_L'] if w['label'] == 1 else w['Y_R']
         Rxx += X.T @ X
         Rxy += X.T @ Y_true
+        total_samples += X.shape[0]
+        
+    if total_samples > 0:
+        Rxx /= total_samples
+        Rxy /= total_samples
+        
     I = torch.eye(F, device=device)
     W = torch.linalg.solve(Rxx + RIDGE_LAMBDA * I, Rxy).cpu().numpy()
     return W
