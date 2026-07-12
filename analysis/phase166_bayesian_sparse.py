@@ -124,7 +124,7 @@ def evaluate_window(w, W):
     pred_label = 1 if corr_L > corr_R else 0
     return 1 if pred_label == w['label'] else 0
 
-def run_bayesian_tracking(track_set, C_xx_calib, C_xy_calib, I, anchor_interval_sec, device, Q_DRIFT, R_NOISE):
+def run_bayesian_tracking(track_set, C_xx_calib, C_xy_calib, I, anchor_interval_sec, device, Q_DRIFT, R_NOISE, P_INIT):
     """
     Runs tracking with Bayesian State Estimation (Kalman Filter for C_xy)
     anchor_interval_sec = 0 means full Oracle (update every window).
@@ -139,7 +139,7 @@ def run_bayesian_tracking(track_set, C_xx_calib, C_xy_calib, I, anchor_interval_
     ALPHA_XX = 0.02
     
     # Kalman Filter Parameters for C_xy
-    P_UNCERTAINTY = 0.0 # Starts at 0 after calibration
+    P_UNCERTAINTY = P_INIT
     
     W = torch.linalg.solve(C_xx + RIDGE_LAMBDA * I, C_xy)
     
@@ -227,24 +227,26 @@ def process_subject(cache_file):
     else:
         R_NOISE = 1.0
         
-    # Since Q is too small to estimate from stable calibration, set fixed SNR
-    Q_DRIFT = R_NOISE * 1e-4
+    # To match Oracle EMA (K=0.02), Q/R = K^2 / (1-K) = 4.08e-4
+    Q_DRIFT = R_NOISE * 4.08e-4
+    # Initialize P to steady state so the first anchor doesn't get ignored
+    P_INIT = 0.02 * R_NOISE
         
     # ---------------------------------------------------------
     # 2. TRACKING SCENARIOS
     # ---------------------------------------------------------
     
     # Scenario A: Fixed Baseline (No updates to C_xy, but C_xx tracks!)
-    acc_fixed = run_bayesian_tracking(track_set, C_xx_calib, C_xy_calib, I, anchor_interval_sec=None, device=device, Q_DRIFT=Q_DRIFT, R_NOISE=R_NOISE)
+    acc_fixed = run_bayesian_tracking(track_set, C_xx_calib, C_xy_calib, I, anchor_interval_sec=None, device=device, Q_DRIFT=Q_DRIFT, R_NOISE=R_NOISE, P_INIT=P_INIT)
     
     # Scenario B: Sparse Anchor (1 min)
-    acc_sparse_1m = run_bayesian_tracking(track_set, C_xx_calib, C_xy_calib, I, anchor_interval_sec=60, device=device, Q_DRIFT=Q_DRIFT, R_NOISE=R_NOISE)
+    acc_sparse_1m = run_bayesian_tracking(track_set, C_xx_calib, C_xy_calib, I, anchor_interval_sec=60, device=device, Q_DRIFT=Q_DRIFT, R_NOISE=R_NOISE, P_INIT=P_INIT)
     
     # Scenario C: Sparse Anchor (5 min)
-    acc_sparse_5m = run_bayesian_tracking(track_set, C_xx_calib, C_xy_calib, I, anchor_interval_sec=300, device=device, Q_DRIFT=Q_DRIFT, R_NOISE=R_NOISE)
+    acc_sparse_5m = run_bayesian_tracking(track_set, C_xx_calib, C_xy_calib, I, anchor_interval_sec=300, device=device, Q_DRIFT=Q_DRIFT, R_NOISE=R_NOISE, P_INIT=P_INIT)
     
     # Scenario D: Oracle Upper Bound (Every window - 0.5s)
-    acc_oracle = run_bayesian_tracking(track_set, C_xx_calib, C_xy_calib, I, anchor_interval_sec=0, device=device, Q_DRIFT=Q_DRIFT, R_NOISE=R_NOISE)
+    acc_oracle = run_bayesian_tracking(track_set, C_xx_calib, C_xy_calib, I, anchor_interval_sec=0, device=device, Q_DRIFT=Q_DRIFT, R_NOISE=R_NOISE, P_INIT=P_INIT)
     
     print(f"[{subj_name}] Finished! (Oracle: {acc_oracle*100:.2f}%)")
     
