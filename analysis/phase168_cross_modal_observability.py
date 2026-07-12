@@ -1,5 +1,4 @@
 import os
-# MUST set before importing torch or numpy to prevent thread thrashing in multiprocessing!
 os.environ["OMP_NUM_THREADS"] = "1"
 os.environ["MKL_NUM_THREADS"] = "1"
 os.environ["OPENBLAS_NUM_THREADS"] = "1"
@@ -15,7 +14,7 @@ import concurrent.futures
 import multiprocessing as mp
 from sklearn.decomposition import PCA
 from sklearn.linear_model import RidgeCV
-from sklearn.model_selection import KFold
+from sklearn.model_selection import TimeSeriesSplit
 from sklearn.metrics import r2_score
 
 # -------------------------------------------------------------------------
@@ -30,6 +29,8 @@ SEQ_HOP = int(0.5 * SR)
 
 BROADBAND = (0.5, 8.0)
 RIDGE_LAMBDA = 2.0
+CALIB_MINUTES = 2.0
+CALIB_WINDOWS = int((CALIB_MINUTES * 60) / 0.5)
 
 def apply_modulation_filter(env, lowcut, highcut, fs, order=4):
     nyq = 0.5 * fs
@@ -115,81 +116,161 @@ def process_subject(cache_file):
     subj_name = cache_file.stem.split('_')[0]
     
     windows = prepare_subject_windows(cache_file, device)
-    if len(windows) == 0:
+    if len(windows) < CALIB_WINDOWS:
         return subj_name, None
         
     F = windows[0]['X'].shape[1]
     I = torch.eye(F, device=device)
     
-    # 1. Compute Oracle Trajectory W_t and Unlabeled Cross-Modal Stats
+    calib_set = windows[:CALIB_WINDOWS]
+    track_set = windows[CALIB_WINDOWS:]
+    
+    # 1. Calibration
+    Rxx_calib = torch.zeros((F, F), device=device)
+    Rxy_calib = torch.zeros((F,), device=device)
+    
+    count = 0
+    for w in calib_set:
+        X = w['X']
+        Y_true = w['Y_L'] if w['label'] == 1 else w['Y_R']
+        Rxx_calib += X.T @ X
+        Rxy_calib += X.T @ Y_true
+        count += 1
+        
+    C_xx = Rxx_calib / count
+    C_xy = Rxy_calib / count
+    
+    W_static = torch.linalg.solve(C_xx + RIDGE_LAMBDA * I, C_xy).cpu().numpy()
+    
+    # 2. Compute Oracle EMA Trajectory W_t and Unlabeled Cross-Modal Stats
     W_oracles = []
     cross_modal_features = []
     
-    for w in windows:
+    for w in track_set:
         X = w['X']
         Y_true = w['Y_L'] if w['label'] == 1 else w['Y_R']
         
-        # Oracle W_t
-        C_xx = X.T @ X
-        C_xy = X.T @ Y_true
+        # Oracle EMA (Alpha = 0.02 matches our optimal filter)
+        C_xx = (1.0 - 0.02) * C_xx + 0.02 * (X.T @ X)
+        C_xy = (1.0 - 0.02) * C_xy + 0.02 * (X.T @ Y_true)
         W_t = torch.linalg.solve(C_xx + RIDGE_LAMBDA * I, C_xy)
         W_oracles.append(W_t.cpu().numpy())
         
         # Unlabeled Cross-Modal Stats (C_xL, C_xR)
+        # Normalize by norms to prevent Ridge from just learning amplitude
         C_xL = X.T @ w['Y_L']
-        C_xR = X.T @ w['Y_R']
+        norm_L = (torch.norm(X) * torch.norm(w['Y_L'])) + 1e-8
+        C_xL = C_xL / norm_L
         
-        # Combine them (816 dimensions)
+        C_xR = X.T @ w['Y_R']
+        norm_R = (torch.norm(X) * torch.norm(w['Y_R'])) + 1e-8
+        C_xR = C_xR / norm_R
+        
         feats = torch.cat([C_xL, C_xR]).cpu().numpy()
         cross_modal_features.append(feats)
         
     W_oracles = np.stack(W_oracles)
     cross_modal_features = np.stack(cross_modal_features)
     
-    # 2. PCA on Oracle Trajectory to extract latent state a_t
-    # In Phase 160, 18 components explained ~85% of variance
-    pca = PCA(n_components=18)
-    a_t = pca.fit_transform(W_oracles)
-    var_explained = np.sum(pca.explained_variance_ratio_)
+    # 3. TimeSeriesSplit Regression to avoid Leakage
+    tscv = TimeSeriesSplit(n_splits=5)
     
-    # 3. Predict a_t from [C_xL, C_xR] using RidgeCV (K-Fold CV)
-    # We evaluate if the unlabeled features can predict the oracle state
-    kf = KFold(n_splits=5, shuffle=False) # Temporal blocks are better, but standard KFold for simplicity
+    reconstructed_W = np.zeros_like(W_oracles)
     
-    y_preds = np.zeros_like(a_t)
-    
-    for train_idx, test_idx in kf.split(cross_modal_features):
+    for train_idx, test_idx in tscv.split(cross_modal_features):
         X_train, X_test = cross_modal_features[train_idx], cross_modal_features[test_idx]
-        y_train, y_test = a_t[train_idx], a_t[test_idx]
+        W_train = W_oracles[train_idx]
+        
+        # Fit PCA strictly on the training fold to prevent leakage
+        pca = PCA(n_components=18)
+        a_train = pca.fit_transform(W_train)
         
         # Multi-output Ridge CV
         reg = RidgeCV(alphas=np.logspace(-2, 4, 10))
-        reg.fit(X_train, y_train)
+        reg.fit(X_train, a_train)
         
-        y_preds[test_idx] = reg.predict(X_test)
+        # Predict test latent coords and inverse-transform to full space
+        a_test_pred = reg.predict(X_test)
+        W_test_pred = pca.inverse_transform(a_test_pred)
+        reconstructed_W[test_idx] = W_test_pred
         
-    # 4. Compute R^2 score for each latent dimension
-    r2_scores = []
-    for d in range(a_t.shape[1]):
-        r2 = r2_score(a_t[:, d], y_preds[:, d])
-        r2_scores.append(r2)
-        
-    # We care about the Mean R^2 across the 18 latent dimensions
-    mean_r2 = np.mean(r2_scores)
-    max_r2 = np.max(r2_scores)
+    # 4. Evaluate downstream accuracy of the Reconstructed W
+    # The first fold in TimeSeriesSplit is used entirely for training and has no test indices.
+    # We will just evaluate accuracy on the windows that were actually predicted.
+    predicted_indices = []
+    for _, test_idx in tscv.split(cross_modal_features):
+        predicted_indices.extend(test_idx)
+    predicted_indices = np.array(predicted_indices)
     
-    print(f"[{subj_name}] PCA Var: {var_explained*100:.1f}% | Mean R2: {mean_r2:.3f} | Max R2: {max_r2:.3f}")
+    if len(predicted_indices) == 0:
+        return subj_name, None
+        
+    correct_recon = 0
+    correct_oracle = 0
+    correct_static = 0
+    total = 0
+    
+    cos_sims = []
+    
+    for i in predicted_indices:
+        w = track_set[i]
+        X = w['X'].cpu().numpy()
+        Y_L = w['Y_L'].cpu().numpy()
+        Y_R = w['Y_R'].cpu().numpy()
+        
+        Y_L_c = Y_L - np.mean(Y_L)
+        Y_R_c = Y_R - np.mean(Y_R)
+        
+        # Evaluate Reconstructed W
+        W_pred = reconstructed_W[i]
+        pred_recon = X @ W_pred
+        pred_recon_c = pred_recon - np.mean(pred_recon)
+        corr_L_recon = np.sum(pred_recon_c * Y_L_c) / (np.linalg.norm(pred_recon_c) * np.linalg.norm(Y_L_c) + 1e-8)
+        corr_R_recon = np.sum(pred_recon_c * Y_R_c) / (np.linalg.norm(pred_recon_c) * np.linalg.norm(Y_R_c) + 1e-8)
+        label_recon = 1 if corr_L_recon > corr_R_recon else 0
+        if label_recon == w['label']: correct_recon += 1
+        
+        # Evaluate True Oracle W
+        W_oracle = W_oracles[i]
+        pred_oracle = X @ W_oracle
+        pred_oracle_c = pred_oracle - np.mean(pred_oracle)
+        corr_L_oracle = np.sum(pred_oracle_c * Y_L_c) / (np.linalg.norm(pred_oracle_c) * np.linalg.norm(Y_L_c) + 1e-8)
+        corr_R_oracle = np.sum(pred_oracle_c * Y_R_c) / (np.linalg.norm(pred_oracle_c) * np.linalg.norm(Y_R_c) + 1e-8)
+        label_oracle = 1 if corr_L_oracle > corr_R_oracle else 0
+        if label_oracle == w['label']: correct_oracle += 1
+        
+        # Evaluate Static Baseline W
+        pred_static = X @ W_static
+        pred_static_c = pred_static - np.mean(pred_static)
+        corr_L_static = np.sum(pred_static_c * Y_L_c) / (np.linalg.norm(pred_static_c) * np.linalg.norm(Y_L_c) + 1e-8)
+        corr_R_static = np.sum(pred_static_c * Y_R_c) / (np.linalg.norm(pred_static_c) * np.linalg.norm(Y_R_c) + 1e-8)
+        label_static = 1 if corr_L_static > corr_R_static else 0
+        if label_static == w['label']: correct_static += 1
+        
+        total += 1
+        
+        # Compute Cosine Similarity between Reconstructed W and Oracle W
+        sim = np.sum(W_pred * W_oracle) / (np.linalg.norm(W_pred) * np.linalg.norm(W_oracle) + 1e-8)
+        cos_sims.append(sim)
+        
+    acc_recon = correct_recon / total
+    acc_oracle = correct_oracle / total
+    acc_static = correct_static / total
+    mean_sim = np.mean(cos_sims)
+    
+    print(f"[{subj_name}] Acc Recon: {acc_recon*100:.1f}% | Acc Static: {acc_static*100:.1f}% | Acc Oracle: {acc_oracle*100:.1f}% | Mean W-Sim: {mean_sim:.3f}")
     
     return subj_name, {
-        'mean_r2': mean_r2,
-        'max_r2': max_r2,
-        'var_explained': var_explained
+        'acc_recon': acc_recon,
+        'acc_oracle': acc_oracle,
+        'acc_static': acc_static,
+        'mean_sim': mean_sim
     }
 
 def main():
     print("=======================================================")
     print(" PHASE 168: CROSS-MODAL OBSERVABILITY ANALYSIS")
-    print(" Predicting Oracle Trajectory from Unlabeled [CxL, CxR]")
+    print(" TimeSeriesSplit Leakage-Free Latent Regression")
     print("=======================================================\n")
     
     cache_dir = Path('/kaggle/input/datasets/lowkieee/multiband-cache/kaggle/working/multiband_cache')
@@ -217,25 +298,34 @@ def main():
                 
     print(f"\nExtraction & Regression Time: {time.time() - start_time:.2f}s\n")
     
-    global_mean_r2 = []
-    global_max_r2 = []
+    global_recon = []
+    global_static = []
+    global_oracle = []
+    global_sim = []
     
     subjects_sorted = sorted(results.keys())
     for subj in subjects_sorted:
         metrics = results[subj]
         
-        global_mean_r2.append(metrics['mean_r2'])
-        global_max_r2.append(metrics['max_r2'])
+        global_recon.append(metrics['acc_recon'] * 100)
+        global_static.append(metrics['acc_static'] * 100)
+        global_oracle.append(metrics['acc_oracle'] * 100)
+        global_sim.append(metrics['mean_sim'])
         
         print(f"--- Subject: {subj} ---")
-        print(f"  Mean R^2 (18 dims) : {metrics['mean_r2']:.3f}")
-        print(f"  Max R^2 (Best dim) : {metrics['max_r2']:.3f}")
+        print(f"  Reconstructed Accuracy : {metrics['acc_recon']*100:.1f}%")
+        print(f"  Static Baseline Acc    : {metrics['acc_static']*100:.1f}%")
+        print(f"  Oracle EMA Accuracy    : {metrics['acc_oracle']*100:.1f}%")
+        print(f"  Decoder Cos Similarity : {metrics['mean_sim']:.3f}")
+        print()
         
     print("=======================================================")
     print(" GLOBAL OBSERVABILITY AVERAGES")
     print("=======================================================")
-    print(f"Global Mean R^2 : {np.mean(global_mean_r2):.3f}")
-    print(f"Global Max R^2  : {np.mean(global_max_r2):.3f}")
+    print(f"Global Reconstructed Acc : {np.mean(global_recon):.2f}%")
+    print(f"Global Static Baseline   : {np.mean(global_static):.2f}%")
+    print(f"Global Oracle EMA Acc    : {np.mean(global_oracle):.2f}%\n")
+    print(f"Global Decoder Similarity: {np.mean(global_sim):.3f}")
     print("=======================================================")
     
 if __name__ == '__main__':
