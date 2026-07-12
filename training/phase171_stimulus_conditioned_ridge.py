@@ -120,8 +120,14 @@ def process_subject(cache_file):
     acc_shared = []
     acc_residual = []
     
-    # We must operate on flattened sequences for Ridge regression training
-    # For evaluation we need to evaluate per 15s sequence
+    # Diagnostics
+    cos_L = []
+    cos_R = []
+    cos_LR = []
+    norm_L = []
+    norm_R = []
+    delta_rho_L = []
+    delta_rho_R = []
     
     for fold, (train_idx, test_idx) in enumerate(tscv.split(sequences)):
         overlap_margin = int(SEQ_SAMPLES / SEQ_HOP)
@@ -183,8 +189,25 @@ def process_subject(cache_file):
             
             ridge_delta_R = RidgeCV(alphas=np.logspace(-1, 5, 10))
             ridge_delta_R.fit(X_train_R_scaled, E_R)
+            
+            # Diagnostics Extraction
+            W_s = ridge_shared.coef_
+            D_L = ridge_delta_L.coef_
+            D_R = ridge_delta_R.coef_
+            
+            W_L = W_s + D_L
+            W_R = W_s + D_R
+            
+            def cos_sim(a, b): return np.dot(a, b) / (np.linalg.norm(a)*np.linalg.norm(b) + 1e-8)
+            
+            cos_L.append(cos_sim(W_s, W_L))
+            cos_R.append(cos_sim(W_s, W_R))
+            cos_LR.append(cos_sim(W_L, W_R))
+            
+            norm_L.append(np.linalg.norm(D_L) / (np.linalg.norm(W_s) + 1e-8))
+            norm_R.append(np.linalg.norm(D_R) / (np.linalg.norm(W_s) + 1e-8))
+            
         else:
-            # Fallback if a fold lacks L or R examples (extremely rare)
             ridge_delta_L = None
             ridge_delta_R = None
             
@@ -216,6 +239,12 @@ def process_subject(cache_file):
                 
                 if (score_L > score_R) == seq['label']:
                     correct_residual += 1
+                    
+                # Track Delta Rho (Improvement on Correct Target)
+                if seq['label'] == 1:
+                    delta_rho_L.append(calc_corr(Y_pred_L_model, Y_L_seq) - corr_shared_L)
+                else:
+                    delta_rho_R.append(calc_corr(Y_pred_R_model, Y_R_seq) - corr_shared_R)
             else:
                 if (corr_shared_L > corr_shared_R) == seq['label']:
                     correct_residual += 1
@@ -227,9 +256,15 @@ def process_subject(cache_file):
         
     mean_shared = np.mean(acc_shared)
     mean_residual = np.mean(acc_residual)
-    print(f"[{subj_name}] Shared Ridge: {mean_shared*100:.1f}% | Residual Decoders: {mean_residual*100:.1f}%")
     
-    return subj_name, mean_shared, mean_residual
+    m_cos_L = np.mean(cos_L) if cos_L else 0
+    m_cos_LR = np.mean(cos_LR) if cos_LR else 0
+    m_norm_L = np.mean(norm_L) if norm_L else 0
+    m_drho_L = np.mean(delta_rho_L + delta_rho_R) if (delta_rho_L or delta_rho_R) else 0
+    
+    print(f"[{subj_name}] Shared: {mean_shared*100:.1f}% | Res: {mean_residual*100:.1f}% | cos(s,L)={m_cos_L:.3f}, cos(L,R)={m_cos_LR:.3f} | ||D_L||/||W||={m_norm_L:.3f} | dRho_L={m_drho_L:.4f}")
+    
+    return subj_name, mean_shared, mean_residual, m_cos_L, m_cos_LR, m_norm_L, m_drho_L
 
 def main():
     print("=======================================================")
@@ -256,9 +291,9 @@ def main():
     with concurrent.futures.ProcessPoolExecutor(max_workers=mp.cpu_count()) as executor:
         futures = {executor.submit(process_subject, cf): cf for cf in cache_files}
         for future in concurrent.futures.as_completed(futures):
-            subj, acc_s, acc_r = future.result()
+            subj, acc_s, acc_r, cosL, cosLR, normL, drho = future.result()
             if acc_s is not None:
-                results[subj] = (acc_s, acc_r)
+                results[subj] = (acc_s, acc_r, cosL, cosLR, normL, drho)
                 
     print(f"\nExtraction & Training Time: {time.time() - start_time:.2f}s\n")
     
@@ -267,12 +302,13 @@ def main():
     
     subjects_sorted = sorted(results.keys())
     for subj in subjects_sorted:
-        s, r = results[subj]
+        s, r, cL, cLR, nL, dR = results[subj]
         global_s.append(s * 100)
         global_r.append(r * 100)
         print(f"--- Subject: {subj} ---")
         print(f"  Shared Ridge    : {s*100:.1f}%")
-        print(f"  Residual Ridge  : {r*100:.1f}%\n")
+        print(f"  Residual Ridge  : {r*100:.1f}%")
+        print(f"  Diagnostics     : cos(L,R)={cLR:.3f} | ||Delta||/||W||={nL:.3f} | dRho={dR:.4f}\n")
         
     print("=======================================================")
     print(" GLOBAL OBSERVABILITY AVERAGES")
