@@ -98,7 +98,7 @@ def process_subject(cache_file):
         min_len = eeg_raw.shape[1]
         
         eeg_f = apply_modulation_filter(eeg_raw, BROADBAND[0], BROADBAND[1], SR)
-        eeg_f = (eeg_f - np.mean(eeg_f, axis=1, keepdims=True)) / (np.std(eeg_f, axis=1, keepdims=True) + 1e-8)
+        # GPT Fix: Do not z-score per trial! It destroys the impedance drift we want to track.
         
         mask_t, mask_v = get_masks(tr['meta'].get('switch_points', []), min_len)
         segs = extract_segments(mask_v)
@@ -143,17 +143,13 @@ def evaluate_uca_for_subject(subj_name, segments):
     # Reference Covariance (C_0)
     C_0 = np.mean([seg['cov'] for seg in calib_segments], axis=0)
     
-    # Static Whitening (Baseline Phase 162)
-    # In phase 162 we just trained on raw covariances, but let's align calibration to I
-    A_0 = fractional_matrix_power(C_0, -0.5)
-    
+    # Train fixed Classifier on raw covariances (geometry anchored to C_0)
     X_train_cov = []
     y_train = []
     for seg in calib_segments:
-        X_aligned = A_0 @ seg['X']
-        cov_aligned = compute_covariance(X_aligned)
-        cov_aligned += np.eye(cov_aligned.shape[0]) * 1e-5
-        X_train_cov.append(cov_aligned)
+        cov_raw = seg['cov']
+        cov_raw += np.eye(cov_raw.shape[0]) * 1e-5
+        X_train_cov.append(cov_raw)
         y_train.append(seg['label'])
         
     X_train_cov = np.array(X_train_cov)
@@ -180,26 +176,22 @@ def evaluate_uca_for_subject(subj_name, segments):
         y_true = seg['label']
         y_test.append(y_true)
         
-        # 2a. Fixed Baseline (No Covariance Updating - similar to Phase 162)
-        X_fixed = A_0 @ X_test
-        cov_fixed = compute_covariance(X_fixed)
+        # 2a. Fixed Baseline (No Covariance Updating - Phase 162 equivalent)
+        cov_fixed = compute_covariance(X_test)
         cov_fixed += np.eye(cov_fixed.shape[0]) * 1e-5
         prob_fixed = clf.predict_proba(np.expand_dims(cov_fixed, 0))[0, 1]
         pred_fixed = clf.predict(np.expand_dims(cov_fixed, 0))[0]
         y_pred_probs_fixed.append(prob_fixed)
         y_preds_fixed.append(pred_fixed)
         
-        # 2b. Unsupervised Covariance Alignment (UCA)
-        current_cov = compute_covariance(X_test)
-        
-        # Update running EMA covariance
-        C_t = (1.0 - ALPHA) * C_t + ALPHA * current_cov
-        
-        # Compute online whitening transform
+        # 2b. Unsupervised Covariance Alignment (UCA) - Causal
+        # Compute transport transform from current running C_t to reference C_0
         A_t = fractional_matrix_power(C_t, -0.5)
+        C_0_sqrt = fractional_matrix_power(C_0, 0.5)
+        T_t = C_0_sqrt @ A_t
         
-        # Align test data
-        X_aligned = A_t @ X_test
+        # Align test data (using running background C_t from PAST trials)
+        X_aligned = T_t @ X_test
         cov_aligned = compute_covariance(X_aligned)
         cov_aligned += np.eye(cov_aligned.shape[0]) * 1e-5
         
@@ -209,6 +201,10 @@ def evaluate_uca_for_subject(subj_name, segments):
         
         y_pred_probs_uca.append(prob_uca)
         y_preds_uca.append(pred_uca)
+        
+        # Update running EMA covariance for NEXT trial (Strictly Causal)
+        current_cov = compute_covariance(X_test)
+        C_t = (1.0 - ALPHA) * C_t + ALPHA * current_cov
         
     # Metrics
     metrics = {
