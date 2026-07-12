@@ -76,9 +76,9 @@ def prepare_subject_windows(cache_file, device):
         env_l_f = (env_l_f - np.mean(env_l_f, axis=1, keepdims=True)) / (np.std(env_l_f, axis=1, keepdims=True) + 1e-8)
         env_r_f = (env_r_f - np.mean(env_r_f, axis=1, keepdims=True)) / (np.std(env_r_f, axis=1, keepdims=True) + 1e-8)
         
-        eeg = torch.tensor(eeg_f, dtype=torch.float32, device=device)
-        env_l = torch.tensor(env_l_f[0], dtype=torch.float32, device=device)
-        env_r = torch.tensor(env_r_f[0], dtype=torch.float32, device=device)
+        eeg = torch.tensor(eeg_f.copy(), dtype=torch.float32, device=device)
+        env_l = torch.tensor(env_l_f[0].copy(), dtype=torch.float32, device=device)
+        env_r = torch.tensor(env_r_f[0].copy(), dtype=torch.float32, device=device)
         
         T = eeg.shape[1]
         X_trial = create_toeplitz_features_pt(eeg, MAX_LAG_SAMPLES)
