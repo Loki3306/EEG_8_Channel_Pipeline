@@ -149,7 +149,7 @@ def run_experiment(cache_file, permute=False):
     print()
 
 if __name__ == "__main__":
-    cache_path = os.path.join(CACHE_DIR, "aasd_S10_cache.pt")
+    cache_path = os.path.join(CACHE_DIR, "S10_multiband.pt")
     if not os.path.exists(cache_path):
         print(f"Run locally on valid dataset: {cache_path} not found.")
     else:
