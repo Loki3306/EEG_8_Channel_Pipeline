@@ -139,7 +139,7 @@ def run_experiment(cache_file, permute=False):
         r_att_list.append(c_att)
         r_unatt_list.append(c_unatt)
         
-        if (abs(c_L) > abs(c_R) and labels[i] == 1) or (abs(c_R) > abs(c_L) and labels[i] == 0):
+        if (c_L > c_R and labels[i] == 1) or (c_R > c_L and labels[i] == 0):
             correct += 1
             
     r_att_arr = np.array(r_att_list)
