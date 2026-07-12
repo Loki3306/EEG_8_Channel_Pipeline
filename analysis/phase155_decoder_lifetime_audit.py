@@ -22,9 +22,9 @@ BROADBAND = (0.5, 8.0)
 RIDGE_LAMBDA = 100.0
 
 WINDOWS_PER_MIN = 120
-CALIB_MINUTES = [1, 2, 5, 10, 20, 40]
+CALIB_MINUTES = [1, 2, 5, 10, 20]
 CALIB_SIZES = [m * WINDOWS_PER_MIN for m in CALIB_MINUTES]
-HOLDOUT_MINUTES = 20
+HOLDOUT_MINUTES = 15
 HOLDOUT_WINDOWS = HOLDOUT_MINUTES * WINDOWS_PER_MIN
 
 LIFETIME_TRAIN_MIN = 10
@@ -191,15 +191,15 @@ def process_subject(cache_file, device_id):
     expB_results = []
     expC_results = []
     
-    # Require at least 60 minutes (7200 windows) of data
-    if total_windows < 7200:
+    # Require at least 45 minutes (5400 windows) of data
+    if total_windows < 5400:
         return subj_name, expA_results, expB_results, expC_results
         
     # --- EXPERIMENT A: CALIBRATION CURVE (Fixed End, Expanding Start) ---
-    # We fix the end of calibration at Minute 40 (window 4800).
-    # This ensures the gap to the Test Set (Minute 40-60) is exactly 0 for all sweep sizes!
-    CALIB_END_WIN = 40 * WINDOWS_PER_MIN
-    TEST_END_WIN = 60 * WINDOWS_PER_MIN
+    # We fix the end of calibration at Minute 30 (window 3600).
+    # This ensures the gap to the Test Set (Minute 30-45) is exactly 0 for all sweep sizes!
+    CALIB_END_WIN = 30 * WINDOWS_PER_MIN
+    TEST_END_WIN = 45 * WINDOWS_PER_MIN
     holdout_set = windows[CALIB_END_WIN:TEST_END_WIN]
     
     for c_min, c_win in zip(CALIB_MINUTES, CALIB_SIZES):
@@ -301,7 +301,7 @@ def main():
         dfC.to_csv("phase155_experimentC_sliding.csv", index=False)
         
         print("\n=======================================================")
-        print(" EXPERIMENT A: CALIBRATION CURVE (Fixed Test 40-60m)")
+        print(" EXPERIMENT A: CALIBRATION CURVE (Fixed Test 30-45m)")
         print("=======================================================")
         meanA = dfA.groupby('calib_min')[['acc', 'auroc']].mean().reset_index()
         for _, row in meanA.iterrows():
