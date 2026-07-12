@@ -113,7 +113,7 @@ def process_subject(cache_file):
     sequences = extract_sequences(cache_file)
     
     if len(sequences) < 50:
-        return subj_name, None, None
+        return subj_name, None, None, None, None, None, None
         
     tscv = TimeSeriesSplit(n_splits=5)
     
