@@ -34,6 +34,7 @@ def get_git_revision_hash() -> str:
     except Exception:
         return "unknown"
 
+@torch.no_grad()
 def evaluate_catcn_multiwindow_batched(model, X, Y_A, Y_B, device, batch_size=256):
     """
     Batched multi-window evaluation for CA-TCN.
@@ -70,7 +71,7 @@ def evaluate_catcn_multiwindow_batched(model, X, Y_A, Y_B, device, batch_size=25
                 delta_list = []
                 for b_idx in range(0, bx.size(0), batch_size):
                     d_b, _, _ = model(bx[b_idx:b_idx+batch_size], bya[b_idx:b_idx+batch_size], byb[b_idx:b_idx+batch_size])
-                    delta_list.append(d_b.cpu())
+                    delta_list.append(d_b.detach().cpu())
                 deltas = torch.cat(delta_list).numpy()
                 d_1s = deltas.tolist()
                 v_1s = [1.0 if d > 0 else (0.5 if d == 0 else 0.0) for d in d_1s]
@@ -96,7 +97,7 @@ def evaluate_catcn_multiwindow_batched(model, X, Y_A, Y_B, device, batch_size=25
                 delta_list = []
                 for b_idx in range(0, bx.size(0), batch_size):
                     d_b, _, _ = model(bx[b_idx:b_idx+batch_size], bya[b_idx:b_idx+batch_size], byb[b_idx:b_idx+batch_size])
-                    delta_list.append(d_b.cpu())
+                    delta_list.append(d_b.detach().cpu())
                 deltas = torch.cat(delta_list).numpy()
                 d_5s = deltas.tolist()
                 v_5s = [1.0 if d > 0 else (0.5 if d == 0 else 0.0) for d in d_5s]
@@ -107,74 +108,75 @@ def evaluate_catcn_multiwindow_batched(model, X, Y_A, Y_B, device, batch_size=25
     windows_all = [1, 2, 5, 10, 15, 20, 25, 30, 35, 40]
     results = {}
     
-    for w in windows_all:
-        c_accum_1s, n_accum_1s = 0.0, 0
-        c_vote_1s = 0.0
-        m_1s = w
-        for d_list, v_list in trial_sub_1s:
-            b_start = 0
-            while b_start + m_1s <= len(d_list):
-                block_d = d_list[b_start : b_start + m_1s]
-                block_v = v_list[b_start : b_start + m_1s]
-                if sum(block_d) > 0: c_accum_1s += 1.0
-                elif sum(block_d) == 0: c_accum_1s += 0.5
-                
-                if sum(block_v) > m_1s / 2.0: c_vote_1s += 1.0
-                elif sum(block_v) == m_1s / 2.0: c_vote_1s += 0.5
-                
-                n_accum_1s += 1
-                b_start += m_1s
-        acc_accum_1s = c_accum_1s / max(n_accum_1s, 1)
-        acc_vote_1s = c_vote_1s / max(n_accum_1s, 1)
-        
-        acc_accum_5s = None
-        if w >= 5 and w % 5 == 0:
-            m_5s = w // 5
-            c_accum_5s, n_accum_5s = 0.0, 0
-            for d_list, _ in trial_sub_5s:
+    with torch.no_grad():
+        for w in windows_all:
+            c_accum_1s, n_accum_1s = 0.0, 0
+            c_vote_1s = 0.0
+            m_1s = w
+            for d_list, v_list in trial_sub_1s:
                 b_start = 0
-                while b_start + m_5s <= len(d_list):
-                    block_d = d_list[b_start : b_start + m_5s]
-                    if sum(block_d) > 0: c_accum_5s += 1.0
-                    elif sum(block_d) == 0: c_accum_5s += 0.5
-                    n_accum_5s += 1
-                    b_start += m_5s
-            acc_accum_5s = c_accum_5s / max(n_accum_5s, 1)
+                while b_start + m_1s <= len(d_list):
+                    block_d = d_list[b_start : b_start + m_1s]
+                    block_v = v_list[b_start : b_start + m_1s]
+                    if sum(block_d) > 0: c_accum_1s += 1.0
+                    elif sum(block_d) == 0: c_accum_1s += 0.5
+                    
+                    if sum(block_v) > m_1s / 2.0: c_vote_1s += 1.0
+                    elif sum(block_v) == m_1s / 2.0: c_vote_1s += 0.5
+                    
+                    n_accum_1s += 1
+                    b_start += m_1s
+            acc_accum_1s = c_accum_1s / max(n_accum_1s, 1)
+            acc_vote_1s = c_vote_1s / max(n_accum_1s, 1)
             
-        # Batched direct evaluation on full window length
-        c_direct, n_direct = 0.0, 0
-        w_samples = int(w * FS)
-        d_x, d_ya, d_yb = [], [], []
-        for i in range(len(X)):
-            x_np, ya_np, yb_np = X[i], Y_A[i], Y_B[i]
-            start = 0
-            while start + w_samples <= x_np.shape[1]:
-                end = start + w_samples
-                d_x.append(x_np[:, start:end])
-                d_ya.append(ya_np[:, start:end])
-                d_yb.append(yb_np[:, start:end])
-                start += w_samples
-        if d_x:
-            bx = torch.from_numpy(np.stack(d_x, axis=0)).to(device, dtype=torch.float32)
-            bya = torch.from_numpy(np.stack(d_ya, axis=0)).to(device, dtype=torch.float32)
-            byb = torch.from_numpy(np.stack(d_yb, axis=0)).to(device, dtype=torch.float32)
-            delta_list = []
-            for b_idx in range(0, bx.size(0), batch_size):
-                d_b, _, _ = model(bx[b_idx:b_idx+batch_size], bya[b_idx:b_idx+batch_size], byb[b_idx:b_idx+batch_size])
-                delta_list.append(d_b.cpu())
-            deltas = torch.cat(delta_list).numpy()
-            c_direct = float((deltas > 0).sum() + 0.5 * (deltas == 0).sum())
-            n_direct = len(deltas)
-            acc_direct = c_direct / max(n_direct, 1)
-        else:
-            acc_direct = 0.5
-            
-        results[w] = {
-            "accum_1s": acc_accum_1s,
-            "vote_1s": acc_vote_1s,
-            "accum_5s": acc_accum_5s,
-            "direct": acc_direct
-        }
+            acc_accum_5s = None
+            if w >= 5 and w % 5 == 0:
+                m_5s = w // 5
+                c_accum_5s, n_accum_5s = 0.0, 0
+                for d_list, _ in trial_sub_5s:
+                    b_start = 0
+                    while b_start + m_5s <= len(d_list):
+                        block_d = d_list[b_start : b_start + m_5s]
+                        if sum(block_d) > 0: c_accum_5s += 1.0
+                        elif sum(block_d) == 0: c_accum_5s += 0.5
+                        n_accum_5s += 1
+                        b_start += m_5s
+                acc_accum_5s = c_accum_5s / max(n_accum_5s, 1)
+                
+            # Batched direct evaluation on full window length
+            c_direct, n_direct = 0.0, 0
+            w_samples = int(w * FS)
+            d_x, d_ya, d_yb = [], [], []
+            for i in range(len(X)):
+                x_np, ya_np, yb_np = X[i], Y_A[i], Y_B[i]
+                start = 0
+                while start + w_samples <= x_np.shape[1]:
+                    end = start + w_samples
+                    d_x.append(x_np[:, start:end])
+                    d_ya.append(ya_np[:, start:end])
+                    d_yb.append(yb_np[:, start:end])
+                    start += w_samples
+            if d_x:
+                bx = torch.from_numpy(np.stack(d_x, axis=0)).to(device, dtype=torch.float32)
+                bya = torch.from_numpy(np.stack(d_ya, axis=0)).to(device, dtype=torch.float32)
+                byb = torch.from_numpy(np.stack(d_yb, axis=0)).to(device, dtype=torch.float32)
+                delta_list = []
+                for b_idx in range(0, bx.size(0), batch_size):
+                    d_b, _, _ = model(bx[b_idx:b_idx+batch_size], bya[b_idx:b_idx+batch_size], byb[b_idx:b_idx+batch_size])
+                    delta_list.append(d_b.detach().cpu())
+                deltas = torch.cat(delta_list).numpy()
+                c_direct = float((deltas > 0).sum() + 0.5 * (deltas == 0).sum())
+                n_direct = len(deltas)
+                acc_direct = c_direct / max(n_direct, 1)
+            else:
+                acc_direct = 0.5
+                
+            results[w] = {
+                "accum_1s": acc_accum_1s,
+                "vote_1s": acc_vote_1s,
+                "accum_5s": acc_accum_5s,
+                "direct": acc_direct
+            }
         
     return results
 
