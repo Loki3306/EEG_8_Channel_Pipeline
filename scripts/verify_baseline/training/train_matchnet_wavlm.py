@@ -100,9 +100,15 @@ def prepare_dataset(examples, channels, lowcut, highcut, subject_id, mapping, en
             env_a = envelopes[fname_a]
             env_b = envelopes[fname_b]
             
-            # DTU convention: wavA is ALWAYS attended, wavB is ALWAYS unattended
-            env_attended = env_a
-            env_unattended = env_b
+            # Ground-truth DTU attention label:
+            # 1 = Stream A attended, Stream B distractor
+            # 2 = Stream B attended, Stream A distractor
+            if getattr(ex, 'label', 1) == 2:
+                env_attended = env_b
+                env_unattended = env_a
+            else:
+                env_attended = env_a
+                env_unattended = env_b
             
             if len(env_attended.shape) == 3:
                 env_attended = env_attended[audio_layer_idx]
@@ -148,31 +154,38 @@ def prepare_dataset(examples, channels, lowcut, highcut, subject_id, mapping, en
 def select_top_channels_from_train(subject_examples, train_paths, mapping, envelopes, num_channels, lowcut=1.0, highcut=6.0, audio_layer_idx=0):
     """
     Ranks all 64 DTU channels using ONLY the training subjects (zero leakage into held-out subject).
-    Computes absolute correlation between each EEG channel and attended speech envelope.
+    Searches across physiological lags [0 to 500 ms] and uses the peak absolute cross-correlation
+    between each EEG channel and the verified attended speech envelope.
     """
     if num_channels >= 64:
         return list(range(64)), np.ones(64)
         
     channel_scores = np.zeros(64, dtype=np.float64)
     channel_counts = np.zeros(64, dtype=np.int32)
+    # Physiological latency search grid: 0 to 500 ms in ~62.5 ms steps (0, 4, 8, 12, 16, 20, 24, 28, 32 samples at 64 Hz)
+    lag_samples_grid = [0, 4, 8, 12, 16, 20, 24, 28, 32]
     
     for p in train_paths:
         sub_key = p.stem.replace("_data_preproc", "")
         exs = subject_examples[str(p)]
-        # Sample up to 10 trials per subject to compute fast correlation ranking
-        sample_exs = exs[:10]
+        # Use 15 representative training trials per subject
+        sample_exs = exs[:15]
         for i, ex in enumerate(sample_exs):
             trial_key = f"trial_{i}"
             if sub_key in mapping and trial_key in mapping[sub_key]:
                 fname_a = mapping[sub_key][trial_key]["wavA"]["filename"]
-                if fname_a not in envelopes:
-                    continue
-                env_a = envelopes[fname_a]
-                if len(env_a.shape) == 3:
-                    env_a = env_a[audio_layer_idx]
+                fname_b = mapping[sub_key][trial_key]["wavB"]["filename"]
                 
-                # Speech envelope energy across bands: mean across bands -> [T]
-                env_1d = env_a.mean(axis=0)
+                # Check actual attended stream based on ex.label
+                att_fname = fname_b if getattr(ex, 'label', 1) == 2 else fname_a
+                if att_fname not in envelopes:
+                    continue
+                env_att = envelopes[att_fname]
+                if len(env_att.shape) == 3:
+                    env_att = env_att[audio_layer_idx]
+                
+                # Speech envelope energy across 28 bands -> 1D
+                env_1d = env_att.mean(axis=0)
                 env_1d = butter_bandpass_filter(env_1d, lowcut, highcut, FS, axis=0)
                 env_1d = (env_1d - env_1d.mean()) / (env_1d.std() + 1e-12)
                 
@@ -189,9 +202,19 @@ def select_top_channels_from_train(subject_examples, train_paths, mapping, envel
                 eeg_std = eeg_all.std(axis=1, keepdims=True) + 1e-12
                 eeg_norm = (eeg_all - eeg_mean) / eeg_std
                 
-                # Pearson correlation with speech envelope for each channel
-                corrs = np.abs((eeg_norm * env_sub[None, :]).mean(axis=1)) # [64]
-                channel_scores += corrs
+                # Multi-lag peak cross-correlation across physiological latencies
+                corrs_tau = []
+                for s in lag_samples_grid:
+                    if s == 0:
+                        r = (eeg_norm * env_sub[None, :]).mean(axis=1)
+                    elif min_len > s:
+                        r = (eeg_norm[:, s:] * env_sub[None, :-s]).mean(axis=1)
+                    else:
+                        r = np.zeros(64)
+                    corrs_tau.append(np.abs(r))
+                    
+                peak_corrs = np.max(np.stack(corrs_tau, axis=0), axis=0) # [64]
+                channel_scores += peak_corrs
                 channel_counts += 1
                 
     avg_scores = channel_scores / np.maximum(channel_counts, 1)

@@ -7,6 +7,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
+from torch.utils.data import DataLoader
 import numpy as np
 import psutil
 import gc
@@ -224,12 +225,11 @@ def train_catcn_loso(channels=None, num_channels=64, rank_channels=False, lowcut
         train_dataset = ChunkDataset(X_tr_full, YA_tr_full, YB_tr_full, chunk_indices)
         train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=num_workers)
         
-        # Initialize CA-TCN Model
         model = CATCNDirectDecoder(
             eeg_channels=len(fold_channels),
             audio_channels=28,
             hidden_dim=64,
-            dilations=[1, 2, 4, 8],
+            max_lag_samples=8,
             dropout=0.2
         ).to(device)
         
