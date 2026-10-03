@@ -188,8 +188,8 @@ def select_top_channels_from_train(subject_examples, train_paths, mapping, envel
                 env_1d = butter_bandpass_filter(env_1d, lowcut, highcut, FS, axis=0)
                 env_1d = (env_1d - env_1d.mean()) / (env_1d.std() + 1e-12)
                 
-                # EEG for all 64 channels: [64, T]
-                eeg_all = ex.eeg.T # [64, T]
+                # EEG for all 64 channels: [64, T] (Slice out the 2 EXG channels)
+                eeg_all = ex.eeg.T[:64, :] # [64, T]
                 eeg_all = butter_bandpass_filter(eeg_all, lowcut, highcut, FS, axis=1)
                 
                 min_len = min(eeg_all.shape[1], len(env_1d))
