@@ -9,13 +9,21 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+VERIFY_ROOT = REPO_ROOT / "scripts" / "verify_baseline"
+if str(VERIFY_ROOT) not in sys.path:
+    sys.path.insert(0, str(VERIFY_ROOT))
+
 from src.streaming.pipeline import StreamingAADPipeline
 from scripts.verify_baseline.models.catcn import CATCNDirectDecoder
+from scripts.verify_baseline.training.montages import MONTAGES
+from scripts.verify_baseline.training.train_matchnet_wavlm import get_mapping_data, prepare_dataset, FS
+from scripts.verify_baseline.baselines.ridge_aad import load_subject_examples, subject_files
 
 def simulate_realtime_stream(
     eeg_stream: np.ndarray,
     audio_a_stream: np.ndarray,
     audio_b_stream: np.ndarray,
+    model: torch.nn.Module = None,
     fs: float = 64.0,
     chunk_samples: int = 16, # 16 samples @ 64 Hz = 250 ms chunk
     speed_factor: float = 1.0,
@@ -24,22 +32,23 @@ def simulate_realtime_stream(
     verbose: bool = True
 ):
     """
-    Simulates real-time arrival of multichannel EEG and candidate audio envelopes.
+    Simulates real-time arrival of multichannel EEG and candidate audio envelopes from genuine DTU recordings.
     
     Parameters:
         eeg_stream: [n_total_samples, n_channels]
         audio_a_stream: [n_total_samples]
         audio_b_stream: [n_total_samples]
+        model: Trained CATCNDirectDecoder
         fs: Sampling rate (64 Hz)
         chunk_samples: Chunk size arriving per clock tick (e.g. 16 samples = 250 ms)
         speed_factor: 1.0 = true wall-clock real time; 0.0 = as fast as possible; >1.0 = accelerated
     """
     n_total, n_channels = eeg_stream.shape
-    assert len(audio_a_stream) == n_total
-    assert len(audio_b_stream) == n_total
+    assert len(audio_a_stream) == n_total, f"Audio A length mismatch: {len(audio_a_stream)} vs {n_total}"
+    assert len(audio_b_stream) == n_total, f"Audio B length mismatch: {len(audio_b_stream)} vs {n_total}"
     
-    # Initialize CA-TCN model (randomly initialized or loaded)
-    model = CATCNDirectDecoder(eeg_channels=n_channels, audio_channels=1, hidden_dim=64, max_lag_samples=8)
+    if model is None:
+        model = CATCNDirectDecoder(eeg_channels=n_channels, audio_channels=1, hidden_dim=64, max_lag_samples=8)
     model.eval()
     
     # Initialize streaming pipeline
@@ -70,10 +79,9 @@ def simulate_realtime_stream(
     step_count = 0
     switches = 0
     total_compute_ms = 0.0
+    acoustic_delay_ms = 0.0
     
     while idx < n_total:
-        t_chunk_start = time.perf_counter()
-        
         # Slice current incoming hardware block
         end_idx = min(idx + chunk_samples, n_total)
         chunk_e = eeg_stream[idx:end_idx]
@@ -83,7 +91,6 @@ def simulate_realtime_stream(
         
         # 1. Fast Acoustic Pipeline Simulation (< 10 ms requirement)
         t_audio_start = time.perf_counter()
-        # Simulated instant linear mixing of current audio sample block using active gains
         active_ga = pipeline.decision_layer.gain_a
         active_gb = pipeline.decision_layer.gain_b
         _simulated_acoustic_mix = active_ga * chunk_a + active_gb * chunk_b
@@ -128,30 +135,67 @@ def simulate_realtime_stream(
     print(f"  Total Stream Time: {sim_time_sec:.1f} s | Wall-Clock Time: {total_wall_sec:.2f} s")
     print(f"  Inference Steps: {step_count} | Total Speaker Switches: {switches}")
     print(f"  Mean BCI Compute Latency (T_compute): {mean_compute_ms:.2f} ms (< 500 ms step budget)")
-    print(f"  Digital Software Mixing Computation Time: {acoustic_delay_ms:.4f} ms (Note: Excludes physical ADC/DAC/OS latency)")
+    print(f"  Digital Software Mixing Computation Time: {acoustic_delay_ms:.4f} ms (Excludes physical DAC/OS latency)")
     print("=" * 85)
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Real-Time CA-TCN Replay Simulator")
-    parser.add_argument("--duration_sec", type=float, default=20.0, help="Duration of stream to simulate in seconds")
-    parser.add_argument("--speed_factor", type=float, default=2.0, help="Clock speedup factor (e.g. 1.0=realtime, 2.0=2x speed, 0=max)")
-    parser.add_argument("--channels", type=int, default=8, help="Number of EEG channels")
+    parser = argparse.ArgumentParser(description="Real-Time CA-TCN DTU Replay Simulator")
+    parser.add_argument("--subject", type=str, default="S1_data_preproc", help="DTU Subject name")
+    parser.add_argument("--montage", type=str, default="near_ear_expanded", help="Electrode montage")
+    parser.add_argument("--trial_idx", type=int, default=0, help="Trial index to replay")
+    parser.add_argument("--checkpoint", type=str, default="", help="Path to trained model checkpoint")
+    parser.add_argument("--speed_factor", type=float, default=2.0, help="Clock speedup factor (1.0=realtime, 2.0=2x speed, 0=max)")
     parser.add_argument("--window_sec", type=float, default=5.0, help="Rolling window size in seconds")
     parser.add_argument("--step_sec", type=float, default=0.5, help="Rolling step size in seconds")
     args = parser.parse_args()
     
-    # Generate synthetic streaming multichannel trial
-    n_samples = int(args.duration_sec * 64.0)
-    np.random.seed(42)
-    syn_eeg = np.random.randn(n_samples, args.channels).astype(np.float32)
-    syn_a = np.random.randn(n_samples).astype(np.float32)
-    syn_b = np.random.randn(n_samples).astype(np.float32)
+    montage_channels = MONTAGES[args.montage]
+    n_ch = len(montage_channels)
+    model = CATCNDirectDecoder(eeg_channels=n_ch, audio_channels=1, hidden_dim=64, max_lag_samples=8)
+    
+    ckpt_path = args.checkpoint
+    if not ckpt_path and Path("/kaggle/working/catcn_deployment_weights.pt").exists():
+        ckpt_path = "/kaggle/working/catcn_deployment_weights.pt"
+        
+    if ckpt_path and Path(ckpt_path).exists():
+        print(f"[MODEL] Loading trained checkpoint from: {ckpt_path}")
+        state = torch.load(ckpt_path, map_location="cpu")
+        model.load_state_dict(state.get("model_state_dict", state.get("state_dict", state)))
+        print("[MODEL] Checkpoint loaded successfully!")
+    else:
+        print("[MODEL WARNING] No checkpoint found. Running with initialized weights.")
+        
+    model.eval()
+
+    files = subject_files()
+    target_files = [f for f in files if args.subject in f.name]
+    if not target_files:
+        raise FileNotFoundError(f"Could not find DTU subject file for {args.subject} in DATA_DIR. Provide genuine DTU data.")
+        
+    print(f"[DATA] Loading genuine DTU recording: {target_files[0].name}...")
+    mapping, envelopes = get_mapping_data("gammatone")
+    test_exs = list(load_subject_examples(target_files[0]))
+    
+    _, YA_all, YB_all = prepare_dataset(test_exs, montage_channels, 1.0, 6.0, args.subject, mapping, envelopes)
+    
+    trial_idx = min(args.trial_idx, len(test_exs) - 1, len(YA_all) - 1)
+    raw_eeg = test_exs[trial_idx].eeg[:, montage_channels].astype(np.float32)
+    ya = YA_all[trial_idx].mean(axis=0).squeeze() if YA_all[trial_idx].ndim > 1 else YA_all[trial_idx].squeeze()
+    yb = YB_all[trial_idx].mean(axis=0).squeeze() if YB_all[trial_idx].ndim > 1 else YB_all[trial_idx].squeeze()
+    
+    min_len = min(len(raw_eeg), len(ya), len(yb))
+    raw_eeg = raw_eeg[:min_len]
+    ya = ya[:min_len]
+    yb = yb[:min_len]
+    
+    print(f"[DATA] Loaded Trial {trial_idx}: {min_len} samples ({min_len / FS:.1f} seconds) of genuine 8-channel EEG & speech.")
     
     simulate_realtime_stream(
-        eeg_stream=syn_eeg,
-        audio_a_stream=syn_a,
-        audio_b_stream=syn_b,
-        fs=64.0,
+        eeg_stream=raw_eeg,
+        audio_a_stream=ya,
+        audio_b_stream=yb,
+        model=model,
+        fs=FS,
         chunk_samples=16,
         speed_factor=args.speed_factor,
         window_sec=args.window_sec,

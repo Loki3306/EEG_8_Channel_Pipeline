@@ -147,12 +147,7 @@ def run_v1_1_validation(args):
             trials_yb.append(YB_te[idx][:min_len])
         print(f"[DATA] Successfully loaded {len(trials_raw_eeg)} genuine DTU trials for {args.subject}.")
     else:
-        print(f"[DATA INFO] No local DTU data found for {args.subject}. Generating synthetic continuous benchmark data.")
-        n_samples_trial = int(60.0 * fs)
-        for _ in range(args.trials):
-            trials_raw_eeg.append(np.random.randn(n_samples_trial, n_ch).astype(np.float32))
-            trials_ya.append(np.random.randn(n_samples_trial).astype(np.float32))
-            trials_yb.append(np.random.randn(n_samples_trial).astype(np.float32))
+        raise FileNotFoundError(f"No DTU patient recording found for {args.subject}. The deployment validation protocol strictly requires genuine patient recordings.")
 
     # -------------------------------------------------------------
     # TEST 1 & 2: Offline (filtfilt) vs. Causal Streaming vs. Delay Compensated

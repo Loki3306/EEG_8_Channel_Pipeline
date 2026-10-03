@@ -66,25 +66,22 @@ def run_streaming_equivalence_audit(
         target_file = [f for f in files if subject_name in f.name]
         if target_file:
             print(f"[DATA] Loading real DTU recording: {target_file[0].name}...")
-            examples = load_subject_examples(target_file[0], label_mapping={1: "A", 2: "B"})
+            examples = list(load_subject_examples(target_file[0]))
             X_all, YA_all, YB_all = prepare_dataset(
-                examples, mapping, envelopes, channels=channels, lowcut=1.0, highcut=6.0, rank_channels=False
+                examples, channels, 1.0, 6.0, subject_name, mapping, envelopes
             )
             for i in range(min(5, len(X_all))):
                 trials_eeg.append(X_all[i].T) # [T, C]
-                trials_ya.append(YA_all[i].squeeze(0)) # [T]
-                trials_yb.append(YB_all[i].squeeze(0)) # [T]
+                ya_v = YA_all[i].mean(axis=0).squeeze() if YA_all[i].ndim > 1 else YA_all[i].squeeze()
+                yb_v = YB_all[i].mean(axis=0).squeeze() if YB_all[i].ndim > 1 else YB_all[i].squeeze()
+                trials_ya.append(ya_v) # [T]
+                trials_yb.append(yb_v) # [T]
             print(f"[DATA] Loaded {len(trials_eeg)} real DTU trials.")
+        else:
+            raise FileNotFoundError(f"No DTU data file found for {subject_name}")
     except Exception as e:
-        print(f"[DATA INFO] Real DTU dataset path unavailable in current local environment ({e}).")
-        print(f"[DATA] Generating {n_synthetic_trials} realistic multi-channel continuous trials for audit...")
-        for _ in range(n_synthetic_trials):
-            e = np.random.randn(n_samples_per_trial, n_ch).astype(np.float32)
-            ya = np.random.randn(n_samples_per_trial).astype(np.float32)
-            yb = np.random.randn(n_samples_per_trial).astype(np.float32)
-            trials_eeg.append(e)
-            trials_ya.append(ya)
-            trials_yb.append(yb)
+        print(f"[DATA ERROR] Could not load genuine DTU data: {e}")
+        raise e
             
     # 3. Setup Streaming Pipeline
     pipeline = StreamingAADPipeline(
