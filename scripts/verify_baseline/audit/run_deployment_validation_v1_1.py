@@ -33,7 +33,8 @@ def run_v1_1_validation(
     subject_name: str = "S1_data_preproc",
     montage_name: str = "near_ear_expanded",
     n_trials: int = 10,
-    trial_duration_sec: float = 60.0
+    trial_duration_sec: float = 60.0,
+    checkpoint_path: str = ""
 ):
     """
     Executes the 5 Deployment Validation v1.1 experiments:
@@ -55,6 +56,20 @@ def run_v1_1_validation(
     torch.manual_seed(42)
     np.random.seed(42)
     model = CATCNDirectDecoder(eeg_channels=n_ch, audio_channels=1, hidden_dim=64, max_lag_samples=8)
+    
+    if checkpoint_path and Path(checkpoint_path).exists():
+        print(f"[MODEL] Loading trained checkpoint from: {checkpoint_path}")
+        state = torch.load(checkpoint_path, map_location="cpu")
+        if "model_state_dict" in state:
+            model.load_state_dict(state["model_state_dict"])
+        elif "state_dict" in state:
+            model.load_state_dict(state["state_dict"])
+        else:
+            model.load_state_dict(state)
+        print("[MODEL] Checkpoint loaded successfully!")
+    else:
+        print("[MODEL] No checkpoint specified. Running with initialized weights.")
+        
     model.eval()
     
     # -------------------------------------------------------------
@@ -73,7 +88,7 @@ def run_v1_1_validation(
         files = subject_files()
         target = [f for f in files if subject_name in f.name]
         if target:
-            examples = load_subject_examples(target[0], label_mapping={1: "A", 2: "B"})
+            examples = load_subject_examples(target[0])
             X_all, YA_all, YB_all = prepare_dataset(
                 examples, mapping, envelopes, channels=channels, lowcut=1.0, highcut=6.0, rank_channels=False
             )
@@ -82,7 +97,7 @@ def run_v1_1_validation(
                 trials_ya.append(YA_all[i].squeeze(0))
                 trials_yb.append(YB_all[i].squeeze(0))
             is_real_data = True
-            print(f"[DATA] Loaded {len(trials_raw_eeg)} genuine DTU trials.")
+            print(f"[DATA] Successfully loaded {len(trials_raw_eeg)} genuine DTU trials for {target[0].name}!")
     except Exception:
         print("[DATA INFO] Running on synthetic continuous benchmark data (local mode).")
         for _ in range(n_trials):
@@ -271,10 +286,12 @@ if __name__ == "__main__":
     parser.add_argument("--subject", type=str, default="S1_data_preproc", help="Subject name")
     parser.add_argument("--montage", type=str, default="near_ear_expanded", help="Montage name")
     parser.add_argument("--trials", type=int, default=10, help="Number of trials")
+    parser.add_argument("--checkpoint", type=str, default="", help="Path to trained model checkpoint")
     args = parser.parse_args()
     
     run_v1_1_validation(
         subject_name=args.subject,
         montage_name=args.montage,
-        n_trials=args.trials
+        n_trials=args.trials,
+        checkpoint_path=args.checkpoint
     )
