@@ -19,6 +19,22 @@ from scripts.verify_baseline.training.montages import MONTAGES
 from scripts.verify_baseline.training.train_matchnet_wavlm import get_mapping_data, prepare_dataset, FS
 from scripts.verify_baseline.baselines.ridge_aad import load_subject_examples, subject_files
 
+def format_bipolar_meter(score: float, width: int = 7) -> str:
+    """Renders a visual spatial steering meter between Stream A (left) and Stream B (right)."""
+    clamped = max(-1.0, min(1.0, score))
+    # score > 0 -> Stream A (left), score < 0 -> Stream B (right)
+    pos = int(round((1.0 - clamped) / 2.0 * (2 * width)))
+    pos = max(0, min(2 * width, pos))
+    bar = ["-"] * (2 * width + 1)
+    bar[width] = "|"
+    if pos == width:
+        bar[pos] = "●"
+    elif pos < width:
+        bar[pos] = "◄"
+    else:
+        bar[pos] = "►"
+    return f"[A] <{''.join(bar)}> [B]"
+
 def simulate_realtime_stream(
     eeg_stream: np.ndarray,
     audio_a_stream: np.ndarray,
@@ -107,14 +123,28 @@ def simulate_realtime_stream(
                 switches += 1
                 
             if verbose:
+                la = telemetry["logit_a"]
+                lb = telemetry["logit_b"]
+                delta = telemetry["raw_delta"]
+                smooth = telemetry["smoothed_score"]
+                stream = telemetry["attended_stream"]
+                ga = telemetry["gain_a"]
+                gb = telemetry["gain_b"]
+                ga_db = 20.0 * np.log10(max(1e-3, ga))
+                gb_db = 20.0 * np.log10(max(1e-3, gb))
+                conf = telemetry["confidence"] * 100.0
+                meter = format_bipolar_meter(smooth)
                 flag = " [SWITCHED!]" if telemetry["switched"] else ""
+                
                 print(
                     f"[{telemetry['timestamp_sec']:5.1f}s] "
-                    f"Stream: {telemetry['attended_stream']:<9} | "
-                    f"Conf: {telemetry['confidence']*100:4.1f}% | "
-                    f"Gains: [A:{telemetry['gain_a']:.2f}, B:{telemetry['gain_b']:.2f}] | "
-                    f"T_comp: {telemetry['compute_ms']:4.1f} ms | "
-                    f"Mixer Time: {acoustic_delay_ms:.4f} ms{flag}"
+                    f"Logits:[A:{la:+.2f}, B:{lb:+.2f}] "
+                    f"Δ:{delta:+.2f} "
+                    f"EMA:{smooth:+.2f} | "
+                    f"{meter} | "
+                    f"Lock: {stream:<9} ({conf:4.1f}%) | "
+                    f"Gains:[A:{ga_db:+4.1f}dB, B:{gb_db:+4.1f}dB] | "
+                    f"{telemetry['compute_ms']:4.1f}ms{flag}"
                 )
                 
         idx = end_idx
