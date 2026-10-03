@@ -174,10 +174,12 @@ def run_v1_1_validation(args):
     for raw_eeg, ya, yb in zip(trials_raw_eeg, trials_ya, trials_yb):
         # 1. Zero-phase filtfilt (Offline reference)
         filt_ff = butter_bandpass_filtfilt(raw_eeg, 1.0, 6.0, fs, order=2)
+        filt_ff = (filt_ff - np.mean(filt_ff, axis=0, keepdims=True)) / (np.std(filt_ff, axis=0, keepdims=True) + 1e-12)
         
         # 2. Causal sosfilt (Deployment streaming)
         causal_filter.reset()
         filt_causal = causal_filter.process_chunk(raw_eeg)
+        filt_causal = (filt_causal - np.mean(filt_causal, axis=0, keepdims=True)) / (np.std(filt_causal, axis=0, keepdims=True) + 1e-12)
         
         # 3. Causal delay-compensated (Shifted forward by 6 samples)
         filt_comp = np.zeros_like(filt_causal)

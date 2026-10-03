@@ -89,29 +89,65 @@ def run_2x2_audit(args):
         model.load_state_dict(state.get("model_state_dict", state.get("state_dict", state)))
         print("[MODEL] Checkpoint loaded successfully!")
     elif is_real_data and args.train_epochs > 0:
-        print(f"\n[MODEL TRAINING]: Training CA-TCN for {args.train_epochs} epoch(s) on {len(train_paths)} subjects to establish real weights...")
+        mode_str = "CAUSAL STREAMING (Matched)" if args.train_causal else "OFFLINE ZERO-PHASE"
+        print(f"\n[MODEL TRAINING]: Training CA-TCN ({mode_str}) for {args.train_epochs} epoch(s) on {len(train_paths)} subjects...")
         mapping, envelopes = get_mapping_data("gammatone")
         win_samples = int(TRAIN_WINDOW_SEC * fs)
         hop_samples = int(2.5 * fs)
+        
+        train_causal_filter = StreamingCausalEEGFilter(lowcut=1.0, highcut=6.0, fs=fs, order=2, n_channels=n_ch) if args.train_causal else None
         
         X_tr_list, YA_tr_list, YB_tr_list = [], [], []
         for p in train_paths:
             sub_name = p.stem
             exs = list(load_subject_examples(p))
-            X_sub, YA_sub, YB_sub = prepare_dataset(exs, montage_channels, 1.0, 6.0, sub_name, mapping, envelopes)
-            YA_sub = [ya.mean(axis=0, keepdims=True).astype(np.float32) if ya.shape[0] > 1 else ya.astype(np.float32) for ya in YA_sub]
-            YB_sub = [yb.mean(axis=0, keepdims=True).astype(np.float32) if yb.shape[0] > 1 else yb.astype(np.float32) for yb in YB_sub]
             
-            for idx in range(len(X_sub)):
-                x, ya, yb = X_sub[idx], YA_sub[idx], YB_sub[idx]
-                t_len = x.shape[1]
-                start = 0
-                while start + win_samples <= t_len:
-                    end = start + win_samples
-                    X_tr_list.append(x[:, start:end])
-                    YA_tr_list.append(ya[:, start:end])
-                    YB_tr_list.append(yb[:, start:end])
-                    start += hop_samples
+            if args.train_causal:
+                _, YA_sub_raw, YB_sub_raw = prepare_dataset(exs, montage_channels, 1.0, 6.0, sub_name, mapping, envelopes)
+                YA_sub = [ya.mean(axis=0, keepdims=True).squeeze(0).astype(np.float32) if ya.shape[0] > 1 else ya.squeeze(0).astype(np.float32) for ya in YA_sub_raw]
+                YB_sub = [yb.mean(axis=0, keepdims=True).squeeze(0).astype(np.float32) if yb.shape[0] > 1 else yb.squeeze(0).astype(np.float32) for yb in YB_sub_raw]
+                
+                for idx in range(min(len(exs), len(YA_sub))):
+                    raw_eeg = exs[idx].eeg[:, montage_channels].astype(np.float32)
+                    min_len = min(len(raw_eeg), len(YA_sub[idx]), len(YB_sub[idx]))
+                    raw_eeg = raw_eeg[:min_len]
+                    
+                    train_causal_filter.reset()
+                    eeg_c = train_causal_filter.process_chunk(raw_eeg)
+                    eeg_c = (eeg_c - np.mean(eeg_c, axis=0, keepdims=True)) / (np.std(eeg_c, axis=0, keepdims=True) + 1e-12)
+                    
+                    ya_c = butter_lowpass_sosfilt(YA_sub[idx][:min_len], 8.0, fs, order=2).astype(np.float32)
+                    yb_c = butter_lowpass_sosfilt(YB_sub[idx][:min_len], 8.0, fs, order=2).astype(np.float32)
+                    ya_c = (ya_c - np.mean(ya_c)) / (np.std(ya_c) + 1e-12)
+                    yb_c = (yb_c - np.mean(yb_c)) / (np.std(yb_c) + 1e-12)
+                    
+                    x_t = eeg_c.T
+                    ya_t = np.expand_dims(ya_c, axis=0)
+                    yb_t = np.expand_dims(yb_c, axis=0)
+                    
+                    t_len = min_len
+                    start = 0
+                    while start + win_samples <= t_len:
+                        end = start + win_samples
+                        X_tr_list.append(x_t[:, start:end])
+                        YA_tr_list.append(ya_t[:, start:end])
+                        YB_tr_list.append(yb_t[:, start:end])
+                        start += hop_samples
+            else:
+                X_sub, YA_sub, YB_sub = prepare_dataset(exs, montage_channels, 1.0, 6.0, sub_name, mapping, envelopes)
+                YA_sub = [ya.mean(axis=0, keepdims=True).astype(np.float32) if ya.shape[0] > 1 else ya.astype(np.float32) for ya in YA_sub]
+                YB_sub = [yb.mean(axis=0, keepdims=True).astype(np.float32) if yb.shape[0] > 1 else yb.astype(np.float32) for yb in YB_sub]
+                
+                for idx in range(len(X_sub)):
+                    x, ya, yb = X_sub[idx], YA_sub[idx], YB_sub[idx]
+                    t_len = x.shape[1]
+                    start = 0
+                    while start + win_samples <= t_len:
+                        end = start + win_samples
+                        X_tr_list.append(x[:, start:end])
+                        YA_tr_list.append(ya[:, start:end])
+                        YB_tr_list.append(yb[:, start:end])
+                        start += hop_samples
                     
         train_ds = TensorDataset(
             torch.from_numpy(np.stack(X_tr_list, axis=0)),
@@ -245,6 +281,7 @@ if __name__ == "__main__":
     parser.add_argument("--montage", type=str, default="near_ear_expanded", help="Montage name")
     parser.add_argument("--trials", type=int, default=20, help="Number of trials to evaluate")
     parser.add_argument("--train_epochs", type=int, default=3, help="Training epochs to train on training fold if no checkpoint provided (default: 3)")
+    parser.add_argument("--train_causal", action="store_true", help="Train CA-TCN directly on causal-filtered streaming EEG and audio to eliminate the phase mismatch gap")
     parser.add_argument("--checkpoint", type=str, default="", help="Path to pre-trained model checkpoint")
     args = parser.parse_args()
     
