@@ -134,6 +134,12 @@ def run_2x2_audit(args):
                 total_loss += loss.item()
             print(f"  * Epoch {epoch+1}/{args.train_epochs} Loss: {total_loss/len(train_loader):.4f}")
         print("[MODEL TRAINING] Complete. Proceeding to 2x2 Factorial Audit.")
+        save_path = Path("/kaggle/working/catcn_deployment_weights.pt")
+        try:
+            torch.save(model.state_dict(), save_path)
+            print(f"[MODEL TRAINING] Saved trained weights to: {save_path}")
+        except Exception as e:
+            pass
     else:
         print("[MODEL WARNING] Running without trained weights. Provide --checkpoint or set --train_epochs > 0 for meaningful accuracy.")
         
@@ -147,7 +153,7 @@ def run_2x2_audit(args):
     print(f"\n[DATA]: Loading genuine DTU patient recording for {held_out_path.name}...")
     mapping, envelopes = get_mapping_data("gammatone")
     test_exs = list(load_subject_examples(held_out_path))
-    ch_indices = [DTU_CHANNELS.index(ch) for ch in montage_channels]
+    ch_indices = montage_channels
     
     # Prepare offline reference audio envelopes
     _, YA_offline_raw, YB_offline_raw = prepare_dataset(test_exs, montage_channels, 1.0, 6.0, args.subject, mapping, envelopes)
@@ -162,25 +168,36 @@ def run_2x2_audit(args):
     
     causal_eeg_filter = StreamingCausalEEGFilter(lowcut=1.0, highcut=6.0, fs=fs, order=2, n_channels=n_ch)
     
-    n_eval_trials = min(args.trials, len(test_exs))
+    n_eval_trials = min(args.trials, len(test_exs), len(YA_offline))
     for idx in range(n_eval_trials):
-        raw_eeg = test_exs[idx].eeg[ch_indices, :].T.astype(np.float32) # [T, C]
-        raw_eeg_list.append(raw_eeg)
+        raw_eeg = test_exs[idx].eeg[:, ch_indices].astype(np.float32) # [T, C]
+        min_len = min(len(raw_eeg), len(YA_offline[idx]), len(YB_offline[idx]))
+        raw_eeg = raw_eeg[:min_len]
+        ya_off = YA_offline[idx][:min_len]
+        yb_off = YB_offline[idx][:min_len]
         
-        # 1. Offline EEG: zero-phase filtfilt
+        # 1. Offline EEG: zero-phase filtfilt + per-channel standardization
         eeg_off = butter_bandpass_filtfilt(raw_eeg, 1.0, 6.0, fs, order=2)
+        eeg_off = (eeg_off - np.mean(eeg_off, axis=0, keepdims=True)) / (np.std(eeg_off, axis=0, keepdims=True) + 1e-12)
         eeg_offline_list.append(eeg_off)
         
-        # 2. Causal EEG: streaming sosfilt
+        # 2. Causal EEG: streaming sosfilt + per-channel standardization
         causal_eeg_filter.reset()
         eeg_caus = causal_eeg_filter.process_chunk(raw_eeg)
+        eeg_caus = (eeg_caus - np.mean(eeg_caus, axis=0, keepdims=True)) / (np.std(eeg_caus, axis=0, keepdims=True) + 1e-12)
         eeg_causal_list.append(eeg_caus)
         
         # 3. Causal Audio: causal lowpass filter on rectified envelope
-        ya_caus = butter_lowpass_sosfilt(YA_offline[idx], 8.0, fs, order=2).astype(np.float32)
-        yb_caus = butter_lowpass_sosfilt(YB_offline[idx], 8.0, fs, order=2).astype(np.float32)
+        ya_caus = butter_lowpass_sosfilt(ya_off, 8.0, fs, order=2).astype(np.float32)
+        yb_caus = butter_lowpass_sosfilt(yb_off, 8.0, fs, order=2).astype(np.float32)
+        ya_caus = (ya_caus - np.mean(ya_caus)) / (np.std(ya_caus) + 1e-12)
+        yb_caus = (yb_caus - np.mean(yb_caus)) / (np.std(yb_caus) + 1e-12)
         audio_causal_a_list.append(ya_caus)
         audio_causal_b_list.append(yb_caus)
+        
+        # Standardize offline audio
+        YA_offline[idx] = (ya_off - np.mean(ya_off)) / (np.std(ya_off) + 1e-12)
+        YB_offline[idx] = (yb_off - np.mean(yb_off)) / (np.std(yb_off) + 1e-12)
         
     print(f"[DATA] Prepared {n_eval_trials} trials across all 4 preprocessing conditions.")
     

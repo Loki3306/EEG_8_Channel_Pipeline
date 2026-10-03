@@ -61,6 +61,10 @@ def run_v1_1_validation(args):
     np.random.seed(42)
     model = CATCNDirectDecoder(eeg_channels=n_ch, audio_channels=1, hidden_dim=64, max_lag_samples=8).to(device)
     
+    if not args.checkpoint and Path("/kaggle/working/catcn_deployment_weights.pt").exists():
+        args.checkpoint = "/kaggle/working/catcn_deployment_weights.pt"
+        print(f"[MODEL] Found previously trained weights: {args.checkpoint}")
+
     if args.checkpoint and Path(args.checkpoint).exists():
         print(f"[MODEL] Loading trained checkpoint from: {args.checkpoint}")
         state = torch.load(args.checkpoint, map_location=device)
@@ -127,19 +131,20 @@ def run_v1_1_validation(args):
         print(f"\n[DATA]: Loading genuine DTU patient recording for {held_out_path.name}...")
         mapping, envelopes = get_mapping_data("gammatone")
         test_exs = list(load_subject_examples(held_out_path))
-        ch_indices = [DTU_CHANNELS.index(ch) for ch in montage_channels]
+        ch_indices = montage_channels
         
         # Prepare candidate audio envelopes
         _, YA_te, YB_te = prepare_dataset(test_exs, montage_channels, 1.0, 6.0, args.subject, mapping, envelopes)
         YA_te = [ya.mean(axis=0, keepdims=True).squeeze(0).astype(np.float32) if ya.shape[0] > 1 else ya.squeeze(0).astype(np.float32) for ya in YA_te]
         YB_te = [yb.mean(axis=0, keepdims=True).squeeze(0).astype(np.float32) if yb.shape[0] > 1 else yb.squeeze(0).astype(np.float32) for yb in YB_te]
         
-        for idx in range(min(args.trials, len(test_exs))):
+        for idx in range(min(args.trials, len(test_exs), len(YA_te))):
             # Extract raw unprocessed EEG channels for exact filter comparison
-            raw_eeg_ch = test_exs[idx].eeg[ch_indices, :].T.astype(np.float32) # [T, C]
-            trials_raw_eeg.append(raw_eeg_ch)
-            trials_ya.append(YA_te[idx])
-            trials_yb.append(YB_te[idx])
+            raw_eeg_ch = test_exs[idx].eeg[:, ch_indices].astype(np.float32) # [T, C]
+            min_len = min(len(raw_eeg_ch), len(YA_te[idx]), len(YB_te[idx]))
+            trials_raw_eeg.append(raw_eeg_ch[:min_len])
+            trials_ya.append(YA_te[idx][:min_len])
+            trials_yb.append(YB_te[idx][:min_len])
         print(f"[DATA] Successfully loaded {len(trials_raw_eeg)} genuine DTU trials for {args.subject}.")
     else:
         print(f"[DATA INFO] No local DTU data found for {args.subject}. Generating synthetic continuous benchmark data.")
