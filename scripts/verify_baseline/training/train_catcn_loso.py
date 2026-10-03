@@ -212,9 +212,10 @@ def train_catcn_loso(channels=None, num_channels=64, rank_channels=False, lowcut
         YA_tr_full = [torch.from_numpy(x) for x in YA_tr_full]
         YB_tr_full = [torch.from_numpy(x) for x in YB_tr_full]
         
+        # 75% overlap for training chunks (arXiv:2603.26394 Sec 2.7)
         chunk_indices = []
         win_samples = int(TRAIN_WINDOW_SEC * FS)
-        hop_samples = int(TRAIN_HOP_SEC * FS)
+        hop_samples = int(1.25 * FS)
         for i in range(len(X_tr_full)):
             trial_len = X_tr_full[i].shape[1]
             start = 0
@@ -227,7 +228,7 @@ def train_catcn_loso(channels=None, num_channels=64, rank_channels=False, lowcut
         
         model = CATCNDirectDecoder(
             eeg_channels=len(fold_channels),
-            audio_channels=28,
+            audio_channels=1,
             hidden_dim=64,
             max_lag_samples=8,
             dropout=0.2
@@ -241,7 +242,7 @@ def train_catcn_loso(channels=None, num_channels=64, rank_channels=False, lowcut
         patience = 5
         epochs_no_improve = 0
         
-        print(f"Training CA-TCN on {len(chunk_indices)} chunks ({TRAIN_WINDOW_SEC}s) | Batch Size: {batch_size}...")
+        print(f"Training CA-TCN on {len(chunk_indices)} chunks ({TRAIN_WINDOW_SEC}s, 75% overlap) | Batch Size: {batch_size} | LR: {lr}...")
         
         for epoch in range(epochs):
             model.train()
@@ -254,10 +255,20 @@ def train_catcn_loso(channels=None, num_channels=64, rank_channels=False, lowcut
                 bya = bya.to(device, non_blocking=True)
                 byb = byb.to(device, non_blocking=True)
                 
+                # Prevent presentation order bias (arXiv:2603.26394 Sec 2.7):
+                # Randomly invert candidate order with 50% probability
+                swap_mask = torch.rand(bx.size(0), device=device) > 0.5
+                c1 = torch.where(swap_mask[:, None, None], byb, bya)
+                c2 = torch.where(swap_mask[:, None, None], bya, byb)
+                target = torch.where(
+                    swap_mask, 
+                    torch.zeros(bx.size(0), device=device, dtype=torch.float32), 
+                    torch.ones(bx.size(0), device=device, dtype=torch.float32)
+                )
+                
                 optimizer.zero_grad()
                 with torch.amp.autocast('cuda' if torch.cuda.is_available() else 'cpu'):
-                    delta, (la, lb), _ = model(bx, bya, byb)
-                    target = torch.ones_like(delta)  # Stream A is attended -> target = 1
+                    delta, (la, lb), _ = model(bx, c1, c2)
                     loss = F.binary_cross_entropy_with_logits(delta, target)
                     
                 if scaler is not None:
@@ -352,8 +363,8 @@ if __name__ == "__main__":
     parser.add_argument("--batch_size", type=int, default=128)
     parser.add_argument("--num_workers", type=int, default=0)
     parser.add_argument("--subjects", type=str, nargs="+", help="Specific subjects to run (e.g. S1_data_preproc)")
-    parser.add_argument("--epochs", type=int, default=30)
-    parser.add_argument("--lr", type=float, default=1e-3)
+    parser.add_argument("--epochs", type=int, default=50)
+    parser.add_argument("--lr", type=float, default=5e-5)
     parser.add_argument("--checkpoint_dir", type=str, default="checkpoints_catcn")
     args = parser.parse_args()
     

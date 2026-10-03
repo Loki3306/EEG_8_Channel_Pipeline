@@ -48,11 +48,11 @@ class DepthwiseSeparableTCNBlock(nn.Module):
     def forward(self, x):
         res = x
         out = self.depthwise(x)
-        out = F.gelu(self.bn1(out))
+        out = F.elu(self.bn1(out))
         out = self.pointwise(out)
         out = self.bn2(out)
         out = self.dropout(out)
-        return F.gelu(out + res)
+        return F.elu(out + res)
 
 class CATCN_AudioEncoder(nn.Module):
     """
@@ -61,7 +61,7 @@ class CATCN_AudioEncoder(nn.Module):
     5 Depthwise-Separable TCN layers with dilations [1, 2, 4, 8, 16], K=3.
     Receptive Field = 1 + 2 * (1 + 2 + 4 + 8 + 16) = 63 samples (984.4 ms at 64 Hz).
     """
-    def __init__(self, in_channels=28, hidden_dim=64, dilations=[1, 2, 4, 8, 16], dropout=0.2):
+    def __init__(self, in_channels=1, hidden_dim=64, dilations=[1, 2, 4, 8, 16], dropout=0.2):
         super().__init__()
         self.proj = nn.Conv1d(in_channels, hidden_dim, kernel_size=1, bias=False)
         self.bn_proj = nn.BatchNorm1d(hidden_dim)
@@ -74,8 +74,10 @@ class CATCN_AudioEncoder(nn.Module):
         ])
         
     def forward(self, x):
-        # x: [B, 28, T]
-        feat = F.gelu(self.bn_proj(self.proj(x)))
+        # If multi-band envelope passed, sum across bands to form broadband envelope (arXiv:2603.26394 Sec 2.4)
+        if x.shape[1] > 1 and self.proj.in_channels == 1:
+            x = x.mean(dim=1, keepdim=True)
+        feat = F.elu(self.bn_proj(self.proj(x)))
         for block in self.blocks:
             feat = block(feat)
         return feat
@@ -103,7 +105,7 @@ class CATCN_EEGEncoder(nn.Module):
         
     def forward(self, x):
         # x: [B, C_eeg, T]
-        feat = F.gelu(self.bn_spatial(self.spatial_proj(x)))
+        feat = F.elu(self.bn_spatial(self.spatial_proj(x)))
         for block in self.blocks:
             feat = block(feat)
         return feat
@@ -188,7 +190,7 @@ class CATCNDirectDecoder(nn.Module):
       - EEG Stream: Anticausal Depthwise-Separable TCN (3 layers, d=[1,2,4], RF ≈ 234 ms future)
       - Head: Multi-lag Cross-Correlation + Linear Classifier (Strict A/B Anti-Symmetry)
     """
-    def __init__(self, eeg_channels=64, audio_channels=28, hidden_dim=64, max_lag_samples=8, dropout=0.2):
+    def __init__(self, eeg_channels=64, audio_channels=1, hidden_dim=64, max_lag_samples=8, dropout=0.2):
         super().__init__()
         self.audio_encoder = CATCN_AudioEncoder(
             in_channels=audio_channels, hidden_dim=hidden_dim, dilations=[1, 2, 4, 8, 16], dropout=dropout
@@ -209,12 +211,12 @@ class CATCNDirectDecoder(nn.Module):
         return delta, (logit_a, logit_b), (z_eeg, z_a, z_b)
 
 def print_summary():
-    model = CATCNDirectDecoder(eeg_channels=64, audio_channels=28, hidden_dim=64, max_lag_samples=8)
+    model = CATCNDirectDecoder(eeg_channels=64, audio_channels=1, hidden_dim=64, max_lag_samples=8)
     params = sum(p.numel() for p in model.parameters() if p.requires_grad)
     print(f"Faithful CA-TCN (64ch) Parameter Count: {params:,}")
     dummy_eeg = torch.randn(2, 64, 320)
-    dummy_a = torch.randn(2, 28, 320)
-    dummy_b = torch.randn(2, 28, 320)
+    dummy_a = torch.randn(2, 1, 320)
+    dummy_b = torch.randn(2, 1, 320)
     delta, (la, lb), (ze, za, zb) = model(dummy_eeg, dummy_a, dummy_b)
     print(f"Output shapes: delta={delta.shape}, la={la.shape}, ze={ze.shape}, za={za.shape}")
 
