@@ -276,8 +276,6 @@ def train_matchnet_loso(eeg_model="eegnet", channels=[0, 33, 6, 41, 22, 59, 15, 
         
     print(f"Using device: {device} | MatchNet ({eeg_model}) | Channels: {channels}")
     
-    mapping, envelopes = get_mapping_data(audio_rep, audio_env_file)
-    
     all_paths = subject_files()
     if not all_paths:
         print("No subjects found.")
@@ -298,6 +296,9 @@ def train_matchnet_loso(eeg_model="eegnet", channels=[0, 33, 6, 41, 22, 59, 15, 
         held_out_key = str(held_out_path)
         print(f"\nEvaluating fold with held-out subject: {held_out_path.stem}")
         print(f"  [Memory] Pre-fold RAM: {psutil.virtual_memory().percent}% ({psutil.virtual_memory().used / 1e9:.2f} GB used)")
+        
+        # Load heavy audio features inside the loop so they can be deleted after extraction
+        mapping, envelopes = get_mapping_data(audio_rep, audio_env_file)
         
         test_exs = subject_examples[held_out_key]
         
