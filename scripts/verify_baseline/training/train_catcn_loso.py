@@ -23,6 +23,7 @@ from training.train_matchnet_wavlm import (
     FS, TRAIN_WINDOW_SEC, TRAIN_HOP_SEC,
     prepare_dataset, select_top_channels_from_train, get_mapping_data, ChunkDataset
 )
+from training.montages import MONTAGES, DTU_CHANNELS
 
 def evaluate_catcn_multiwindow(model, X, Y_A, Y_B, device):
     """
@@ -141,7 +142,7 @@ def evaluate_catcn_multiwindow(model, X, Y_A, Y_B, device):
         }
     return results
 
-def train_catcn_loso(channels=None, num_channels=64, rank_channels=False, lowcut=1.0, highcut=6.0, batch_size=128, num_workers=0, subjects_to_run=None, epochs=30, lr=1e-3, checkpoint_dir="checkpoints_catcn"):
+def train_catcn_loso(channels=None, num_channels=64, rank_channels=False, montage=None, lowcut=1.0, highcut=6.0, batch_size=128, num_workers=0, subjects_to_run=None, epochs=30, lr=1e-3, checkpoint_dir="checkpoints_catcn"):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     all_paths = subject_files()
     if not all_paths:
@@ -172,7 +173,11 @@ def train_catcn_loso(channels=None, num_channels=64, rank_channels=False, lowcut
         mapping, envelopes = get_mapping_data("gammatone")
         
         # Channel Selection
-        if channels is not None and len(channels) > 0:
+        if montage is not None and montage in MONTAGES:
+            fold_channels = MONTAGES[montage]
+            num_channels = len(fold_channels)
+            print(f"  [Channel Setup]: Using defined montage '{montage}' ({num_channels} ch): {[DTU_CHANNELS[c] for c in fold_channels]}")
+        elif channels is not None and len(channels) > 0:
             fold_channels = list(channels)
             print(f"  [Channel Setup]: Using explicit user channels ({len(fold_channels)} ch): {fold_channels}")
         elif rank_channels and num_channels < 64:
@@ -394,6 +399,7 @@ def train_catcn_loso(channels=None, num_channels=64, rank_channels=False, lowcut
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Train and Evaluate CA-TCN Direct AAD Classifier")
     parser.add_argument("--channels", type=int, nargs='+', default=None, help="Explicit channel indices")
+    parser.add_argument("--montage", type=str, default=None, help="Name of predefined montage (e.g. near_ear_strict)")
     parser.add_argument("--num_channels", type=int, default=64, choices=[8, 16, 32, 64], help="Channel count")
     parser.add_argument("--rank_channels", action="store_true", help="Rank channels using only training subjects")
     parser.add_argument("--lowcut", type=float, default=1.0)
@@ -410,6 +416,7 @@ if __name__ == "__main__":
         channels=args.channels,
         num_channels=args.num_channels,
         rank_channels=args.rank_channels,
+        montage=args.montage,
         lowcut=args.lowcut,
         highcut=args.highcut,
         batch_size=args.batch_size,
