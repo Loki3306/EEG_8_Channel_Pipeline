@@ -43,9 +43,20 @@ TIER3_NEAR_EAR_EXPANDED = get_indices("T7", "T8", "TP7", "TP8", "CP5", "CP6", "F
 TIER3_NEAR_EAR_TEMPORAL = get_indices("FT7", "FT8", "T7", "T8", "TP7", "TP8", "CP5", "CP6")
 
 # ==========================================
+# TIER 1: RANDOM 8-CHANNEL BASELINES (FIXED SEEDS)
+# ==========================================
+# Deterministic random 8-channel selections across the 64 scalp electrodes
+RANDOM_8_SEED1 = [4, 15, 27, 32, 40, 47, 53, 61]   # Seed 42
+RANDOM_8_SEED2 = [0, 8, 17, 24, 38, 45, 52, 59]   # Seed 123
+RANDOM_8_SEED3 = [2, 11, 21, 28, 35, 43, 50, 63]  # Seed 999
+
+# ==========================================
 # ALL DEFINED MONTAGES DICT
 # ==========================================
 MONTAGES = {
+    "random_8_seed1": RANDOM_8_SEED1,
+    "random_8_seed2": RANDOM_8_SEED2,
+    "random_8_seed3": RANDOM_8_SEED3,
     "frontal": TIER2_FRONTAL,
     "fronto_temporal": TIER2_FRONTO_TEMPORAL,
     "temporal": TIER2_TEMPORAL,
