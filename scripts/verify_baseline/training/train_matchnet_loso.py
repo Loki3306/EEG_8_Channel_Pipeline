@@ -88,7 +88,8 @@ def prepare_dataset(examples, channels, lowcut, highcut, subject_id, mapping, en
     shift_samples = int(round(lag_sec * FS))
     
     for i, ex in enumerate(examples):
-        trial_key = f"trial_{i}"
+        trial_idx = getattr(ex, 'trial_index', i)
+        trial_key = f"trial_{trial_idx}"
         
         if sub_key in mapping and trial_key in mapping[sub_key]:
             fname_a = mapping[sub_key][trial_key]["wavA"]["filename"]
@@ -162,7 +163,8 @@ def select_top_channels_from_train(subject_examples, train_paths, mapping, envel
         # Sample up to 10 trials per subject to compute fast correlation ranking
         sample_exs = exs[:10]
         for i, ex in enumerate(sample_exs):
-            trial_key = f"trial_{i}"
+            trial_idx = getattr(ex, 'trial_index', i)
+            trial_key = f"trial_{trial_idx}"
             if sub_key in mapping and trial_key in mapping[sub_key]:
                 fname_a = mapping[sub_key][trial_key]["wavA"]["filename"]
                 if fname_a not in envelopes:

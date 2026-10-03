@@ -108,10 +108,11 @@ def run():
         all_subject_examples[s_name] = exs
         for i, ex in enumerate(exs):
             if sample_count < 20:
-                tk = f"trial_{i}"
+                t_idx = getattr(ex, 'trial_index', i)
+                tk = f"trial_{t_idx}"
                 fa = mapping[s_name][tk]["wavA"]["filename"] if (mapping and s_name in mapping and tk in mapping[s_name]) else "N/A"
                 fb = mapping[s_name][tk]["wavB"]["filename"] if (mapping and s_name in mapping and tk in mapping[s_name]) else "N/A"
-                print(f"{sample_count:3d} | {s_name:>4} | {i:3d} | {ex.label:5d} | {fa:>28} | {fb:>28}")
+                print(f"{sample_count:3d} | {s_name:>4} | {t_idx:3d} | {ex.label:5d} | {fa:>28} | {fb:>28}")
                 sample_count += 1
     print("-" * 85)
 
@@ -153,7 +154,8 @@ def run():
             
             # Gammatone envelopes (from envelopes.pkl via mapping)
             ea_gam, eb_gam = None, None
-            tk = f"trial_{i}"
+            t_idx = getattr(ex, 'trial_index', i)
+            tk = f"trial_{t_idx}"
             if mapping and envelopes and s_name in mapping and tk in mapping[s_name]:
                 fa = mapping[s_name][tk]["wavA"]["filename"]
                 fb = mapping[s_name][tk]["wavB"]["filename"]

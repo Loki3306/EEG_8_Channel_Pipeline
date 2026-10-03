@@ -50,7 +50,8 @@ def test_1_prove_labels():
             sample_subj_name = sub_name
             
         for i, ex in enumerate(exs[:10]):
-            trial_key = f"trial_{i}"
+            trial_idx = getattr(ex, 'trial_index', i)
+            trial_key = f"trial_{trial_idx}"
             if sub_key in mapping and trial_key in mapping[sub_key]:
                 fname_a = mapping[sub_key][trial_key]["wavA"]["filename"]
                 fname_b = mapping[sub_key][trial_key]["wavB"]["filename"]

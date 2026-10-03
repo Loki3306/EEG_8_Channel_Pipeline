@@ -88,7 +88,8 @@ def prepare_dataset(examples, channels, lowcut, highcut, subject_id, mapping, en
     shift_samples = int(round(lag_sec * FS))
     
     for i, ex in enumerate(examples):
-        trial_key = f"trial_{i}"
+        trial_idx = getattr(ex, 'trial_index', i)
+        trial_key = f"trial_{trial_idx}"
         
         if sub_key in mapping and trial_key in mapping[sub_key]:
             fname_a = mapping[sub_key][trial_key]["wavA"]["filename"]
@@ -168,7 +169,8 @@ def select_top_channels_from_train(subject_examples, train_paths, mapping, envel
         # Use 15 representative training trials per subject
         sample_exs = exs[:15]
         for i, ex in enumerate(sample_exs):
-            trial_key = f"trial_{i}"
+            trial_idx = getattr(ex, 'trial_index', i)
+            trial_key = f"trial_{trial_idx}"
             if sub_key in mapping and trial_key in mapping[sub_key]:
                 fname_a = mapping[sub_key][trial_key]["wavA"]["filename"]
                 fname_b = mapping[sub_key][trial_key]["wavB"]["filename"]
