@@ -16,7 +16,7 @@ from copy import deepcopy
 from datetime import datetime
 import subprocess
 
-REPO_ROOT = Path(__file__).resolve().parents[3]
+REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT))
 
 from models.catcn import CATCNDirectDecoder
@@ -29,7 +29,8 @@ from training.montages import MONTAGES, DTU_CHANNELS
 
 def get_git_revision_hash() -> str:
     try:
-        return subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=str(REPO_ROOT)).decode('ascii').strip()
+        project_root = Path(__file__).resolve().parents[3]
+        return subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=str(project_root)).decode('ascii').strip()
     except Exception:
         return "unknown"
 
@@ -181,7 +182,7 @@ def run_experiment(args):
     if args.subjects:
         folds = [f for f in folds if f[0].stem in args.subjects]
         
-    out_dir = Path(REPO_ROOT) / "results" / "montage_8ch"
+    out_dir = Path(__file__).resolve().parents[3] / "results" / "montage_8ch"
     out_dir.mkdir(parents=True, exist_ok=True)
     
     # Save Config
