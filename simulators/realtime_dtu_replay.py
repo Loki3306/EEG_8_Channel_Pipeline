@@ -107,7 +107,7 @@ def simulate_realtime_stream(
                     f"Conf: {telemetry['confidence']*100:4.1f}% | "
                     f"Gains: [A:{telemetry['gain_a']:.2f}, B:{telemetry['gain_b']:.2f}] | "
                     f"T_comp: {telemetry['compute_ms']:4.1f} ms | "
-                    f"Acoustic Delay: {acoustic_delay_ms:.3f} ms{flag}"
+                    f"Mixer Time: {acoustic_delay_ms:.4f} ms{flag}"
                 )
                 
         idx = end_idx
@@ -127,8 +127,8 @@ def simulate_realtime_stream(
     print("  SIMULATION COMPLETE")
     print(f"  Total Stream Time: {sim_time_sec:.1f} s | Wall-Clock Time: {total_wall_sec:.2f} s")
     print(f"  Inference Steps: {step_count} | Total Speaker Switches: {switches}")
-    print(f"  Mean Compute Latency (T_compute): {mean_compute_ms:.2f} ms (< 500 ms step budget)")
-    print(f"  Instantaneous Audio Pipeline Latency: {acoustic_delay_ms:.3f} ms (< 10 ms budget)")
+    print(f"  Mean BCI Compute Latency (T_compute): {mean_compute_ms:.2f} ms (< 500 ms step budget)")
+    print(f"  Digital Software Mixing Computation Time: {acoustic_delay_ms:.4f} ms (Note: Excludes physical ADC/DAC/OS latency)")
     print("=" * 85)
 
 if __name__ == "__main__":
