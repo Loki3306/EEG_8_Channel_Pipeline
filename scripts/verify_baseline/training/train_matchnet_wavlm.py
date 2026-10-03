@@ -591,6 +591,8 @@ def train_matchnet_loso(eeg_model="eegnet", channels=[0, 33, 6, 41, 22, 59, 15, 
         
         # Aggressive memory cleanup to prevent swap death on Kaggle
         del X_tr_full, YA_tr_full, YB_tr_full, X_va_full, YA_va_full, YB_va_full, X_te_full, YA_te_full, YB_te_full
+        if 'train_dataset' in locals(): del train_dataset
+        if 'train_loader' in locals(): del train_loader
         gc.collect()
         
         print(f"  [Memory] Post-cleanup RAM: {psutil.virtual_memory().percent}% ({psutil.virtual_memory().used / 1e9:.2f} GB used)")
