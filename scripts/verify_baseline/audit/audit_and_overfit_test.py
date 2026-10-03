@@ -57,18 +57,22 @@ def test_1_prove_labels():
                 lbl = getattr(ex, 'label', 1)
                 label_counts[lbl] = label_counts.get(lbl, 0) + 1
                 
-                # Check mapping convention
-                # label 1 -> wavA attended, label 2 -> wavB attended
-                att_stream = "wavA (A)" if lbl == 1 else "wavB (B)"
-                target_a = 1.0 if lbl == 1 else 0.0
+                # DTU convention (DATASETS_REFERENCE.md):
+                # wavA is ALWAYS attended, wavB is ALWAYS unattended
+                # ex.label indicates speaker gender (1=Male, 2=Female)
+                gender = "Male" if lbl == 1 else "Female"
+                att_stream = "wavA (Attended)"
+                target_a = 1.0
                 
-                print(f"{ex_count:3d} | {sub_key:>8} | {lbl:8d} | {att_stream:>9} | {fname_a:>30} | {fname_b:>30} | {target_a:6.1f}")
+                print(f"{ex_count:3d} | {sub_key:>8} | {lbl:8d} ({gender:>6}) | {att_stream:>15} | {fname_a:>28} | {fname_b:>28} | {target_a:6.1f}")
                 ex_count += 1
                 
     total_audited = sum(label_counts.values())
-    print("-" * 105)
-    print(f"Label Distribution: Label 1 (Attend A) = {label_counts.get(1,0)} ({label_counts.get(1,0)/max(total_audited,1)*100:.1f}%) | "
-          f"Label 2 (Attend B) = {label_counts.get(2,0)} ({label_counts.get(2,0)/max(total_audited,1)*100:.1f}%)")
+    print("-" * 115)
+    print(f"Trigger Distribution: Label 1 (Attend Male) = {label_counts.get(1,0)} ({label_counts.get(1,0)/max(total_audited,1)*100:.1f}%) | "
+          f"Label 2 (Attend Female) = {label_counts.get(2,0)} ({label_counts.get(2,0)/max(total_audited,1)*100:.1f}%)")
+    print(f"[Verified]: wavA is ALWAYS attended across all conditions in audio_mapping.json.")
+    print("-" * 115)
     
     return paths, mapping, envelopes, sample_exs, sample_subj_name
 

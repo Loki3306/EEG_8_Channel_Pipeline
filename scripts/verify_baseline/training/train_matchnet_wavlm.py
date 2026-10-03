@@ -100,15 +100,12 @@ def prepare_dataset(examples, channels, lowcut, highcut, subject_id, mapping, en
             env_a = envelopes[fname_a]
             env_b = envelopes[fname_b]
             
-            # Ground-truth DTU attention label:
-            # 1 = Stream A attended, Stream B distractor
-            # 2 = Stream B attended, Stream A distractor
-            if getattr(ex, 'label', 1) == 2:
-                env_attended = env_b
-                env_unattended = env_a
-            else:
-                env_attended = env_a
-                env_unattended = env_b
+            # DTU convention (DATASETS_REFERENCE.md & preproc_data.m):
+            # wavA in audio_mapping.json is ALWAYS the attended stream.
+            # wavB is ALWAYS the unattended stream.
+            # Event label (1 or 2) indicates speaker gender trigger, NOT attention stream.
+            env_attended = env_a
+            env_unattended = env_b
             
             if len(env_attended.shape) == 3:
                 env_attended = env_attended[audio_layer_idx]
@@ -176,8 +173,8 @@ def select_top_channels_from_train(subject_examples, train_paths, mapping, envel
                 fname_a = mapping[sub_key][trial_key]["wavA"]["filename"]
                 fname_b = mapping[sub_key][trial_key]["wavB"]["filename"]
                 
-                # Check actual attended stream based on ex.label
-                att_fname = fname_b if getattr(ex, 'label', 1) == 2 else fname_a
+                # DTU convention: wavA is ALWAYS attended
+                att_fname = fname_a
                 if att_fname not in envelopes:
                     continue
                 env_att = envelopes[att_fname]

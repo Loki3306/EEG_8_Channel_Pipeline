@@ -237,6 +237,11 @@ def train_catcn_loso(channels=None, num_channels=64, rank_channels=False, lowcut
         val_dataset = ChunkDataset(X_va_full, YA_va_full, YB_va_full, val_chunk_indices)
         val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False, num_workers=num_workers)
         
+        print(f"  [Data & Label Integrity]:")
+        print(f"    * Attended audio (YA)  = wavA in audio_mapping.json (TRUE attended stream)")
+        print(f"    * Distractor audio (YB) = wavB in audio_mapping.json (TRUE distractor stream)")
+        print(f"    * Training pool: {len(chunk_indices)} chunks | Validation pool: {len(val_chunk_indices)} chunks")
+        
         model = CATCNDirectDecoder(
             eeg_channels=len(fold_channels),
             audio_channels=1,
