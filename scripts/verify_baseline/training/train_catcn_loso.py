@@ -226,6 +226,17 @@ def train_catcn_loso(channels=None, num_channels=64, rank_channels=False, lowcut
         train_dataset = ChunkDataset(X_tr_full, YA_tr_full, YB_tr_full, chunk_indices)
         train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=num_workers)
         
+        # Prepare validation chunks for continuous, low-variance validation loss
+        val_chunk_indices = []
+        for i in range(len(X_va_full)):
+            trial_len = X_va_full[i].shape[1]
+            start = 0
+            while start + win_samples <= trial_len:
+                val_chunk_indices.append((i, start, start + win_samples))
+                start += hop_samples
+        val_dataset = ChunkDataset(X_va_full, YA_va_full, YB_va_full, val_chunk_indices)
+        val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False, num_workers=num_workers)
+        
         model = CATCNDirectDecoder(
             eeg_channels=len(fold_channels),
             audio_channels=1,
@@ -235,11 +246,13 @@ def train_catcn_loso(channels=None, num_channels=64, rank_channels=False, lowcut
         ).to(device)
         
         optimizer = optim.Adam(model.parameters(), lr=lr, weight_decay=1e-4)
+        scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=epochs, eta_min=1e-6)
         scaler = torch.amp.GradScaler('cuda') if torch.cuda.is_available() else None
         
-        best_val_acc = 0.0
+        best_val_loss = float('inf')
         best_weights = deepcopy(model.state_dict())
-        patience = 5
+        min_epochs = 15
+        patience = 12
         epochs_no_improve = 0
         
         print(f"Training CA-TCN on {len(chunk_indices)} chunks ({TRAIN_WINDOW_SEC}s, 75% overlap) | Batch Size: {batch_size} | LR: {lr}...")
@@ -255,8 +268,7 @@ def train_catcn_loso(channels=None, num_channels=64, rank_channels=False, lowcut
                 bya = bya.to(device, non_blocking=True)
                 byb = byb.to(device, non_blocking=True)
                 
-                # Prevent presentation order bias (arXiv:2603.26394 Sec 2.7):
-                # Randomly invert candidate order with 50% probability
+                # Prevent presentation order bias (arXiv:2603.26394 Sec 2.7)
                 swap_mask = torch.rand(bx.size(0), device=device) > 0.5
                 c1 = torch.where(swap_mask[:, None, None], byb, bya)
                 c2 = torch.where(swap_mask[:, None, None], bya, byb)
@@ -279,24 +291,45 @@ def train_catcn_loso(channels=None, num_channels=64, rank_channels=False, lowcut
                     loss.backward()
                     optimizer.step()
                     
-                train_loss += loss.item()
+                train_loss += loss.item() * bx.size(0)
                 correct_train += ((delta > 0).float() == target).sum().item()
                 total_train += delta.size(0)
                 
-            # Validation at 10s window
-            res_val = evaluate_catcn_multiwindow(model, X_va_full, YA_va_full, YB_va_full, device)
-            val_acc = res_val[10]["accum_1s"]
+            scheduler.step()
+            train_epoch_loss = train_loss / total_train
+            train_epoch_acc = (correct_train / total_train) * 100.0
             
-            if val_acc > best_val_acc:
-                best_val_acc = val_acc
+            # Continuous validation evaluation
+            model.eval()
+            val_loss = 0.0
+            val_correct = 0.0
+            val_total = 0
+            with torch.no_grad():
+                for bx, bya, byb in val_loader:
+                    bx = bx.to(device, non_blocking=True)
+                    bya = bya.to(device, non_blocking=True)
+                    byb = byb.to(device, non_blocking=True)
+                    with torch.amp.autocast('cuda' if torch.cuda.is_available() else 'cpu'):
+                        delta, _, _ = model(bx, bya, byb)
+                        target = torch.ones(bx.size(0), device=device, dtype=torch.float32)
+                        v_loss = F.binary_cross_entropy_with_logits(delta, target)
+                    val_loss += v_loss.item() * bx.size(0)
+                    val_correct += ((delta > 0).float() == target).sum().item()
+                    val_total += bx.size(0)
+                    
+            epoch_val_loss = val_loss / max(val_total, 1)
+            epoch_val_acc = (val_correct / max(val_total, 1)) * 100.0
+            
+            if epoch_val_loss < best_val_loss:
+                best_val_loss = epoch_val_loss
                 best_weights = deepcopy(model.state_dict())
                 epochs_no_improve = 0
-            else:
+            elif epoch >= min_epochs:
                 epochs_no_improve += 1
                 
-            num_batches = max(len(train_loader), 1)
-            print(f"  Epoch {epoch+1:02d}/{epochs} | BCE Loss: {train_loss/num_batches:.4f} | Train Acc: {correct_train/total_train*100:.2f}% | Val Acc (10s): {val_acc*100:.2f}% | Patience: {epochs_no_improve}/{patience}")
+            print(f"  Epoch {epoch+1:02d}/{epochs} | Train Loss: {train_epoch_loss:.4f} | Train Acc: {train_epoch_acc:.2f}% | Val Loss: {epoch_val_loss:.4f} | Val Acc (5s): {epoch_val_acc:.2f}% | Patience: {epochs_no_improve}/{patience}")
             if epochs_no_improve >= patience:
+                print(f"  [Early Stopping Triggered at Epoch {epoch+1}] Best Val Loss: {best_val_loss:.4f}")
                 break
                 
         best_path = Path(checkpoint_dir) / f"catcn_fold_{sub_name}_best.pth"
@@ -364,7 +397,7 @@ if __name__ == "__main__":
     parser.add_argument("--num_workers", type=int, default=0)
     parser.add_argument("--subjects", type=str, nargs="+", help="Specific subjects to run (e.g. S1_data_preproc)")
     parser.add_argument("--epochs", type=int, default=50)
-    parser.add_argument("--lr", type=float, default=5e-5)
+    parser.add_argument("--lr", type=float, default=2e-4)
     parser.add_argument("--checkpoint_dir", type=str, default="checkpoints_catcn")
     args = parser.parse_args()
     
