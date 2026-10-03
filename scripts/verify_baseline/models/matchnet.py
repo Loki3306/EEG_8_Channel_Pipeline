@@ -6,6 +6,16 @@ from models.atcnet import ATCNet
 from models.eegnet_tcn import EEGNetTCN
 from models.eegnet_multiscale import EEGNetMultiScaleM2
 
+class ChannelLayerNorm(nn.Module):
+    def __init__(self, channels):
+        super().__init__()
+        self.norm = nn.LayerNorm(channels)
+
+    def forward(self, x):
+        # [B, C, T] -> [B, T, C]
+        x = x.transpose(1, 2)
+        x = self.norm(x)
+        return x.transpose(1, 2)
 class AudioEncoder(nn.Module):
     """
     Encodes 28-band Gammatone subbands into a latent representation.
@@ -174,11 +184,11 @@ class ContrastiveMatchNet(nn.Module):
         elif audio_model_type.lower() == "wavlm":
             self.audio_encoder = nn.Sequential(
                 nn.Conv1d(audio_channels, 256, kernel_size=1),
-                nn.BatchNorm1d(256),
+                ChannelLayerNorm(256),
                 nn.GELU(),
                 nn.Dropout(0.3),
                 nn.Conv1d(256, latent_dim, kernel_size=1),
-                nn.BatchNorm1d(latent_dim)
+                ChannelLayerNorm(latent_dim)
             )
         else:
             raise ValueError(f"Unknown audio_model_type: {audio_model_type}")
