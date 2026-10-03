@@ -279,8 +279,8 @@ HTML_TEMPLATE = """<!DOCTYPE html>
           <!-- Speaker A (Left) -->
           <div id="cardSpeakerA" class="speaker-card speaker-a">
             <div style="color: var(--cyan);">SPEAKER A</div>
-            <div id="txtGainA" class="speaker-gain" style="color: var(--cyan);">-0.0 dB</div>
-            <div style="font-size: 0.65rem; color: var(--text-muted);">ATTENDED</div>
+            <div id="txtGainA" class="speaker-gain" style="color: var(--cyan);">0.0 dB</div>
+            <div id="lblStatusA" style="font-size: 0.65rem; color: var(--text-muted);">NEUTRAL</div>
           </div>
 
           <!-- Head SVG Vector -->
@@ -302,8 +302,8 @@ HTML_TEMPLATE = """<!DOCTYPE html>
           <!-- Speaker B (Right) -->
           <div id="cardSpeakerB" class="speaker-card speaker-b">
             <div style="color: var(--orange);">SPEAKER B</div>
-            <div id="txtGainB" class="speaker-gain" style="color: var(--orange);">-6.0 dB</div>
-            <div style="font-size: 0.65rem; color: var(--text-muted);">SUPPRESSED</div>
+            <div id="txtGainB" class="speaker-gain" style="color: var(--orange);">0.0 dB</div>
+            <div id="lblStatusB" style="font-size: 0.65rem; color: var(--text-muted);">NEUTRAL</div>
           </div>
         </div>
 
@@ -499,15 +499,24 @@ function updateUI(t) {
   txtGainA.innerText = `${cur.ga_db.toFixed(1)} dB`;
   txtGainB.innerText = `${cur.gb_db.toFixed(1)} dB`;
   
+  const lblStatusA = document.getElementById("lblStatusA");
+  const lblStatusB = document.getElementById("lblStatusB");
+
   if (cur.stream === 'A') {
     cardSpeakerA.className = "speaker-card speaker-a active-beam-a";
     cardSpeakerB.className = "speaker-card speaker-b";
+    if (lblStatusA) lblStatusA.innerText = "ATTENDED (Boosted)";
+    if (lblStatusB) lblStatusB.innerText = "ATTENUATED (-6dB)";
   } else if (cur.stream === 'B') {
     cardSpeakerA.className = "speaker-card speaker-a";
     cardSpeakerB.className = "speaker-card speaker-b active-beam-b";
+    if (lblStatusA) lblStatusA.innerText = "ATTENUATED (-6dB)";
+    if (lblStatusB) lblStatusB.innerText = "ATTENDED (Boosted)";
   } else {
     cardSpeakerA.className = "speaker-card speaker-a";
     cardSpeakerB.className = "speaker-card speaker-b";
+    if (lblStatusA) lblStatusA.innerText = "BALANCED (0dB)";
+    if (lblStatusB) lblStatusB.innerText = "BALANCED (0dB)";
   }
 
   // Compass Pointer
