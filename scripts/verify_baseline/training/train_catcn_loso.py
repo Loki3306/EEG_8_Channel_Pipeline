@@ -173,7 +173,7 @@ def run_experiment(args):
             "near_ear_temporal"
         ]
     elif args.montage:
-        suite_montages = [args.montage]
+        suite_montages = args.montage
     else:
         suite_montages = ["standard_64"]
 
@@ -524,7 +524,7 @@ def run_experiment(args):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Unified 8-Channel Montage Evaluation Runner")
     parser.add_argument("--montage-suite", type=str, choices=["8ch"], help="Run full suite of 8-channel montages")
-    parser.add_argument("--montage", type=str, help="Specific montage to run")
+    parser.add_argument("--montage", type=str, nargs='+', help="Specific montage(s) to run")
     parser.add_argument("--lowcut", type=float, default=1.0)
     parser.add_argument("--highcut", type=float, default=6.0)
     parser.add_argument("--batch_size", type=int, default=128)
