@@ -368,8 +368,9 @@ def train_matchnet_loso(eeg_model="eegnet", channels=[0, 33, 6, 41, 22, 59, 15, 
 
         X_te_full, YA_te_full, YB_te_full = prepare_dataset(test_exs, channels, lowcut, highcut, held_out_path.stem, mapping, envelopes, audio_layer_idx=audio_layer_idx)
         
-        # Free the massive 9.4 GB envelopes dictionary now that everything is extracted
-        del envelopes
+        # We CANNOT delete envelopes here if we are running multiple folds sequentially!
+        # It must stay in memory for the next fold.
+        # del envelopes
         import gc
         gc.collect()
         
@@ -423,19 +424,19 @@ def train_matchnet_loso(eeg_model="eegnet", channels=[0, 33, 6, 41, 22, 59, 15, 
         
         best_val_acc = 0.0
         best_weights = deepcopy(model.state_dict())
-        patience = 10
+        patience = 5
         epochs_no_improve = 0
         
         print(f"Training on {len(chunk_indices)} chunks ({TRAIN_WINDOW_SEC}s) | Batch Size: {batch_size} | Workers: {num_workers}...")
         
-        for epoch in range(100):
+        for epoch in range(30):
             model.train()
             train_loss, train_sa, train_sb = 0.0, 0.0, 0.0
             train_loss_delay, train_loss_smooth, train_loss_mono, train_jac_min = 0.0, 0.0, 0.0, 0.0
             
             # Update GRL lambda for this epoch
             if use_dann:
-                p = float(epoch) / 100.0
+                p = float(epoch) / 30.0
                 grl_lambda = (2.0 / (1.0 + np.exp(-10.0 * p))) - 1.0
                 model.grl.lambda_ = grl_lambda
                 
