@@ -456,6 +456,12 @@ def train_matchnet_loso(eeg_model="eegnet", channels=[0, 33, 6, 41, 22, 59, 15, 
                     # Shape of bx: (B, C, T)
                     sign = torch.randint(0, 2, (bx.size(0), 1, 1), device=device).float() * 2.0 - 1.0
                     bx = bx * sign
+                    
+                # Hard Negative Sampling (Temporal Shift)
+                # With 25% probability, replace Y_B with a time-shifted Y_A
+                if torch.rand(1).item() < 0.25:
+                    shift_amount = torch.randint(64, bya.size(-1) - 64, (1,)).item()
+                    byb = torch.roll(bya, shifts=shift_amount, dims=-1)
                 
                 optimizer.zero_grad()
                 with torch.cuda.amp.autocast():

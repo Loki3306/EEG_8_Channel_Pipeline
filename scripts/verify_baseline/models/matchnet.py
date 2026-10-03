@@ -173,7 +173,12 @@ class ContrastiveMatchNet(nn.Module):
             self.audio_encoder = AudioEncoder(in_channels=audio_channels, latent_dim=latent_dim)
         elif audio_model_type.lower() == "wavlm":
             self.audio_encoder = nn.Sequential(
-                nn.Conv1d(audio_channels, latent_dim, kernel_size=1)
+                nn.Conv1d(audio_channels, 256, kernel_size=1),
+                nn.BatchNorm1d(256),
+                nn.GELU(),
+                nn.Dropout(0.3),
+                nn.Conv1d(256, latent_dim, kernel_size=1),
+                nn.BatchNorm1d(latent_dim)
             )
         else:
             raise ValueError(f"Unknown audio_model_type: {audio_model_type}")
