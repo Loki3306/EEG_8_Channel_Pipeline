@@ -708,8 +708,11 @@ def generate_interactive_ui(
     model = CATCNDirectDecoder(eeg_channels=n_ch, audio_channels=1, hidden_dim=64, max_lag_samples=8)
     
     ckpt_path = checkpoint
-    if not ckpt_path and Path("/kaggle/working/catcn_deployment_weights.pt").exists():
-        ckpt_path = "/kaggle/working/catcn_deployment_weights.pt"
+    if not ckpt_path:
+        for candidate in ["/kaggle/working/catcn_deployment_weights.pt", "/kaggle/working/catcn_universal_model.pt"]:
+            if Path(candidate).exists():
+                ckpt_path = candidate
+                break
         
     if ckpt_path and Path(ckpt_path).exists():
         print(f"[MODEL] Loading trained checkpoint from: {ckpt_path}")
@@ -723,7 +726,7 @@ def generate_interactive_ui(
 
     # 2. Load Genuine DTU Data
     files = subject_files()
-    target_files = [f for f in files if subject in f.name]
+    target_files = [f for f in files if f.stem == subject or f.stem.split("_")[0] == subject.split("_")[0]]
     if not target_files:
         raise FileNotFoundError(f"Could not find DTU subject file for {subject} in DATA_DIR.")
         
