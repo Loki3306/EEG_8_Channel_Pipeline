@@ -322,7 +322,7 @@ def train_matchnet_loso(eeg_model="eegnet", channels=[0, 33, 6, 41, 22, 59, 15, 
             # Deep copy list to avoid in-place shuffling issues across folds
             exs = list(exs)
             
-            np.random.seed(42 + curr_id)  # deterministic but varied per subject
+            np.random.seed(42)  # MUST be exactly 42 so all subjects split the exact same trials!
             np.random.shuffle(exs)
             
             # Exactly 10% of trials (e.g. 6 out of 60) go to validation
