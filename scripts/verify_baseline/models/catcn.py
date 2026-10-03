@@ -74,9 +74,6 @@ class CATCN_AudioEncoder(nn.Module):
         ])
         
     def forward(self, x):
-        # If multi-band envelope passed, sum across bands to form broadband envelope (arXiv:2603.26394 Sec 2.4)
-        if x.shape[1] > 1 and self.proj.in_channels == 1:
-            x = x.mean(dim=1, keepdim=True)
         feat = F.elu(self.bn_proj(self.proj(x)))
         for block in self.blocks:
             feat = block(feat)
