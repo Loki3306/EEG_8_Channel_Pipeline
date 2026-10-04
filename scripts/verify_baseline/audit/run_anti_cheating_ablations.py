@@ -12,9 +12,14 @@ from pathlib import Path
 from copy import deepcopy
 from datetime import datetime
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(REPO_ROOT))
+REPO_ROOT = Path(__file__).resolve().parents[3]
+VERIFY_ROOT = Path(__file__).resolve().parents[1]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+if str(VERIFY_ROOT) not in sys.path:
+    sys.path.insert(0, str(VERIFY_ROOT))
 
+from src.streaming.causal_filters import StreamingCausalEEGFilter
 from models.catcn import CATCNDirectDecoder
 from baselines.ridge_aad import load_subject_examples, subject_files, iter_leave_one_subject_out
 from training.train_matchnet_wavlm import (
@@ -23,62 +28,33 @@ from training.train_matchnet_wavlm import (
 )
 from training.montages import MONTAGES, DTU_CHANNELS
 
-@torch.no_grad()
-def evaluate_catcn_multiwindow_batched(model, X, Y_A, Y_B, device, batch_size=256):
-    model.eval()
-    samples_1s = int(1 * FS)
-    samples_5s = int(5 * FS)
-    
-    trial_sub_1s = []
-    trial_sub_5s = []
-    
-    for i in range(len(X)):
-        x_np, ya_np, yb_np = X[i], Y_A[i], Y_B[i]
-        trial_len = x_np.shape[1]
-        
-        # 1-second chunks
-        c_1s_x, c_1s_ya, c_1s_yb = [], [], []
-        start = 0
-        while start + samples_1s <= trial_len:
-            end = start + samples_1s
-            c_1s_x.append(x_np[:, start:end])
-            c_1s_ya.append(ya_np[:, start:end])
-            c_1s_yb.append(yb_np[:, start:end])
-            start += samples_1s
-            
-        if c_1s_x:
-            bx = torch.from_numpy(np.stack(c_1s_x, axis=0)).to(device, dtype=torch.float32)
-            bya = torch.from_numpy(np.stack(c_1s_ya, axis=0)).to(device, dtype=torch.float32)
-            byb = torch.from_numpy(np.stack(c_1s_yb, axis=0)).to(device, dtype=torch.float32)
-            
-            delta_list = []
-            for b_idx in range(0, bx.size(0), batch_size):
-                d_b, _, _ = model(bx[b_idx:b_idx+batch_size], bya[b_idx:b_idx+batch_size], byb[b_idx:b_idx+batch_size])
-                delta_list.append(d_b.detach().cpu())
-            deltas = torch.cat(delta_list).numpy()
-            d_1s = deltas.tolist()
-            v_1s = [1.0 if d > 0 else (0.5 if d == 0 else 0.0) for d in d_1s]
-        else:
-            d_1s, v_1s = [], []
-        trial_sub_1s.append((d_1s, v_1s))
+def butter_lowpass_sosfilt(data: np.ndarray, cutoff: float, fs: float, order: int = 2) -> np.ndarray:
+    from scipy import signal
+    sos = signal.butter(order, cutoff, btype='low', fs=fs, output='sos')
+    return signal.sosfilt(sos, data).astype(np.float32)
 
-    windows_all = [1, 2, 5, 10, 20, 40]
+@torch.no_grad()
+def evaluate_catcn_windows(model, eeg_list, ya_list, yb_list, windows=[5, 10, 20, 40], fs=FS, device="cuda"):
+    model.eval()
     results = {}
-    
-    for w in windows_all:
-        c_accum_1s, n_accum_1s = 0.0, 0
-        m_1s = w
-        for d_list, v_list in trial_sub_1s:
-            b_start = 0
-            while b_start + m_1s <= len(d_list):
-                block_d = d_list[b_start : b_start + m_1s]
-                if sum(block_d) > 0: c_accum_1s += 1.0
-                elif sum(block_d) == 0: c_accum_1s += 0.5
-                n_accum_1s += 1
-                b_start += m_1s
-        acc_accum_1s = c_accum_1s / max(n_accum_1s, 1)
-        results[w] = acc_accum_1s
-        
+    for w in windows:
+        w_samples = int(w * fs)
+        deltas = []
+        for eeg, ya, yb in zip(eeg_list, ya_list, yb_list):
+            t_len = min(len(eeg), len(ya), len(yb))
+            for s in range(0, t_len - w_samples + 1, w_samples):
+                e = s + w_samples
+                w_e = torch.from_numpy(eeg[s:e].T.copy()).unsqueeze(0).float().to(device)
+                w_a = torch.from_numpy(ya[s:e].copy()).unsqueeze(0).unsqueeze(0).float().to(device)
+                w_b = torch.from_numpy(yb[s:e].copy()).unsqueeze(0).unsqueeze(0).float().to(device)
+                d, _, _ = model(w_e, w_a, w_b)
+                deltas.append(d.item())
+        deltas = np.array(deltas)
+        if len(deltas) == 0:
+            results[w] = 0.5
+        else:
+            acc = float(np.sum(deltas > 0)) / float(len(deltas))
+            results[w] = acc
     return results
 
 def run_ablation_test(args):
@@ -258,13 +234,32 @@ def run_ablation_test(args):
         print("  -> Model Training Complete.")
 
     # 3. Load Test Data for Held-out Subject
-    print(f"\n[Stage 3]: Loading Held-out Evaluation Subject: {target_sub}...")
+    print(f"
+[Stage 3]: Loading Held-out Evaluation Subject: {target_sub}...")
+    causal_filter = StreamingCausalEEGFilter(fs=FS, lowcut=1.0, highcut=6.0, order=2, n_channels=len(montage_channels))
     test_exs = list(load_subject_examples(held_out_path))
-    X_te, YA_te, YB_te = prepare_dataset(
-        test_exs, montage_channels, args.lowcut, args.highcut, target_sub, mapping, envelopes
-    )
-    YA_te = [ya.mean(axis=0, keepdims=True).astype(np.float32) if ya.shape[0] > 1 else ya.astype(np.float32) for ya in YA_te]
-    YB_te = [yb.mean(axis=0, keepdims=True).astype(np.float32) if yb.shape[0] > 1 else yb.astype(np.float32) for yb in YB_te]
+    _, ya_raw, yb_raw = prepare_dataset(test_exs, montage_channels, 1.0, 6.0, target_sub, mapping, envelopes)
+    ya_clean = [ya.mean(axis=0, keepdims=True).squeeze(0).astype(np.float32) if ya.shape[0] > 1 else ya.squeeze(0).astype(np.float32) for ya in ya_raw]
+    yb_clean = [yb.mean(axis=0, keepdims=True).squeeze(0).astype(np.float32) if yb.shape[0] > 1 else yb.squeeze(0).astype(np.float32) for yb in yb_raw]
+
+    eeg_all, ya_all, yb_all = [], [], []
+    for idx in range(min(len(test_exs), len(ya_clean))):
+        raw_eeg = test_exs[idx].eeg[:, montage_channels].astype(np.float32)
+        min_len = min(len(raw_eeg), len(ya_clean[idx]), len(yb_clean[idx]))
+        raw_eeg = raw_eeg[:min_len]
+
+        causal_filter.reset()
+        eeg_c = causal_filter.process_chunk(raw_eeg)
+        eeg_c = (eeg_c - np.mean(eeg_c, axis=0, keepdims=True)) / (np.std(eeg_c, axis=0, keepdims=True) + 1e-8)
+
+        ya_c = butter_lowpass_sosfilt(ya_clean[idx][:min_len], 8.0, FS, order=2).astype(np.float32)
+        yb_c = butter_lowpass_sosfilt(yb_clean[idx][:min_len], 8.0, FS, order=2).astype(np.float32)
+        ya_c = (ya_c - np.mean(ya_c)) / (np.std(ya_c) + 1e-8)
+        yb_c = (yb_c - np.mean(yb_c)) / (np.std(yb_c) + 1e-8)
+
+        eeg_all.append(eeg_c)
+        ya_all.append(ya_c)
+        yb_all.append(yb_c)
 
     # ==============================================================
     # RUN THE ABLATION EXPERIMENTS
@@ -272,52 +267,49 @@ def run_ablation_test(args):
     ablation_results = {}
 
     # 1. BASELINE (Unaltered, Ground Truth)
-    print("\n--- Running Control 0: Ground Truth Baseline ---")
-    res_base = evaluate_catcn_multiwindow_batched(model, X_te, YA_te, YB_te, device)
+    print("
+--- Running Control 0: Ground Truth Baseline ---")
+    res_base = evaluate_catcn_windows(model, eeg_all, ya_all, yb_all, windows=[5, 10, 20, 40], fs=FS, device=device)
     ablation_results["Ground Truth Baseline"] = res_base
 
     # 2. TIME-REVERSED AUDIO ENVELOPE (Ablation 1)
-    # Reverses temporal envelope in time: preserves power spectrum & energy, destroys phase synchrony
     print("--- Running Control 1: Time-Reversed Speech Envelope ---")
-    YA_rev = [np.ascontiguousarray(ya[:, ::-1]) for ya in YA_te]
-    YB_rev = [np.ascontiguousarray(yb[:, ::-1]) for yb in YB_te]
-    res_rev = evaluate_catcn_multiwindow_batched(model, X_te, YA_rev, YB_rev, device)
+    ya_rev = [np.ascontiguousarray(ya[::-1]) for ya in ya_all]
+    yb_rev = [np.ascontiguousarray(yb[::-1]) for yb in yb_all]
+    res_rev = evaluate_catcn_windows(model, eeg_all, ya_rev, yb_rev, windows=[5, 10, 20, 40], fs=FS, device=device)
     ablation_results["Time-Reversed Audio"] = res_rev
 
     # 3. TEMPORAL LAG SHIFT (Ablation 2)
-    # Circularly shifts audio by +10 seconds: breaks physiological latency window (0-250ms)
     print("--- Running Control 2: Temporal Latency Violation (+10s Lag Trap) ---")
     shift_samples = int(10.0 * FS)
-    YA_shift = [np.roll(ya, shift_samples, axis=1) for ya in YA_te]
-    YB_shift = [np.roll(yb, shift_samples, axis=1) for yb in YB_te]
-    res_shift = evaluate_catcn_multiwindow_batched(model, X_te, YA_shift, YB_shift, device)
+    ya_shift = [np.roll(ya, shift_samples) for ya in ya_all]
+    yb_shift = [np.roll(yb, shift_samples) for yb in yb_all]
+    res_shift = evaluate_catcn_windows(model, eeg_all, ya_shift, yb_shift, windows=[5, 10, 20, 40], fs=FS, device=device)
     ablation_results["Temporal Jitter (+10s Shift)"] = res_shift
 
     # 4. RANDOM LABEL PERMUTATION (Ablation 3)
-    # Randomly flips YA and YB stream assignments
     print("--- Running Control 3: Random Label Permutation (Shuffled YA/YB) ---")
     rng = np.random.RandomState(42)
-    YA_perm, YB_perm = [], []
-    for ya, yb in zip(YA_te, YB_te):
+    ya_perm, yb_perm = [], []
+    for ya, yb in zip(ya_all, yb_all):
         if rng.rand() > 0.5:
-            YA_perm.append(yb)
-            YB_perm.append(ya)
+            ya_perm.append(yb)
+            yb_perm.append(ya)
         else:
-            YA_perm.append(ya)
-            YB_perm.append(yb)
-    res_perm = evaluate_catcn_multiwindow_batched(model, X_te, YA_perm, YB_perm, device)
+            ya_perm.append(ya)
+            yb_perm.append(yb)
+    res_perm = evaluate_catcn_windows(model, eeg_all, ya_perm, yb_perm, windows=[5, 10, 20, 40], fs=FS, device=device)
     ablation_results["Label Permutation (Shuffled)"] = res_perm
 
     # 5. SYNTHETIC EEG GAUSSIAN NOISE (Ablation 4)
-    # Replaces EEG with Gaussian noise matched to empirical mean and variance
     print("--- Running Control 4: Synthetic EEG Noise Control ---")
-    X_noise = []
-    for x in X_te:
-        mean = x.mean(axis=1, keepdims=True)
-        std = x.std(axis=1, keepdims=True)
-        noise = rng.randn(*x.shape).astype(np.float32) * std + mean
-        X_noise.append(noise)
-    res_noise = evaluate_catcn_multiwindow_batched(model, X_noise, YA_te, YB_te, device)
+    eeg_noise = []
+    for e in eeg_all:
+        mean = e.mean(axis=0, keepdims=True)
+        std = e.std(axis=0, keepdims=True)
+        noise = rng.randn(*e.shape).astype(np.float32) * std + mean
+        eeg_noise.append(noise)
+    res_noise = evaluate_catcn_windows(model, eeg_noise, ya_all, yb_all, windows=[5, 10, 20, 40], fs=FS, device=device)
     ablation_results["Synthetic EEG Noise"] = res_noise
 
     # PRINT FINAL RESULTS TABLE
