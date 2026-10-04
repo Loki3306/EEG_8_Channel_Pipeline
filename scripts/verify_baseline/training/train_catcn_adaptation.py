@@ -267,6 +267,7 @@ def main():
     parser.add_argument("--lr_calib_spatial", type=float, default=2e-4, help="Learning rate for spatial-only adaptation")
     parser.add_argument("--batch_size", type=int, default=128, help="Batch size")
     parser.add_argument("--hidden_dim", type=int, default=64, help="Hidden dimension")
+    parser.add_argument("--backbone_path", type=str, default="", help="Path to pre-trained checkpoint to adapt")
     parser.add_argument("--force_retrain_backbone", action="store_true", help="Force retraining universal backbone")
     args = parser.parse_args()
     
@@ -295,12 +296,18 @@ def main():
     # 1. Obtain Universal Backbone
     ckpt_dir = Path("/kaggle/working/checkpoints") if Path("/kaggle/working").exists() else Path("checkpoints/adaptation")
     ckpt_dir.mkdir(parents=True, exist_ok=True)
-    backbone_ckpt = ckpt_dir / f"catcn_univ_heldout_{args.subject}.pt"
+    backbone_ckpt = Path(args.backbone_path) if args.backbone_path and Path(args.backbone_path).exists() else (ckpt_dir / f"catcn_univ_heldout_{args.subject}.pt")
     
     if backbone_ckpt.exists() and not args.force_retrain_backbone:
-        print(f"  [CHECKPOINT] Loading cached universal backbone from: {backbone_ckpt.name}")
+        print(f"  [CHECKPOINT] Loading backbone from: {backbone_ckpt}")
         univ_model = CATCNDirectDecoder(eeg_channels=len(montage_channels), audio_channels=1, hidden_dim=args.hidden_dim, max_lag_samples=8).to(device)
-        univ_model.load_state_dict(torch.load(backbone_ckpt, map_location=device))
+        raw_sd = torch.load(backbone_ckpt, map_location=device)
+        if "model_state_dict" in raw_sd:
+            univ_model.load_state_dict(raw_sd["model_state_dict"])
+        elif "model" in raw_sd:
+            univ_model.load_state_dict(raw_sd["model"])
+        else:
+            univ_model.load_state_dict(raw_sd)
     else:
         univ_model = train_backbone(train_paths, montage_channels, mapping, envelopes, causal_filter, args, device)
         torch.save(univ_model.state_dict(), backbone_ckpt)
@@ -429,6 +436,21 @@ def main():
     res_spatial = run_evaluation_suite(spatial_model, eeg_test, ya_test, yb_test, FS, device)
     results["4. Spatial & BN-Only (Ours)"] = res_spatial
     print(f"    * 5.0s: {res_spatial['acc_5s']:.1f}% | 10.0s: {res_spatial['acc_10s']:.1f}% | 20.0s: {res_spatial['acc_20s']:.1f}% | Majority: {res_spatial['majority_acc']:.1f}% | Margin: {res_spatial['mean_margin']:+.2f}")
+    
+    # Save adapted spatial model checkpoint
+    adapted_dir = Path("/kaggle/working/loso_checkpoints") if Path("/kaggle/working").exists() else Path("checkpoints/adapted")
+    adapted_dir.mkdir(parents=True, exist_ok=True)
+    adapted_path = adapted_dir / f"catcn_adapted_{args.subject}.pt"
+    torch.save({
+        "model_state_dict": spatial_model.state_dict(),
+        "calib_trials": K,
+        "subject": args.subject,
+        "acc_5s": res_spatial['acc_5s'],
+        "acc_10s": res_spatial['acc_10s'],
+        "acc_20s": res_spatial['acc_20s'],
+        "majority_acc": res_spatial['majority_acc']
+    }, adapted_path)
+    print(f"  [CHECKPOINT] Saved adapted model (Spatial & BN adapted) to: {adapted_path}")
     
     # --------------------------------------------------------------------------
     # SYNTHESIS COMPARISON TABLE
