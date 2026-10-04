@@ -684,12 +684,24 @@ def main():
             Path(args.checkpoint_dir) / f"catcn_loso_{sub}.pt",
             Path(args.checkpoint_dir) / f"catcn_univ_heldout_{sub}.pt",
             Path(f"/kaggle/working/loso_checkpoints/catcn_loso_{sub}.pt"),
+            Path(f"/kaggle/working/loso_checkpoints/catcn_univ_heldout_{sub}.pt"),
             Path(f"/kaggle/working/checkpoints/catcn_univ_heldout_{sub}.pt"),
+            Path(f"/kaggle/working/checkpoints/catcn_loso_{sub}.pt"),
             Path(f"checkpoints/loso/catcn_loso_{sub}.pt"),
+            Path(f"checkpoints/adaptation/catcn_univ_heldout_{sub}.pt"),
         ]
         found_ckpt = next((p for p in backbone_candidates if p.exists()), None)
         if not found_ckpt:
-            print(f"[ERROR] Checkpoint not found for {sub}")
+            search_roots = [Path(args.checkpoint_dir), Path("/kaggle/working"), Path("checkpoints")]
+            for s_root in search_roots:
+                if s_root.exists():
+                    cands = list(s_root.rglob(f"*{sub}*.pt"))
+                    if cands:
+                        found_ckpt = cands[0]
+                        break
+                        
+        if not found_ckpt:
+            print(f"[ERROR] Checkpoint not found for {sub} in {args.checkpoint_dir} or /kaggle/working")
             continue
             
         univ_model = CATCNDirectDecoder(eeg_channels=len(montage_channels), audio_channels=1, hidden_dim=64, max_lag_samples=8).to(device)

@@ -79,12 +79,32 @@ def run_live_streaming_demo(
         Path(checkpoint_dir) / f"catcn_loso_{target_sub}.pt",
         Path(checkpoint_dir) / f"catcn_univ_heldout_{target_sub}.pt",
         Path(f"/kaggle/working/loso_checkpoints/catcn_loso_{target_sub}.pt"),
+        Path(f"/kaggle/working/loso_checkpoints/catcn_univ_heldout_{target_sub}.pt"),
+        Path(f"/kaggle/working/checkpoints/catcn_univ_heldout_{target_sub}.pt"),
         Path(f"/kaggle/working/checkpoints/catcn_loso_{target_sub}.pt"),
         Path(f"checkpoints/loso/catcn_loso_{target_sub}.pt"),
+        Path(f"checkpoints/adaptation/catcn_univ_heldout_{target_sub}.pt"),
     ]
     found_ckpt = next((p for p in backbone_candidates if p.exists()), None)
     if not found_ckpt:
-        raise FileNotFoundError(f"Checkpoint not found for {target_sub} in {checkpoint_dir}")
+        # Fallback: recursive search in checkpoint_dir, /kaggle/working, and ./checkpoints
+        search_roots = [Path(checkpoint_dir), Path("/kaggle/working"), Path("checkpoints")]
+        for s_root in search_roots:
+            if s_root.exists():
+                cands = list(s_root.rglob(f"*{target_sub}*.pt"))
+                if cands:
+                    found_ckpt = cands[0]
+                    break
+                    
+    if not found_ckpt:
+        all_pts = []
+        for s_root in [Path(checkpoint_dir), Path("/kaggle/working")]:
+            if s_root.exists():
+                all_pts.extend([str(p) for p in s_root.rglob("*.pt")])
+        avail_str = "\n".join(all_pts[:10]) if all_pts else "No .pt files found"
+        raise FileNotFoundError(
+            f"Checkpoint not found for {target_sub}.\nSearched candidates in: {checkpoint_dir}, /kaggle/working\nAvailable files on disk:\n{avail_str}"
+        )
         
     print(f"[CHECKPOINT] Loaded frozen backbone from: {found_ckpt}")
     univ_model = CATCNDirectDecoder(
