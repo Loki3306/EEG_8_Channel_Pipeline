@@ -35,6 +35,7 @@ from src.selective_aad.evaluator import SelectiveAADEvaluator
 from src.selective_aad.temporal_gate import SignalQualityMonitor, StickyHysteresisGate
 from src.audio.steering_engine import AudioSteeringDSP
 from src.audio.metrics import evaluate_audio_steering_trial
+from src.audio.live_visualizer import save_live_streaming_dashboard
 
 # Helper: Synthesize speech-like modulated acoustic carrier if raw WAV is missing
 def synthesize_acoustic_speech(envelope_64hz: np.ndarray, target_fs: int = 44100) -> np.ndarray:
@@ -536,6 +537,83 @@ def run_single_demo_trial(
     
     print(f"  [METRICS] ΔSIR: {metrics['delta_sir_db']:+.1f} dB | Contrast: {metrics['mean_contrast_db']:+.1f} dB | STOI: {metrics['stoi_steered']:.2f} | Acc: {metrics['decision_accuracy_pct']:.1f}%")
     print(f"  [SAVED] Audio: {p_steered.name} ({duration_sec:.1f}s) | Plot: {p_plot.name}")
+    
+    # 9. Build Synchronized Telemetry for Live Interactive Player
+    telemetry_frames = []
+    n_corr = 0
+    total_dec = 0
+    flips_cnt = 0
+    prev_d = "HOLD"
+    
+    for i in range(len(control_times)):
+        t_sec = control_times[i]
+        d_val = control_states[i]
+        s_val = control_margins[i]
+        conf_val = float(np.clip(abs(s_val) / (best_hyst["threshold_switch"] + 1e-8), 0.0, 1.0))
+        
+        if d_val != prev_d and i > 0 and d_val in ["A", "B"] and prev_d in ["A", "B"]:
+            flips_cnt += 1
+        prev_d = d_val
+        
+        is_c = (d_val == gt)
+        if d_val in ["A", "B"]:
+            total_dec += 1
+            if is_c:
+                n_corr += 1
+        acc_now = (n_corr / max(1, total_dec)) * 100.0
+        
+        s_idx = int(t_sec * actual_fs)
+        h_win = int(0.25 * actual_fs)
+        w_s = max(0, s_idx - h_win)
+        w_e = min(len(audio_a), s_idx + h_win)
+        rms_a = float(np.sqrt(np.mean(np.square(audio_a[w_s:w_e])))) if w_e > w_s else 0.0
+        rms_b = float(np.sqrt(np.mean(np.square(audio_b[w_s:w_e])))) if w_e > w_s else 0.0
+        
+        g_a_val = float(render_dict["gain_db_a"][min(len(render_dict["gain_db_a"]) - 1, s_idx)])
+        g_b_val = float(render_dict["gain_db_b"][min(len(render_dict["gain_db_b"]) - 1, s_idx)])
+        
+        telemetry_frames.append({
+            "time_sec": round(float(t_sec), 2),
+            "raw_margin": round(float(trial_margins[i]), 3),
+            "smoothed_margin": round(float(s_val), 3),
+            "confidence": round(conf_val, 3),
+            "decision": d_val,
+            "ground_truth": gt,
+            "is_correct": is_c,
+            "gain_a_db": round(g_a_val, 1),
+            "gain_b_db": round(g_b_val, 1),
+            "rms_a": round(rms_a, 4),
+            "rms_b": round(rms_b, 4),
+            "cumulative_accuracy_pct": round(acc_now, 1),
+            "running_delta_sir_db": round(float(g_a_val - g_b_val), 1),
+            "running_stoi": round(float(metrics["stoi_steered"]), 2),
+            "switch_count": flips_cnt,
+        })
+        
+    telemetry_packet = {
+        "subject": target_sub,
+        "trial_idx": target_trial_idx,
+        "duration_sec": round(duration_sec, 2),
+        "sample_rate": actual_fs,
+        "ground_truth": gt,
+        "threshold_switch": float(best_hyst["threshold_switch"]),
+        "threshold_maintain": float(best_hyst["threshold_maintain"]),
+        "max_boost_db": max_boost_db,
+        "max_suppress_db": max_suppress_db,
+        "tau_ms": tau_ms,
+        "headroom_db": round(float(metrics["headroom_db"]), 1),
+        "steered_wav_filename": p_steered.name,
+        "mixture_wav_filename": p_mixture.name,
+        "ref_wav_filename": p_ref.name,
+        "frames": telemetry_frames
+    }
+    
+    live_player_path = out_dir / f"{target_sub}_trial_{target_trial_idx}_live_player.html"
+    save_live_streaming_dashboard(telemetry_packet, live_player_path)
+    if target_sub == "S8":
+        save_live_streaming_dashboard(telemetry_packet, out_dir / "aad_live_streaming_player.html")
+        
+    print(f"  [LIVE PLAYER] Interactive live stream player saved to: {live_player_path.name}")
     
     return {
         "subject": target_sub,

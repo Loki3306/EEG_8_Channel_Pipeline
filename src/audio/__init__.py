@@ -5,6 +5,10 @@ from .metrics import (
     compute_stoi_intelligibility,
     evaluate_audio_steering_trial,
 )
+from .live_visualizer import (
+    build_live_streaming_html,
+    save_live_streaming_dashboard,
+)
 
 __all__ = [
     "AudioSteeringDSP",
@@ -12,4 +16,6 @@ __all__ = [
     "compute_headroom_metrics",
     "compute_stoi_intelligibility",
     "evaluate_audio_steering_trial",
+    "build_live_streaming_html",
+    "save_live_streaming_dashboard",
 ]
