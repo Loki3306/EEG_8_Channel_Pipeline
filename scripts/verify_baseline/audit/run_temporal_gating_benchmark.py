@@ -383,26 +383,40 @@ def main():
         # -----------------------------------------------------------------
         # STRATEGY 4: Lightweight Time-Series Neural Gate (Tiny GRU)
         # -----------------------------------------------------------------
+        calib_gru_logits = []
+        for m_seq in cv_margins:
+            x_seq = torch.from_numpy(build_temporal_features(m_seq, seq_len=8)).to(device)
+            with torch.no_grad():
+                l_out, _, _ = tiny_gru(x_seq)
+            calib_gru_logits.append(l_out.cpu().numpy())
+            
+        flat_calib_gru = np.concatenate(calib_gru_logits)
+        calibrator_gru = TemperatureCalibrator()
+        t_gru = calibrator_gru.fit(flat_calib_gru, flat_calib_l, bounds=(0.05, 10.0))
+        
+        hyst_gru_sweep = SelectiveAADEvaluator.sweep_hysteresis_parameters(
+            calib_gru_logits, cv_labels, alpha=0.3,
+            switch_candidates=[0.05, 0.15, 0.30], confirm_candidates=[1, 2], step_sec=args.step_sec
+        )
+        best_gru_hyst = hyst_gru_sweep["best_config"]
+        
         s4_dec_list = []
         s4_gains_attended = []
         for m_seq in test_margins:
             x_seq = torch.from_numpy(build_temporal_features(m_seq, seq_len=8)).to(device)
             with torch.no_grad():
                 intent_logits, _, _ = tiny_gru(x_seq)
-            probs_a = torch.sigmoid(intent_logits).cpu().numpy()
+            raw_logits = intent_logits.cpu().numpy()
             
-            # Map probabilities to sticky state transitions
             gate_s4 = StickyHysteresisGate(
-                alpha=0.3,  # Tiny GRU already models history; light smoothing
-                threshold_switch=0.70,
-                threshold_maintain=0.40,
-                n_confirm=1,
+                alpha=0.3,
+                threshold_switch=best_gru_hyst["threshold_switch"],
+                threshold_maintain=best_gru_hyst["threshold_maintain"],
+                n_confirm=best_gru_hyst["n_confirm"],
                 deadband_timeout_steps=20,
-                temperature=1.0
+                temperature=t_gru
             )
-            # Center around 0: margin = (prob_a - 0.5) * 2.0
-            proxy_margins = (probs_a - 0.5) * 2.0
-            trial_decs = [gate_s4.update(pm)["decision"] for pm in proxy_margins]
+            trial_decs = [gate_s4.update(rl)["decision"] for rl in raw_logits]
             trial_gains = [gate_s4.gain_a for _ in trial_decs]
             s4_dec_list.append(np.array(trial_decs))
             s4_gains_attended.append(np.array(trial_gains))
