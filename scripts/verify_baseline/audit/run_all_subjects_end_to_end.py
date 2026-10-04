@@ -562,7 +562,7 @@ def run_full_cohort_pipeline(args):
     # COHORT EXECUTION LOOP
     # =========================================================================
     for sub_idx, sub_id in enumerate(target_subs, start=1):
-        if sub_id in completed_subs and not args.force_rerun:
+        if sub_id in completed_rows and not args.force_rerun:
             print("\n" + "#" * 115)
             print(f"  [COHORT {sub_idx:02d}/{len(target_subs):02d}] TARGET SUBJECT {sub_id} ALREADY COMPLETED IN SUMMARY CSV")
             print(f"  Skipping re-computation (pass --force_rerun to overwrite).")
