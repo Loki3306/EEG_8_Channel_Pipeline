@@ -197,9 +197,15 @@ def main():
     adapter.eval()
     
     # 4. Initialize DSP & Streaming Engines
-    gate = StickyHysteresisGate(theta=0.08, tau=3)
-    sq_monitor = SignalQualityMonitor(fs=64.0)
-    steering_dsp = AudioSteeringDSP(sr=audio_fs, crossfade_ms=100.0)
+    gate = StickyHysteresisGate(
+        alpha=0.82,
+        threshold_switch=0.35,
+        threshold_maintain=0.20,
+        n_confirm=2,
+        temperature=0.69
+    )
+    sq_monitor = SignalQualityMonitor()
+    steering_dsp = AudioSteeringDSP(fs=int(audio_fs), tau_ms=100.0, threshold_switch=0.35)
     
     dual_engine = DualStreamIngestionEngine(
         raw_eeg_fs=raw_sub.fs,
@@ -246,7 +252,7 @@ def main():
     total_gpu_ms = 0.0
     total_evals = 0
     correct_evals = 0
-    state_counts = {"ATTEND_A": 0, "ATTEND_B": 0, "HOLD": 0}
+    state_counts = {"A": 0, "B": 0, "HOLD": 0}
     steered_audio_chunks = []
     
     for t_idx in range(n_ticks):
@@ -296,15 +302,16 @@ def main():
             sq = sq_monitor.check_eeg_window(frame.eeg_window.T)
             gate_out = gate.update(s_t, is_artifact=not sq["is_valid"])
             dec = gate_out["decision"]
-            state_counts[dec] = state_counts.get(dec, 0) + 1
+            dsp_dec = "A" if "A" in dec else ("B" if "B" in dec else "HOLD")
+            state_counts[dsp_dec] = state_counts.get(dsp_dec, 0) + 1
             
             if s_t > 0:
                 correct_evals += 1
                 
             # Real-Time Audio Steering
-            steered_chunk = steering_dsp.process_frame(chunk_a, chunk_b, decision=dec)
+            steered_chunk = steering_dsp.process_frame(chunk_a, chunk_b, decision=dsp_dec, margin=gate_out["smoothed_margin"])
             if args.save_audio:
-                steered_audio_chunks.append(steered_chunk)
+                steered_audio_chunks.append(steered_chunk.T) # [N, 2]
                 
             sim_time = (e_end / raw_sub.fs)
             # RTF = (Total Compute Time during this 0.5s window) / (0.5s window duration)
@@ -314,7 +321,7 @@ def main():
             eeg_us = frame.dsp_timing_us.get("eeg_us", 0.0)
             aud_a_us = frame.dsp_timing_us.get("audio_a_us", 0.0)
             aud_b_us = frame.dsp_timing_us.get("audio_b_us", 0.0)
-            print(f" {sim_time:5.1f}s | Block {t_idx:<5} | {eeg_us:10.1f} us | {aud_a_us:8.1f} us | {aud_b_us:8.1f} us | {t_gpu_ms:10.2f} ms | s={gate_out['smoothed_margin']:+6.2f}   | {dec:<7} | {rtf:6.3f}x")
+            print(f" {sim_time:5.1f}s | Block {t_idx:<5} | {eeg_us:10.1f} us | {aud_a_us:8.1f} us | {aud_b_us:8.1f} us | {t_gpu_ms:10.2f} ms | s={gate_out['smoothed_margin']:+6.2f}   | {dsp_dec:<7} | {rtf:6.3f}x")
             
     print("-" * 115)
     
@@ -338,7 +345,7 @@ def main():
     print(f"  Combined Total DSP CPU Load:        {total_dsp_pct:6.2f}% of single CPU core")
     print(f"  Average GPU CA-TCN Latency:         {avg_gpu_latency:6.2f} milliseconds per evaluation")
     print(f"  Total Real-Time Factor (RTF):       {overall_rtf:6.4f}x (Budget < 1.0x, Speedup = {1.0/max(1e-6, overall_rtf):.1f}x)")
-    print(f"  Decision Distribution:              ATTEND_A={state_counts['ATTEND_A']}, ATTEND_B={state_counts['ATTEND_B']}, HOLD={state_counts['HOLD']}")
+    print(f"  Decision Distribution:              A={state_counts.get('A', 0)}, B={state_counts.get('B', 0)}, HOLD={state_counts.get('HOLD', 0)}")
     if total_evals > 0:
         print(f"  Raw Window Decision Accuracy:       {(correct_evals/total_evals)*100.0:.1f}% ({correct_evals}/{total_evals})")
     print("=" * 115)
@@ -348,7 +355,7 @@ def main():
         out_wav.parent.mkdir(parents=True, exist_ok=True)
         steered_audio_full = np.concatenate(steered_audio_chunks, axis=0)
         wavfile.write(str(out_wav), int(audio_fs), (np.clip(steered_audio_full, -1.0, 1.0) * 32767).astype(np.int16))
-        print(f"\n[ARTIFACT] Saved steered audio output to: {out_wav}")
+        print(f"\n[ARTIFACT] Saved steered stereo audio output to: {out_wav}")
 
 
 if __name__ == "__main__":

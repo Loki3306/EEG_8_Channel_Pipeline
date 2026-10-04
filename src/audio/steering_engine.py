@@ -136,6 +136,22 @@ class AudioSteeringDSP:
             
         return stereo_out, g_a_traj, g_b_traj
 
+    def process_frame(
+        self,
+        audio_a: np.ndarray,
+        audio_b: np.ndarray,
+        decision: str = "HOLD",
+        margin: float = 0.0
+    ) -> np.ndarray:
+        """
+        Convenience wrapper to process an audio frame given a discrete decision ('A', 'B', 'HOLD')
+        and margin. Returns stereo audio array of shape [2, N].
+        """
+        state = "A" if "A" in decision else ("B" if "B" in decision else "HOLD")
+        g_a_db, g_b_db = self.compute_target_gains_db(state, margin)
+        stereo_out, _, _ = self.process_block(audio_a, audio_b, g_a_db, g_b_db)
+        return stereo_out
+
     def render_full_trial(
         self,
         audio_a: np.ndarray,
