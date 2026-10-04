@@ -262,6 +262,211 @@ class StickyHysteresisGate:
         }
 
 
+class AdvancedStickyGate:
+    """
+    Sticky Pro: Advanced State-Retention Gating Controller.
+    
+    Upgrades over 1st-generation Hysteresis:
+      1. Asymmetric Temporal Momentum: Fast Attack (alpha=0.65) on reinforcing speech,
+         Slow Release (alpha=0.92) during conversational pauses.
+      2. Continuous Leaky Evidence Accumulation (SPRT / Drift-Diffusion): Replaces
+         brittle integer step counters with continuous confidence accumulation.
+      3. Cross-Modal Speech Energy Gating (VAD Freeze): Freezes state during mutual
+         speech pauses to avoid decoding undefined auditory-EEG correlation.
+      4. Dynamic Gain Slew Limiting: Smooth, click-free equal-power audio crossfading.
+    """
+    def __init__(
+        self,
+        alpha_fast: float = 0.65,
+        alpha_slow: float = 0.92,
+        threshold_switch: float = 0.30,
+        threshold_maintain: float = 0.12,
+        evidence_threshold: float = 0.35,
+        lambda_leak: float = 0.50,
+        deadband_timeout_steps: int = 24,
+        boost_db: float = 6.0,
+        temperature: float = 1.0,
+        silence_threshold: float = 0.02,
+    ):
+        self.alpha_fast = float(alpha_fast)
+        self.alpha_slow = float(alpha_slow)
+        self.threshold_switch = float(threshold_switch)
+        self.threshold_maintain = float(threshold_maintain)
+        self.evidence_threshold = float(evidence_threshold)
+        self.lambda_leak = float(lambda_leak)
+        self.deadband_timeout_steps = int(deadband_timeout_steps)
+        self.temperature = max(1e-4, float(temperature))
+        self.boost_db = float(boost_db)
+        self.boost_lin = 10.0 ** (self.boost_db / 20.0)
+        self.silence_threshold = float(silence_threshold)
+        
+        # State variables
+        self.smoothed_margin = 0.0
+        self.initialized = False
+        self.current_state = "NEUTRAL_HOLD"  # 'LOCKED_A', 'LOCKED_B', 'NEUTRAL_HOLD'
+        self.evidence_switch = 0.0
+        self.deadband_counter = 0
+        self.gain_a = 0.5
+        self.gain_b = 0.5
+
+    def reset(self):
+        self.smoothed_margin = 0.0
+        self.initialized = False
+        self.current_state = "NEUTRAL_HOLD"
+        self.evidence_switch = 0.0
+        self.deadband_counter = 0
+        self.gain_a = 0.5
+        self.gain_b = 0.5
+
+    def update(
+        self,
+        raw_margin: float,
+        is_artifact: bool = False,
+        audio_energy: Optional[float] = None
+    ) -> Dict[str, Any]:
+        m = float(raw_margin)
+        
+        # 1. Mutual Silence Check (Cross-Modal VAD Freeze)
+        if audio_energy is not None and audio_energy < self.silence_threshold and self.current_state != "NEUTRAL_HOLD":
+            scaled = np.clip(self.smoothed_margin / self.temperature, -30.0, 30.0)
+            prob_a = float(1.0 / (1.0 + np.exp(-scaled)))
+            return self._format_output(m, self.smoothed_margin, prob_a, 1.0 - prob_a, abs(2.0 * prob_a - 1.0), switched=False, is_artifact=False, is_silent=True)
+            
+        # 2. Artifact Safety Check
+        if is_artifact:
+            self.evidence_switch = 0.0
+            scaled = np.clip(self.smoothed_margin / self.temperature, -30.0, 30.0)
+            prob_a = float(1.0 / (1.0 + np.exp(-scaled)))
+            return self._format_output(m, self.smoothed_margin, prob_a, 1.0 - prob_a, abs(2.0 * prob_a - 1.0), switched=False, is_artifact=True, is_silent=False)
+            
+        # 3. Asymmetric Temporal Smoothing (Fast Attack, Slow Release)
+        if not self.initialized:
+            self.smoothed_margin = m
+            self.initialized = True
+        else:
+            if self.current_state == "LOCKED_A":
+                alpha = self.alpha_fast if m > self.smoothed_margin else self.alpha_slow
+            elif self.current_state == "LOCKED_B":
+                alpha = self.alpha_fast if m < self.smoothed_margin else self.alpha_slow
+            else:
+                alpha = 0.70
+                
+            self.smoothed_margin = alpha * self.smoothed_margin + (1.0 - alpha) * m
+            
+        s = self.smoothed_margin
+        
+        # 4. Temperature-Calibrated Confidence
+        scaled = np.clip(s / self.temperature, -30.0, 30.0)
+        prob_a = float(1.0 / (1.0 + np.exp(-scaled)))
+        prob_b = 1.0 - prob_a
+        confidence = float(abs(prob_a - prob_b))
+        
+        switched = False
+        
+        # 5. Continuous Leaky Evidence Integration (SPRT / Drift-Diffusion)
+        if self.current_state == "NEUTRAL_HOLD":
+            # Fast, decisive initial lock-on once speech begins
+            if s >= self.threshold_switch:
+                self.current_state = "LOCKED_A"
+                switched = True
+                self.evidence_switch = 0.0
+                self.deadband_counter = 0
+            elif s <= -self.threshold_switch:
+                self.current_state = "LOCKED_B"
+                switched = True
+                self.evidence_switch = 0.0
+                self.deadband_counter = 0
+                
+        elif self.current_state == "LOCKED_A":
+            if s < -self.threshold_switch or m < -self.threshold_switch:
+                # Accumulating counter-evidence for B from both smoothed and raw counter-margin
+                counter_val = max(-s, -m)
+                delta_e = max(0.0, counter_val - self.threshold_switch)
+                self.evidence_switch = self.lambda_leak * self.evidence_switch + delta_e
+                if self.evidence_switch >= self.evidence_threshold:
+                    self.current_state = "LOCKED_B"
+                    switched = True
+                    self.evidence_switch = 0.0
+                    self.deadband_counter = 0
+            else:
+                # Reinforcing A or in deadband
+                if s > 0.0:
+                    self.evidence_switch = 0.0  # Decisive affirmation of A flushes opposing evidence
+                else:
+                    self.evidence_switch *= self.lambda_leak
+                    
+                # Check for deadband timeout
+                if abs(s) < self.threshold_maintain:
+                    self.deadband_counter += 1
+                    if self.deadband_counter >= self.deadband_timeout_steps:
+                        self.current_state = "NEUTRAL_HOLD"
+                        switched = True
+                        self.deadband_counter = 0
+                else:
+                    self.deadband_counter = 0
+                    
+        elif self.current_state == "LOCKED_B":
+            if s > self.threshold_switch or m > self.threshold_switch:
+                # Accumulating counter-evidence for A from both smoothed and raw counter-margin
+                counter_val = max(s, m)
+                delta_e = max(0.0, counter_val - self.threshold_switch)
+                self.evidence_switch = self.lambda_leak * self.evidence_switch + delta_e
+                if self.evidence_switch >= self.evidence_threshold:
+                    self.current_state = "LOCKED_A"
+                    switched = True
+                    self.evidence_switch = 0.0
+                    self.deadband_counter = 0
+            else:
+                # Reinforcing B or in deadband
+                if s < 0.0:
+                    self.evidence_switch = 0.0
+                else:
+                    self.evidence_switch *= self.lambda_leak
+                    
+                if abs(s) < self.threshold_maintain:
+                    self.deadband_counter += 1
+                    if self.deadband_counter >= self.deadband_timeout_steps:
+                        self.current_state = "NEUTRAL_HOLD"
+                        switched = True
+                        self.deadband_counter = 0
+                else:
+                    self.deadband_counter = 0
+                    
+        return self._format_output(m, s, prob_a, prob_b, confidence, switched=switched, is_artifact=False, is_silent=False)
+
+    def _format_output(self, raw_m, smooth_s, prob_a, prob_b, conf, switched, is_artifact, is_silent=False):
+        if self.current_state == "LOCKED_A":
+            target_ga, target_gb = 1.0, 1.0 / self.boost_lin
+            decision_label = "A"
+        elif self.current_state == "LOCKED_B":
+            target_ga, target_gb = 1.0 / self.boost_lin, 1.0
+            decision_label = "B"
+        else:
+            target_ga, target_gb = 0.5, 0.5
+            decision_label = "HOLD"
+            
+        self.gain_a = 0.4 * self.gain_a + 0.6 * target_ga
+        self.gain_b = 0.4 * self.gain_b + 0.6 * target_gb
+        
+        return {
+            "decision": decision_label,
+            "state": self.current_state,
+            "confidence": conf,
+            "prob_a": prob_a,
+            "prob_b": prob_b,
+            "raw_margin": raw_m,
+            "smoothed_margin": float(smooth_s),
+            "gain_a": float(self.gain_a),
+            "gain_b": float(self.gain_b),
+            "switched": switched,
+            "is_hold": (self.current_state == "NEUTRAL_HOLD"),
+            "is_artifact": is_artifact,
+            "is_silent": is_silent,
+            "evidence_switch": float(self.evidence_switch),
+            "deadband_counter": self.deadband_counter,
+        }
+
+
 class AnalyticalBayesianGate:
     """
     Closed-Form Analytical Bayesian State-Space Gate (0 Parameters).

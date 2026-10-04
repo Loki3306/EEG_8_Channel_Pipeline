@@ -17,6 +17,7 @@ from .streaming_gate import SelectiveStreamingGate
 from .temporal_gate import (
     SignalQualityMonitor,
     StickyHysteresisGate,
+    AdvancedStickyGate,
     AnalyticalBayesianGate,
     TinyTemporalGate,
 )
@@ -39,6 +40,7 @@ __all__ = [
     "SelectiveStreamingGate",
     "SignalQualityMonitor",
     "StickyHysteresisGate",
+    "AdvancedStickyGate",
     "AnalyticalBayesianGate",
     "TinyTemporalGate",
     "calculate_selective_metrics",

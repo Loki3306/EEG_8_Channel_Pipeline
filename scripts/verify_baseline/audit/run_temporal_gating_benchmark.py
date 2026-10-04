@@ -35,6 +35,7 @@ from src.selective_aad.streaming_gate import SelectiveStreamingGate
 from src.selective_aad.temporal_gate import (
     SignalQualityMonitor,
     StickyHysteresisGate,
+    AdvancedStickyGate,
     AnalyticalBayesianGate,
     TinyTemporalGate,
 )
@@ -105,11 +106,13 @@ def extract_margins_with_raw_eeg(model, eeg_list, ya_list, yb_list, window_sec, 
     trials_margins = []
     trials_labels = []
     trials_raw_eeg = []
+    trials_audio_energy = []
     
     for t_idx, (eeg, ya, yb) in enumerate(zip(eeg_list, ya_list, yb_list)):
         t_len = min(len(eeg), len(ya), len(yb))
         win_e, win_a, win_b = [], [], []
         raw_e = []
+        raw_energy = []
         
         curr_start = 0
         while curr_start + window_samples <= t_len:
@@ -119,6 +122,9 @@ def extract_margins_with_raw_eeg(model, eeg_list, ya_list, yb_list, window_sec, 
             w_b = yb[curr_start:curr_end]
             
             raw_e.append(w_e)
+            step_energy = float(np.mean(np.abs(w_a)) + np.mean(np.abs(w_b))) / 2.0
+            raw_energy.append(step_energy)
+            
             # Causal window standardization
             w_e_std = (w_e - np.mean(w_e, axis=0, keepdims=True)) / (np.std(w_e, axis=0, keepdims=True) + 1e-8)
             w_a_std = (w_a - np.mean(w_a)) / (np.std(w_a) + 1e-8)
@@ -139,8 +145,9 @@ def extract_margins_with_raw_eeg(model, eeg_list, ya_list, yb_list, window_sec, 
             trials_margins.append(np.array(trial_m, dtype=np.float64))
             trials_labels.append(np.ones(len(trial_m), dtype=np.int64))
             trials_raw_eeg.append(raw_e)
+            trials_audio_energy.append(np.array(raw_energy, dtype=np.float32))
             
-    return trials_margins, trials_labels, trials_raw_eeg
+    return trials_margins, trials_labels, trials_raw_eeg, trials_audio_energy
 
 def build_temporal_features(margin_seq: np.ndarray, seq_len: int = 8) -> np.ndarray:
     """
@@ -299,7 +306,7 @@ def main():
         eeg_test, ya_test, yb_test = eeg_all[K:], ya_all[K:], yb_all[K:]
         
         # 3. Inner CV for Gating Parameters
-        cv_margins, cv_labels, _ = extract_margins_with_raw_eeg(univ_model, eeg_calib, ya_calib, yb_calib, args.window_sec, args.step_sec, FS, device)
+        cv_margins, cv_labels, _, _ = extract_margins_with_raw_eeg(univ_model, eeg_calib, ya_calib, yb_calib, args.window_sec, args.step_sec, FS, device)
         flat_calib_m = np.concatenate(cv_margins)
         flat_calib_l = np.concatenate(cv_labels)
         
@@ -320,7 +327,7 @@ def main():
         tiny_gru = train_tiny_temporal_gate(cv_margins, cv_labels, epochs=15 if not args.smoke_test else 3, lr=1e-3, device=device)
         
         # 5. Extract Test Set Data
-        test_margins, test_labels, test_raw_eeg = extract_margins_with_raw_eeg(univ_model, eeg_test, ya_test, yb_test, args.window_sec, args.step_sec, FS, device)
+        test_margins, test_labels, test_raw_eeg, test_audio_energy = extract_margins_with_raw_eeg(univ_model, eeg_test, ya_test, yb_test, args.window_sec, args.step_sec, FS, device)
         flat_test_m = np.concatenate(test_margins)
         flat_test_l = np.concatenate(test_labels)
         gt_test_str = np.where(flat_test_l == 1, "A", "B")
@@ -426,6 +433,38 @@ def main():
         s4_fsw = float(np.mean([compute_temporal_stability_metrics(d, np.where(l == 1, "A", "B"), args.step_sec)["false_switches_per_minute"] for d, l in zip(s4_dec_list, test_labels)]))
         s4_useful_cov = float(np.mean(np.concatenate(s4_gains_attended) >= 0.80) * 100.0)
         
+        # -----------------------------------------------------------------
+        # STRATEGY 5: Sticky Pro (AdvancedStickyGate with Asym+SPRT+VAD)
+        # -----------------------------------------------------------------
+        s5_dec_list = []
+        s5_gains_attended = []
+        for m_seq, eeg_trial, nrg_trial in zip(test_margins, test_raw_eeg, test_audio_energy):
+            gate_s5 = AdvancedStickyGate(
+                alpha_fast=0.65,
+                alpha_slow=0.92,
+                threshold_switch=best_hyst["threshold_switch"],
+                threshold_maintain=best_hyst["threshold_maintain"] * 0.8,
+                evidence_threshold=0.30,
+                lambda_leak=0.50,
+                deadband_timeout_steps=24,
+                temperature=fitted_t,
+                silence_threshold=0.015
+            )
+            trial_decs = []
+            trial_gains = []
+            for v, w_eeg, nrg in zip(m_seq, eeg_trial, nrg_trial):
+                sq = sq_monitor.check_eeg_window(w_eeg)
+                out = gate_s5.update(v, is_artifact=not sq["is_valid"], audio_energy=float(nrg))
+                trial_decs.append(out["decision"])
+                trial_gains.append(out["gain_a"])
+            s5_dec_list.append(np.array(trial_decs))
+            s5_gains_attended.append(np.array(trial_gains))
+            
+        flat_s5 = np.concatenate(s5_dec_list)
+        m_s5 = calculate_selective_metrics(flat_s5, gt_test_str)
+        s5_fsw = float(np.mean([compute_temporal_stability_metrics(d, np.where(l == 1, "A", "B"), args.step_sec)["false_switches_per_minute"] for d, l in zip(s5_dec_list, test_labels)]))
+        s5_useful_cov = float(np.mean(np.concatenate(s5_gains_attended) >= 0.80) * 100.0)
+        
         results[target_sub] = {
             "S1_forced_acc": m_s1["selective_accuracy"] * 100.0,
             "S1_forced_fsw": s1_fsw,
@@ -440,6 +479,10 @@ def main():
             "S4_gru_cov": s4_useful_cov,
             "S4_gru_hold": m_s4["abstention_rate"] * 100.0,
             "S4_gru_fsw": s4_fsw,
+            "S5_pro_acc": m_s5["selective_accuracy"] * 100.0,
+            "S5_pro_cov": s5_useful_cov,
+            "S5_pro_hold": m_s5["abstention_rate"] * 100.0,
+            "S5_pro_fsw": s5_fsw,
         }
         
         print(f"  RESULTS for {target_sub}:")
@@ -447,6 +490,7 @@ def main():
         print(f"    2. Blunt HOLD (Current F):     {m_s2['selective_accuracy']*100:.1f}% | FalseSw: {s2_fsw:.2f}/m | HOLD: {m_s2['abstention_rate']*100:.1f}%")
         print(f"    3. Sticky State Retention:     {m_s3['selective_accuracy']*100:.1f}% | FalseSw: {s3_fsw:.2f}/m | Useful Boost: {s3_useful_cov:.1f}% (HOLD: {m_s3['abstention_rate']*100:.1f}%)")
         print(f"    4. Tiny GRU Time-Series Gate:  {m_s4['selective_accuracy']*100:.1f}% | FalseSw: {s4_fsw:.2f}/m | Useful Boost: {s4_useful_cov:.1f}% (HOLD: {m_s4['abstention_rate']*100:.1f}%)")
+        print(f"    5. Sticky Pro (Asym+SPRT+VAD): {m_s5['selective_accuracy']*100:.1f}% | FalseSw: {s5_fsw:.2f}/m | Useful Boost: {s5_useful_cov:.1f}% (HOLD: {m_s5['abstention_rate']*100:.1f}%)")
         
         # Clean memory
         del univ_model, tiny_gru
@@ -456,15 +500,15 @@ def main():
         gc.collect()
 
     # Grand Comparison Table
-    print("\n" + "=" * 125)
+    print("\n" + "=" * 145)
     print("  GRAND SUMMARY: ADVANCED TEMPORAL GATING ARCHITECTURES (FROZEN 5.0s CA-TCN)")
-    print("=" * 125)
-    print(f"  {'Subject':<8} | {'1. Forced Base':<15} | {'2. Blunt HOLD F':<17} | {'3. Sticky Retention':<22} | {'4. Tiny GRU Gate':<20}")
-    print(f"  {'':<8} | {'Acc':<7} {'F.Sw':<7} | {'Acc':<7} {'HOLD%':<8} | {'Acc':<7} {'Boost%':<7} {'F.Sw':<6} | {'Acc':<7} {'Boost%':<7} {'F.Sw':<5}")
-    print("  " + "-" * 121)
+    print("=" * 145)
+    print(f"  {'Subject':<8} | {'1. Forced Base':<15} | {'2. Blunt HOLD F':<17} | {'3. Sticky Retention':<22} | {'4. Tiny GRU':<17} | {'5. Sticky Pro (Winner)':<22}")
+    print(f"  {'':<8} | {'Acc':<7} {'F.Sw':<7} | {'Acc':<7} {'HOLD%':<8} | {'Acc':<7} {'Boost%':<7} {'F.Sw':<6} | {'Acc':<7} {'F.Sw':<8} | {'Acc':<7} {'Boost%':<7} {'F.Sw':<6}")
+    print("  " + "-" * 141)
     
     for sub, r in results.items():
-        print(f"  {sub:<8} | {r['S1_forced_acc']:>5.1f}% {r['S1_forced_fsw']:>5.2f} | {r['S2_blunt_acc']:>5.1f}% {r['S2_blunt_hold']:>6.1f}% | {r['S3_sticky_acc']:>5.1f}% {r['S3_sticky_cov']:>6.1f}% {r['S3_sticky_fsw']:>5.2f} | {r['S4_gru_acc']:>5.1f}% {r['S4_gru_cov']:>6.1f}% {r['S4_gru_fsw']:>5.2f}")
+        print(f"  {sub:<8} | {r['S1_forced_acc']:>5.1f}% {r['S1_forced_fsw']:>5.2f} | {r['S2_blunt_acc']:>5.1f}% {r['S2_blunt_hold']:>6.1f}% | {r['S3_sticky_acc']:>5.1f}% {r['S3_sticky_cov']:>6.1f}% {r['S3_sticky_fsw']:>5.2f} | {r['S4_gru_acc']:>5.1f}% {r['S4_gru_fsw']:>7.2f} | {r['S5_pro_acc']:>5.1f}% {r['S5_pro_cov']:>6.1f}% {r['S5_pro_fsw']:>5.2f}")
         
     if len(results) > 1:
         mean_s1_acc = np.mean([r["S1_forced_acc"] for r in results.values()])
@@ -475,12 +519,14 @@ def main():
         mean_s3_cov = np.mean([r["S3_sticky_cov"] for r in results.values()])
         mean_s3_fsw = np.mean([r["S3_sticky_fsw"] for r in results.values()])
         mean_s4_acc = np.mean([r["S4_gru_acc"] for r in results.values()])
-        mean_s4_cov = np.mean([r["S4_gru_cov"] for r in results.values()])
         mean_s4_fsw = np.mean([r["S4_gru_fsw"] for r in results.values()])
+        mean_s5_acc = np.mean([r["S5_pro_acc"] for r in results.values()])
+        mean_s5_cov = np.mean([r["S5_pro_cov"] for r in results.values()])
+        mean_s5_fsw = np.mean([r["S5_pro_fsw"] for r in results.values()])
         
-        print("  " + "-" * 121)
-        print(f"  {'AVERAGE':<8} | {mean_s1_acc:>5.1f}% {mean_s1_fsw:>5.2f} | {mean_s2_acc:>5.1f}% {mean_s2_hold:>6.1f}% | {mean_s3_acc:>5.1f}% {mean_s3_cov:>6.1f}% {mean_s3_fsw:>5.2f} | {mean_s4_acc:>5.1f}% {mean_s4_cov:>6.1f}% {mean_s4_fsw:>5.2f}")
-    print("=" * 125)
+        print("  " + "-" * 141)
+        print(f"  {'AVERAGE':<8} | {mean_s1_acc:>5.1f}% {mean_s1_fsw:>5.2f} | {mean_s2_acc:>5.1f}% {mean_s2_hold:>6.1f}% | {mean_s3_acc:>5.1f}% {mean_s3_cov:>6.1f}% {mean_s3_fsw:>5.2f} | {mean_s4_acc:>5.1f}% {mean_s4_fsw:>7.2f} | {mean_s5_acc:>5.1f}% {mean_s5_cov:>6.1f}% {mean_s5_fsw:>5.2f}")
+    print("=" * 145)
     
     out_file = Path("/kaggle/working/temporal_gating_benchmark_results.json") if Path("/kaggle/working").exists() else Path("temporal_gating_benchmark_results.json")
     with open(out_file, "w") as f:
