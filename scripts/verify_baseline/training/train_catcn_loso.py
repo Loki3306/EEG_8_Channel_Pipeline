@@ -1,6 +1,10 @@
 import argparse
 import sys
 import os
+
+if hasattr(sys.stdout, 'reconfigure'):
+    sys.stdout.reconfigure(line_buffering=True)
+
 import json
 import time
 import math
