@@ -14,6 +14,12 @@ from .core import (
     ConformalSelectiveGate,
 )
 from .streaming_gate import SelectiveStreamingGate
+from .temporal_gate import (
+    SignalQualityMonitor,
+    StickyHysteresisGate,
+    AnalyticalBayesianGate,
+    TinyTemporalGate,
+)
 from .metrics import (
     calculate_selective_metrics,
     compute_risk_coverage_curve,
@@ -31,6 +37,10 @@ __all__ = [
     "SelectiveRiskCoverageOptimizer",
     "ConformalSelectiveGate",
     "SelectiveStreamingGate",
+    "SignalQualityMonitor",
+    "StickyHysteresisGate",
+    "AnalyticalBayesianGate",
+    "TinyTemporalGate",
     "calculate_selective_metrics",
     "compute_risk_coverage_curve",
     "compute_aurc",
