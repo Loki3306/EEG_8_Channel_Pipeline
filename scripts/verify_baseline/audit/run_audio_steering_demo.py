@@ -145,14 +145,9 @@ def generate_html_player(demo_results: list, output_html_path: Path):
         gt = r["ground_truth"]
         m = r["metrics"]
         
-        # Read WAVs and base64 encode
-        def get_b64(path):
-            with open(path, "rb") as f:
-                return base64.b64encode(f.read()).decode("utf-8")
-                
-        b64_steered = get_b64(r["steered_wav_path"])
-        b64_mixture = get_b64(r["mixture_wav_path"])
-        b64_ref = get_b64(r["ref_wav_path"])
+        steered_name = r["steered_wav_path"].name
+        mixture_name = r["mixture_wav_path"].name
+        ref_name = r["ref_wav_path"].name
         
         card = f"""
         <div class="trial-card">
@@ -193,21 +188,21 @@ def generate_html_player(demo_results: list, output_html_path: Path):
                 <div class="player-group">
                     <div class="player-title">1. Live AAD Steered Binaural Output (Attended Amplified + Unattended Suppressed)</div>
                     <audio controls style="width: 100%;">
-                        <source src="data:audio/wav;base64,{b64_steered}" type="audio/wav">
+                        <source src="{steered_name}" type="audio/wav">
                     </audio>
                 </div>
                 
                 <div class="player-group">
                     <div class="player-title">2. Raw Unsteered Mixture (Baseline 50/50 Cocktail Party)</div>
                     <audio controls style="width: 100%;">
-                        <source src="data:audio/wav;base64,{b64_mixture}" type="audio/wav">
+                        <source src="{mixture_name}" type="audio/wav">
                     </audio>
                 </div>
                 
                 <div class="player-group">
                     <div class="player-title">3. Clean Attended Speaker Reference (Isolated Target)</div>
                     <audio controls style="width: 100%;">
-                        <source src="data:audio/wav;base64,{b64_ref}" type="audio/wav">
+                        <source src="{ref_name}" type="audio/wav">
                     </audio>
                 </div>
             </div>
