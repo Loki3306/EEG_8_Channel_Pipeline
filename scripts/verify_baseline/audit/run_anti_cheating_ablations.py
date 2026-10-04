@@ -88,11 +88,11 @@ def run_ablation_test(args):
         print("No subjects found.")
         return
 
-    target_sub = args.subject
+    target_sub = args.subject.split("_")[0]
     held_out_path = None
     train_paths = []
     for p in all_paths:
-        if p.stem == target_sub:
+        if p.stem.split("_")[0] == target_sub:
             held_out_path = p
         else:
             train_paths.append(p)
@@ -112,67 +112,6 @@ def run_ablation_test(args):
     mapping, envelopes = get_mapping_data("gammatone")
     montage_channels = MONTAGES[args.montage]
 
-    print("\n[Stage 1]: Loading & Preprocessing Training Data...")
-    X_tr_list, YA_tr_list, YB_tr_list = [], [], []
-    X_va_list, YA_va_list, YB_va_list = [], [], []
-
-    win_samples = int(TRAIN_WINDOW_SEC * FS)
-    hop_samples = int(args.train_hop_sec * FS)
-
-    for p in train_paths:
-        sub_name = p.stem
-        exs = list(load_subject_examples(p))
-        X_sub, YA_sub, YB_sub = prepare_dataset(
-            exs, montage_channels, args.lowcut, args.highcut, sub_name, mapping, envelopes
-        )
-        YA_sub = [ya.mean(axis=0, keepdims=True).astype(np.float32) if ya.shape[0] > 1 else ya.astype(np.float32) for ya in YA_sub]
-        YB_sub = [yb.mean(axis=0, keepdims=True).astype(np.float32) if yb.shape[0] > 1 else yb.astype(np.float32) for yb in YB_sub]
-
-        n_trials = len(X_sub)
-        val_split = max(1, int(0.1 * n_trials))
-        rng = np.random.RandomState(42)
-        perm = rng.permutation(n_trials)
-
-        for idx in perm[val_split:]:
-            x, ya, yb = X_sub[idx], YA_sub[idx], YB_sub[idx]
-            t_len = x.shape[1]
-            start = 0
-            while start + win_samples <= t_len:
-                end = start + win_samples
-                X_tr_list.append(x[:, start:end])
-                YA_tr_list.append(ya[:, start:end])
-                YB_tr_list.append(yb[:, start:end])
-                start += hop_samples
-
-        for idx in perm[:val_split]:
-            x, ya, yb = X_sub[idx], YA_sub[idx], YB_sub[idx]
-            t_len = x.shape[1]
-            start = 0
-            while start + win_samples <= t_len:
-                end = start + win_samples
-                X_va_list.append(x[:, start:end])
-                YA_va_list.append(ya[:, start:end])
-                YB_va_list.append(yb[:, start:end])
-                start += hop_samples
-
-    X_tr_t = torch.from_numpy(np.stack(X_tr_list, axis=0))
-    YA_tr_t = torch.from_numpy(np.stack(YA_tr_list, axis=0))
-    YB_tr_t = torch.from_numpy(np.stack(YB_tr_list, axis=0))
-
-    X_va_t = torch.from_numpy(np.stack(X_va_list, axis=0))
-    YA_va_t = torch.from_numpy(np.stack(YA_va_list, axis=0))
-    YB_va_t = torch.from_numpy(np.stack(YB_va_list, axis=0))
-
-    print(f"  * Training Chunks: {X_tr_t.shape[0]} | Validation Chunks: {X_va_t.shape[0]}")
-
-    train_ds = TensorDataset(X_tr_t, YA_tr_t, YB_tr_t)
-    train_loader = DataLoader(train_ds, batch_size=args.batch_size, shuffle=True, pin_memory=True, num_workers=0)
-
-    val_ds = TensorDataset(X_va_t, YA_va_t, YB_va_t)
-    val_loader = DataLoader(val_ds, batch_size=args.batch_size, shuffle=False, pin_memory=True, num_workers=0)
-
-    # 2. Train Standard Model on Training Fold
-    print(f"\n[Stage 2]: Training CA-TCN on {len(train_paths)} training subjects...")
     model = CATCNDirectDecoder(
         eeg_channels=len(montage_channels),
         audio_channels=1,
@@ -181,56 +120,142 @@ def run_ablation_test(args):
         dropout=0.2
     ).to(device)
 
-    optimizer = optim.Adam(model.parameters(), lr=args.lr, weight_decay=1e-4)
-    scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.epochs, eta_min=1e-6)
-    scaler = torch.amp.GradScaler('cuda') if torch.cuda.is_available() else None
+    ckpt_candidate = Path(args.checkpoint_path) if args.checkpoint_path else None
+    if ckpt_candidate is None:
+        for c in [
+            Path(f"/kaggle/working/loso_checkpoints/catcn_adapted_{target_sub}.pt"),
+            Path(f"/kaggle/working/loso_checkpoints/catcn_loso_{target_sub}.pt"),
+            Path(f"checkpoints/loso/catcn_loso_{target_sub}.pt"),
+            Path(f"checkpoints/catcn_loso_{target_sub}.pt")
+        ]:
+            if c.exists():
+                ckpt_candidate = c
+                break
 
-    best_val_loss = float('inf')
-    best_weights = deepcopy(model.state_dict())
+    if ckpt_candidate and ckpt_candidate.exists():
+        print(f"\n[MODEL] Loading pre-trained checkpoint from: {ckpt_candidate} (skipping Stage 1 & 2 training)")
+        try:
+            ckpt = torch.load(str(ckpt_candidate), map_location=device, weights_only=False)
+        except TypeError:
+            ckpt = torch.load(str(ckpt_candidate), map_location=device)
+        if "model_state_dict" in ckpt:
+            model.load_state_dict(ckpt["model_state_dict"])
+        elif "model" in ckpt:
+            model.load_state_dict(ckpt["model"])
+        else:
+            model.load_state_dict(ckpt)
+    else:
+        print("\n[Stage 1]: Loading & Preprocessing Training Data...")
+        X_tr_list, YA_tr_list, YB_tr_list = [], [], []
+        X_va_list, YA_va_list, YB_va_list = [], [], []
 
-    for epoch in range(args.epochs):
-        model.train()
-        for bx, bya, byb in train_loader:
-            bx, bya, byb = bx.to(device, non_blocking=True), bya.to(device, non_blocking=True), byb.to(device, non_blocking=True)
-            swap_mask = torch.rand(bx.size(0), device=device) > 0.5
-            c1 = torch.where(swap_mask[:, None, None], byb, bya)
-            c2 = torch.where(swap_mask[:, None, None], bya, byb)
-            target = torch.where(swap_mask, torch.zeros(bx.size(0), device=device), torch.ones(bx.size(0), device=device))
+        win_samples = int(TRAIN_WINDOW_SEC * FS)
+        hop_samples = int(args.train_hop_sec * FS)
 
-            optimizer.zero_grad(set_to_none=True)
-            with torch.amp.autocast('cuda' if torch.cuda.is_available() else 'cpu'):
-                delta, _, _ = model(bx, c1, c2)
-                loss = F.binary_cross_entropy_with_logits(delta, target)
+        for p in train_paths:
+            sub_name = p.stem
+            exs = list(load_subject_examples(p))
+            X_sub, YA_sub, YB_sub = prepare_dataset(
+                exs, montage_channels, args.lowcut, args.highcut, sub_name, mapping, envelopes
+            )
+            YA_sub = [ya.mean(axis=0, keepdims=True).astype(np.float32) if ya.shape[0] > 1 else ya.astype(np.float32) for ya in YA_sub]
+            YB_sub = [yb.mean(axis=0, keepdims=True).astype(np.float32) if yb.shape[0] > 1 else yb.astype(np.float32) for yb in YB_sub]
 
-            if scaler is not None:
-                scaler.scale(loss).backward()
-                scaler.step(optimizer)
-                scaler.update()
-            else:
-                loss.backward()
-                optimizer.step()
+            n_trials = len(X_sub)
+            val_split = max(1, int(0.1 * n_trials))
+            rng = np.random.RandomState(42)
+            perm = rng.permutation(n_trials)
 
-        scheduler.step()
+            for idx in perm[val_split:]:
+                x, ya, yb = X_sub[idx], YA_sub[idx], YB_sub[idx]
+                t_len = x.shape[1]
+                start = 0
+                while start + win_samples <= t_len:
+                    end = start + win_samples
+                    X_tr_list.append(x[:, start:end])
+                    YA_tr_list.append(ya[:, start:end])
+                    YB_tr_list.append(yb[:, start:end])
+                    start += hop_samples
 
-        model.eval()
-        val_loss, val_total = 0.0, 0
-        with torch.no_grad():
-            for bx, bya, byb in val_loader:
+            for idx in perm[:val_split]:
+                x, ya, yb = X_sub[idx], YA_sub[idx], YB_sub[idx]
+                t_len = x.shape[1]
+                start = 0
+                while start + win_samples <= t_len:
+                    end = start + win_samples
+                    X_va_list.append(x[:, start:end])
+                    YA_va_list.append(ya[:, start:end])
+                    YB_va_list.append(yb[:, start:end])
+                    start += hop_samples
+
+        X_tr_t = torch.from_numpy(np.stack(X_tr_list, axis=0))
+        YA_tr_t = torch.from_numpy(np.stack(YA_tr_list, axis=0))
+        YB_tr_t = torch.from_numpy(np.stack(YB_tr_list, axis=0))
+
+        X_va_t = torch.from_numpy(np.stack(X_va_list, axis=0))
+        YA_va_t = torch.from_numpy(np.stack(YA_va_list, axis=0))
+        YB_va_t = torch.from_numpy(np.stack(YB_va_list, axis=0))
+
+        print(f"  * Training Chunks: {X_tr_t.shape[0]} | Validation Chunks: {X_va_t.shape[0]}")
+
+        train_ds = TensorDataset(X_tr_t, YA_tr_t, YB_tr_t)
+        train_loader = DataLoader(train_ds, batch_size=args.batch_size, shuffle=True, pin_memory=True, num_workers=0)
+
+        val_ds = TensorDataset(X_va_t, YA_va_t, YB_va_t)
+        val_loader = DataLoader(val_ds, batch_size=args.batch_size, shuffle=False, pin_memory=True, num_workers=0)
+
+        # 2. Train Standard Model on Training Fold
+        print(f"\n[Stage 2]: Training CA-TCN on {len(train_paths)} training subjects...")
+        optimizer = optim.Adam(model.parameters(), lr=args.lr, weight_decay=1e-4)
+        scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.epochs, eta_min=1e-6)
+        scaler = torch.amp.GradScaler('cuda') if torch.cuda.is_available() else None
+
+        best_val_loss = float('inf')
+        best_weights = deepcopy(model.state_dict())
+
+        for epoch in range(args.epochs):
+            model.train()
+            for bx, bya, byb in train_loader:
                 bx, bya, byb = bx.to(device, non_blocking=True), bya.to(device, non_blocking=True), byb.to(device, non_blocking=True)
+                swap_mask = torch.rand(bx.size(0), device=device) > 0.5
+                c1 = torch.where(swap_mask[:, None, None], byb, bya)
+                c2 = torch.where(swap_mask[:, None, None], bya, byb)
+                target = torch.where(swap_mask, torch.zeros(bx.size(0), device=device), torch.ones(bx.size(0), device=device))
+
+                optimizer.zero_grad(set_to_none=True)
                 with torch.amp.autocast('cuda' if torch.cuda.is_available() else 'cpu'):
-                    delta, _, _ = model(bx, bya, byb)
-                    target = torch.ones(bx.size(0), device=device)
-                    v_loss = F.binary_cross_entropy_with_logits(delta, target)
-                val_loss += v_loss.item() * bx.size(0)
-                val_total += bx.size(0)
+                    delta, _, _ = model(bx, c1, c2)
+                    loss = F.binary_cross_entropy_with_logits(delta, target)
 
-        epoch_val = val_loss / max(val_total, 1)
-        if epoch_val < best_val_loss:
-            best_val_loss = epoch_val
-            best_weights = deepcopy(model.state_dict())
+                if scaler is not None:
+                    scaler.scale(loss).backward()
+                    scaler.step(optimizer)
+                    scaler.update()
+                else:
+                    loss.backward()
+                    optimizer.step()
 
-    model.load_state_dict(best_weights)
-    print("  -> Model Training Complete.")
+            scheduler.step()
+
+            model.eval()
+            val_loss, val_total = 0.0, 0
+            with torch.no_grad():
+                for bx, bya, byb in val_loader:
+                    bx, bya, byb = bx.to(device, non_blocking=True), bya.to(device, non_blocking=True), byb.to(device, non_blocking=True)
+                    with torch.amp.autocast('cuda' if torch.cuda.is_available() else 'cpu'):
+                        delta, _, _ = model(bx, bya, byb)
+                        target = torch.ones(bx.size(0), device=device)
+                        v_loss = F.binary_cross_entropy_with_logits(delta, target)
+                    val_loss += v_loss.item() * bx.size(0)
+                    val_total += bx.size(0)
+
+            epoch_val = val_loss / max(val_total, 1)
+            if epoch_val < best_val_loss:
+                best_val_loss = epoch_val
+                best_weights = deepcopy(model.state_dict())
+
+        model.load_state_dict(best_weights)
+        print("  -> Model Training Complete.")
 
     # 3. Load Test Data for Held-out Subject
     print(f"\n[Stage 3]: Loading Held-out Evaluation Subject: {target_sub}...")
@@ -323,7 +348,7 @@ def run_ablation_test(args):
         out_csv.append(f"{cond},{exp},{a5:.1f},{a10:.1f},{a20:.1f},{a40:.1f}")
 
     print("=" * 92)
-    out_dir = Path(__file__).resolve().parents[3] / "results" / "ablations"
+    out_dir = Path("/kaggle/working/results/ablations") if Path("/kaggle/working").exists() else (Path(__file__).resolve().parents[3] / "results" / "ablations")
     out_dir.mkdir(parents=True, exist_ok=True)
     with open(out_dir / f"ablation_{target_sub}.csv", "w") as f:
         f.write("\n".join(out_csv))
@@ -338,6 +363,7 @@ if __name__ == "__main__":
     parser.add_argument("--train_hop_sec", type=float, default=2.5)
     parser.add_argument("--lowcut", type=float, default=1.0)
     parser.add_argument("--highcut", type=float, default=6.0)
+    parser.add_argument("--checkpoint_path", type=str, default="", help="Path to pre-trained checkpoint to evaluate directly without retraining")
     parser.add_argument("--lr", type=float, default=2e-4)
     args = parser.parse_args()
 
