@@ -300,6 +300,12 @@ def main():
     
     if backbone_ckpt.exists() and not args.force_retrain_backbone:
         print(f"  [CHECKPOINT] Loading backbone from: {backbone_ckpt}")
+        univ_model = CATCNDirectDecoder(
+            eeg_channels=len(montage_channels),
+            audio_channels=1,
+            hidden_dim=args.hidden_dim,
+            max_lag_samples=8
+        ).to(device)
         try:
             raw_sd = torch.load(backbone_ckpt, map_location=device, weights_only=False)
         except TypeError:
