@@ -217,6 +217,7 @@ if __name__ == "__main__":
     parser.add_argument("--step_sec", type=float, default=0.5, help="Rolling step size in seconds")
     parser.add_argument("--decision_alpha", type=float, default=0.82, help="EMA smoothing factor (0.7=fast, 0.85=stable)")
     parser.add_argument("--n_confirm", type=int, default=3, help="Consecutive steps required to confirm a speaker switch")
+    parser.add_argument("--all_subjects", action="store_true", help="Run simulation across all 18 DTU subjects (S1 to S18)")
     parser.add_argument("--compare_subjects", type=str, default="", help="Comma-separated subjects to compare (e.g. S1,S2,S7,S8,S15)")
     parser.add_argument("--compare_trials", type=str, default="", help="Comma-separated trials to compare (e.g. 0,1,2,3)")
     parser.add_argument("--verbose", action="store_true", help="Force verbose 0.5s visual step meter even for multiple trials")
@@ -250,7 +251,12 @@ if __name__ == "__main__":
     mapping, envelopes = get_mapping_data("gammatone")
 
     # Determine subjects to run
-    if args.compare_subjects:
+    if args.all_subjects:
+        if files:
+            subjects_to_run = sorted([f.stem.split("_")[0] for f in files], key=lambda s: int(s[1:]) if s[1:].isdigit() else 999)
+        else:
+            subjects_to_run = [f"S{i}" for i in range(1, 19)]
+    elif args.compare_subjects:
         subjects_to_run = [s.strip() for s in args.compare_subjects.split(",") if s.strip()]
     else:
         subjects_to_run = [args.subject]
@@ -366,12 +372,11 @@ if __name__ == "__main__":
             print("=" * 106)
 
     # Multi-Subject Overall Table
-    total_runs = sum(len(res) for res in all_subject_results.values())
-    if len(subjects_to_run) > 1 and total_runs > len(subjects_to_run):
+    if len(subjects_to_run) > 1 and len(all_subject_results) > 1:
         print("\n" + "=" * 118)
-        print("  MULTI-SUBJECT GRAND SUMMARY BENCHMARK")
+        print("  18-SUBJECT POPULATION REAL-TIME STREAMING BENCHMARK")
         print("=" * 118)
-        print(f"  {'Subject':<8} | {'Trials':<6} | {'Majority Win Acc':<18} | {'Cumulative Win Acc':<20} | {'Mean Time on GT':<17} | {'Mean Margin'}")
+        print(f"  {'Subject':<18} | {'Trials':<6} | {'Majority Win Acc':<18} | {'Cumulative Win Acc':<20} | {'Mean Time on GT':<17} | {'Mean Margin'}")
         print("  " + "-" * 114)
         for sub, res_list in all_subject_results.items():
             t_cnt = len(res_list)
@@ -379,6 +384,14 @@ if __name__ == "__main__":
             c_acc = sum(1 for r in res_list if r["cumulative_winner"] == r["ground_truth"]) / max(1, t_cnt) * 100.0
             l_time = np.mean([r["accuracy_pct"] for r in res_list])
             m_del = np.mean([r["mean_delta"] for r in res_list])
-            print(f"  {sub:<8} | {t_cnt:<6} | {m_acc:>15.1f}%    | {c_acc:>17.1f}%     | {l_time:>14.1f}%   | {m_del:+6.2f}")
+            print(f"  {sub:<18} | {t_cnt:<6} | {m_acc:>15.1f}%    | {c_acc:>17.1f}%     | {l_time:>14.1f}%   | {m_del:+6.2f}")
+            
+        print("  " + "-" * 114)
+        all_maj = [sum(1 for r in res_list if r["majority_winner"] == r["ground_truth"]) / max(1, len(res_list)) * 100.0 for res_list in all_subject_results.values() if res_list]
+        all_cum = [sum(1 for r in res_list if r["cumulative_winner"] == r["ground_truth"]) / max(1, len(res_list)) * 100.0 for res_list in all_subject_results.values() if res_list]
+        all_ltime = [np.mean([r["accuracy_pct"] for r in res_list]) for res_list in all_subject_results.values() if res_list]
+        all_del = [np.mean([r["mean_delta"] for r in res_list]) for res_list in all_subject_results.values() if res_list]
+        total_all_t = sum(len(res_list) for res_list in all_subject_results.values())
+        print(f"  {'POPULATION MEAN':<18} | {total_all_t:<6} | {np.mean(all_maj):>15.1f}%    | {np.mean(all_cum):>17.1f}%     | {np.mean(all_ltime):>14.1f}%   | {np.mean(all_del):+6.2f}")
         print("=" * 118)
 
