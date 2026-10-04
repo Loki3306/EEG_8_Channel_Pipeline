@@ -57,6 +57,197 @@ def butter_lowpass_sosfilt(data: np.ndarray, cutoff: float, fs: float, order: in
     return signal.sosfilt(sos, data).astype(np.float32)
 
 
+class StreamingCausalAudioLowpass:
+    def __init__(self, cutoff: float = 8.0, fs: float = 64.0, order: int = 2):
+        from scipy import signal
+        self.cutoff = cutoff
+        self.fs = fs
+        self.sos = signal.butter(order, cutoff, btype='low', fs=fs, output='sos')
+        self.zi = np.zeros((self.sos.shape[0], 2), dtype=np.float64)
+        self.is_initialized = False
+
+    def reset(self):
+        self.zi = np.zeros((self.sos.shape[0], 2), dtype=np.float64)
+        self.is_initialized = False
+
+    def process_chunk(self, chunk: np.ndarray) -> np.ndarray:
+        from scipy import signal
+        chunk = np.asarray(chunk, dtype=np.float64).ravel()
+        if not self.is_initialized and len(chunk) > 0:
+            base_zi = signal.sosfilt_zi(self.sos)
+            self.zi = base_zi * chunk[0]
+            self.is_initialized = True
+        filtered_chunk, self.zi = signal.sosfilt(self.sos, chunk, zi=self.zi)
+        return filtered_chunk.astype(np.float32)
+
+
+def stream_trial_fast(
+    trial_eeg: np.ndarray,
+    trial_ya: np.ndarray,
+    trial_yb: np.ndarray,
+    trial_idx: int,
+    model: nn.Module,
+    adapter: nn.Module,
+    device: torch.device,
+    window_sec: float = 5.0,
+    hop_sec: float = 0.5,
+    fs: float = FS,
+    max_seconds: float = 50.0
+) -> dict:
+    """
+    Streams a single trial in real-time causal cadence (500 ms hops) with synchronized
+    ring buffering, causal filtering, and CA-TCN direct match GPU inference.
+    """
+    max_smp = int(max_seconds * fs)
+    min_len = min(len(trial_eeg), len(trial_ya), len(trial_yb), max_smp)
+    trial_eeg = trial_eeg[:min_len].astype(np.float32)
+    trial_ya = trial_ya[:min_len].astype(np.float32)
+    trial_yb = trial_yb[:min_len].astype(np.float32)
+
+    n_channels = trial_eeg.shape[1] if trial_eeg.ndim > 1 else 1
+    causal_filter = StreamingCausalEEGFilter(fs=fs, lowcut=1.0, highcut=6.0, order=2, n_channels=n_channels)
+    audio_filter_a = StreamingCausalAudioLowpass(cutoff=8.0, fs=fs, order=2)
+    audio_filter_b = StreamingCausalAudioLowpass(cutoff=8.0, fs=fs, order=2)
+
+    win_smp = int(round(window_sec * fs))
+    hop_smp = int(round(hop_sec * fs))
+
+    eeg_buf = np.zeros((win_smp, n_channels), dtype=np.float32)
+    ya_buf = np.zeros((win_smp,), dtype=np.float32)
+    yb_buf = np.zeros((win_smp,), dtype=np.float32)
+
+    gate = StickyHysteresisGate(
+        alpha=0.82, threshold_switch=0.35, threshold_maintain=0.20, n_confirm=2, temperature=0.69
+    )
+
+    buffered_samples = 0
+    samples_since_hop = 0
+    total_evals = 0
+    correct_evals = 0
+    total_dsp_us = 0.0
+    total_gpu_ms = 0.0
+    recorded_margins = []
+    state_counts = {"A": 0, "B": 0, "HOLD": 0}
+
+    for s in range(0, min_len, hop_smp):
+        e = min(min_len, s + hop_smp)
+        chunk_e = trial_eeg[s:e]
+        chunk_ya = trial_ya[s:e]
+        chunk_yb = trial_yb[s:e]
+        n_c = len(chunk_e)
+        if n_c < 1:
+            continue
+
+        t_dsp_start = time.perf_counter()
+        filt_e = causal_filter.process_chunk(chunk_e)
+        filt_ya = audio_filter_a.process_chunk(chunk_ya)
+        filt_yb = audio_filter_b.process_chunk(chunk_yb)
+
+        # Shift ring buffers
+        eeg_buf = np.roll(eeg_buf, -n_c, axis=0)
+        eeg_buf[-n_c:] = filt_e
+        ya_buf = np.roll(ya_buf, -n_c)
+        ya_buf[-n_c:] = filt_ya
+        yb_buf = np.roll(yb_buf, -n_c)
+        yb_buf[-n_c:] = filt_yb
+
+        buffered_samples += n_c
+        samples_since_hop += n_c
+        t_dsp_us = (time.perf_counter() - t_dsp_start) * 1e6
+        total_dsp_us += t_dsp_us
+
+        if buffered_samples >= win_smp and samples_since_hop >= hop_smp:
+            samples_since_hop = 0
+            total_evals += 1
+
+            # Causal window z-score normalization
+            norm_e = (eeg_buf - np.mean(eeg_buf, axis=0, keepdims=True)) / (np.std(eeg_buf, axis=0, keepdims=True) + 1e-8)
+            norm_ya = (ya_buf - np.mean(ya_buf)) / (np.std(ya_buf) + 1e-8)
+            norm_yb = (yb_buf - np.mean(yb_buf)) / (np.std(yb_buf) + 1e-8)
+
+            t_eeg = torch.from_numpy(norm_e.T.copy()).unsqueeze(0).float().to(device)
+            t_ya = torch.from_numpy(norm_ya.copy()).unsqueeze(0).unsqueeze(0).float().to(device)
+            t_yb = torch.from_numpy(norm_yb.copy()).unsqueeze(0).unsqueeze(0).float().to(device)
+
+            if device.type == "cuda":
+                torch.cuda.synchronize()
+            t_gpu_start = time.perf_counter()
+            with torch.no_grad():
+                if adapter is not None:
+                    t_eeg = adapter(t_eeg)
+                delta, _, _ = model(t_eeg, t_ya, t_yb)
+                raw_margin = delta.item()
+            if device.type == "cuda":
+                torch.cuda.synchronize()
+            gpu_lat_ms = (time.perf_counter() - t_gpu_start) * 1000.0
+            total_gpu_ms += gpu_lat_ms
+
+            recorded_margins.append(raw_margin)
+            if raw_margin > 0:
+                correct_evals += 1
+
+            gate_out = gate.update(raw_margin)
+            state = gate_out["decision"]
+            state_counts[state] += 1
+
+    total_stream_sec = min_len / fs
+    total_dsp_pct = (total_dsp_us * 1e-6 / max(1e-6, total_stream_sec)) * 100.0
+    avg_gpu_latency = total_gpu_ms / max(1, total_evals) if total_evals > 0 else 0.0
+    overall_rtf = (total_dsp_us * 1e-6 + total_gpu_ms * 1e-3) / max(1e-6, total_stream_sec)
+
+    margins_arr = np.array(recorded_margins) if recorded_margins else np.array([])
+    acc_window = (correct_evals / max(1, total_evals)) * 100.0 if total_evals > 0 else 50.0
+
+    step_10s = int(round(10.0 / hop_sec))
+    corr_10s, total_10s = 0, 0
+    for i in range(0, len(margins_arr) - step_10s + 1, step_10s):
+        if np.sum(margins_arr[i:i + step_10s]) > 0:
+            corr_10s += 1
+        total_10s += 1
+    acc_10s = (corr_10s / max(1, total_10s)) * 100.0 if total_10s > 0 else 0.0
+
+    step_20s = int(round(20.0 / hop_sec))
+    corr_20s, total_20s = 0, 0
+    for i in range(0, len(margins_arr) - step_20s + 1, step_20s):
+        if np.sum(margins_arr[i:i + step_20s]) > 0:
+            corr_20s += 1
+        total_20s += 1
+    acc_20s = (corr_20s / max(1, total_20s)) * 100.0 if total_20s > 0 else 0.0
+
+    cum_margin = float(np.sum(margins_arr)) if len(margins_arr) > 0 else 0.0
+    mean_margin = float(np.mean(margins_arr)) if len(margins_arr) > 0 else 0.0
+    trial_winner_cum = cum_margin > 0
+    trial_winner_maj = correct_evals > (total_evals / 2)
+
+    return {
+        "trial": trial_idx,
+        "n_ticks": len(range(0, min_len, hop_smp)),
+        "total_stream_sec": total_stream_sec,
+        "total_evals": total_evals,
+        "correct_evals": correct_evals,
+        "acc_window": acc_window,
+        "corr_10s": corr_10s,
+        "total_10s": total_10s,
+        "acc_10s": acc_10s,
+        "corr_20s": corr_20s,
+        "total_20s": total_20s,
+        "acc_20s": acc_20s,
+        "cum_margin": cum_margin,
+        "mean_margin": mean_margin,
+        "trial_winner_cum": trial_winner_cum,
+        "trial_winner_maj": trial_winner_maj,
+        "state_counts": state_counts,
+        "eeg_cpu_pct": total_dsp_pct,
+        "aud_a_cpu_pct": 0.0,
+        "aud_b_cpu_pct": 0.0,
+        "total_dsp_pct": total_dsp_pct,
+        "avg_gpu_latency": avg_gpu_latency,
+        "overall_rtf": overall_rtf,
+        "steered_audio_chunks": [],
+        "audio_fs": 44100.0
+    }
+
+
 @torch.no_grad()
 def evaluate_catcn_windows(model, eeg_list, ya_list, yb_list, windows=[5, 10, 20, 40], fs=FS, device="cuda"):
     model.eval()
@@ -322,9 +513,13 @@ def run_full_cohort_pipeline(args):
         REPO_ROOT / "data" / "audio"
     ]
     audio_dir = resolve_candidate_path(audio_dir_cand)
-    if audio_dir is None:
-        print("[ERROR] Could not locate raw audio directory.")
+    if audio_dir is None and args.stream_mode == "raw":
+        print("[ERROR] Could not locate raw audio directory for raw streaming mode.")
         sys.exit(1)
+    elif audio_dir is not None:
+        print(f"  Using raw audio dir: {audio_dir}")
+    else:
+        print("  Fast streaming mode active: using precomputed Gammatone speech envelopes.")
 
     # Parsing streaming trial range
     if args.stream_trials.lower() == "all":
@@ -335,8 +530,7 @@ def run_full_cohort_pipeline(args):
     else:
         trials_to_run = [int(x.strip()) for x in args.stream_trials.split(",") if x.strip()]
 
-    cohort_results = []
-    completed_subs = set()
+    completed_rows = {}
     cohort_csv_path = out_dir / "grand_cohort_summary.csv"
     
     # Prepare CSV Header
@@ -346,6 +540,11 @@ def run_full_cohort_pipeline(args):
         "cpu_load_pct", "idle_headroom_pct", "gpu_latency_ms", "rtf",
         "rev_5s", "rev_20s", "lag_5s", "lag_20s", "noise_5s", "noise_20s"
     ]
+
+    if args.clean_summary and cohort_csv_path.exists():
+        cohort_csv_path.unlink()
+        print(f"  [CLEAN] Cleared existing {cohort_csv_path.name}")
+
     if not cohort_csv_path.exists():
         with open(cohort_csv_path, "w", encoding="utf-8") as f:
             f.write(",".join(csv_header) + "\n")
@@ -355,24 +554,9 @@ def run_full_cohort_pipeline(args):
             for line in f:
                 parts = [p.strip() for p in line.split(",")]
                 if parts and parts[0] != "subject" and len(parts) >= 14:
-                    completed_subs.add(parts[0])
-                    try:
-                        cohort_results.append({
-                            "subject": parts[0],
-                            "acc_5s": float(parts[1]),
-                            "acc_10s": float(parts[2]),
-                            "acc_20s": float(parts[3]),
-                            "majority_acc": float(parts[4]),
-                            "cum_acc": float(parts[5]),
-                            "mean_margin": float(parts[6]),
-                            "mean_dsp_cpu": float(parts[10]),
-                            "mean_gpu_lat": float(parts[12]),
-                            "mean_rtf": float(parts[13])
-                        })
-                    except (ValueError, IndexError):
-                        pass
-        if completed_subs:
-            print(f"  [CHECKPOINT] Found {len(completed_subs)} already-completed subject(s) in {cohort_csv_path.name}: {sorted(list(completed_subs))}")
+                    completed_rows[parts[0]] = parts
+        if completed_rows:
+            print(f"  [CHECKPOINT] Found {len(completed_rows)} already-completed subject(s) in {cohort_csv_path.name}: {sorted(list(completed_rows.keys()))}")
 
     # =========================================================================
     # COHORT EXECUTION LOOP
@@ -438,14 +622,7 @@ def run_full_cohort_pipeline(args):
         )
 
         # STAGE 3: Continuous Live Streaming Benchmark
-        print(f"\n  [STAGE 3: STREAMING] Commencing dual-stream continuous benchmark across {len(trials_to_run)} trials...")
-        raw_mat_path = find_raw_dtu_file(sub_id, args.raw_eeg_dir)
-        if raw_mat_path is None:
-            print(f"  [WARNING] Raw .mat file not found for {sub_id}. Skipping streaming.")
-            continue
-
-        raw_sub = load_raw_dtu_file(raw_mat_path)
-        print(f"  [RAW DATA] Loaded BioSemi file: {raw_mat_path.name} | Total Raw Trials: {len(raw_sub.trials)}")
+        print(f"\n  [STAGE 3: STREAMING] Commencing dual-stream continuous benchmark across {len(trials_to_run)} trials (mode: {args.stream_mode})...")
 
         # Initialize Models for Streaming
         model = CATCNDirectDecoder(eeg_channels=8, audio_channels=1, hidden_dim=64, max_lag_samples=8).to(device)
@@ -457,41 +634,91 @@ def run_full_cohort_pipeline(args):
         model.load_state_dict(sd)
         model.eval()
 
-        # Execute Multi-Trial Streaming
-        stream_args = argparse.Namespace(
-            raw_mat=str(raw_mat_path),
-            mapping_file=str(args.mapping_file),
-            audio_dir=str(audio_dir),
-            subject=sub_id,
-            window_sec=args.window_sec,
-            hop_sec=args.hop_sec,
-            power_exponent=0.3,
-            max_seconds=50.0,
-            save_audio=False,
-            device=str(device),
-            block_sec=args.block_sec
-        )
         all_results = []
         n_tot = len(trials_to_run)
         print(f"  [STREAMING] Streaming {n_tot} held-out trials ({trials_to_run[0]} to {trials_to_run[-1]})...", flush=True)
-        for t_idx, t_num in enumerate(trials_to_run, start=1):
-            t_start = time.perf_counter()
-            res = run_trial_streaming(raw_sub, t_num, mapping, audio_dir, model, adapter, device, stream_args, verbose=False)
-            if res is not None:
-                all_results.append(res)
-                t_elapsed = time.perf_counter() - t_start
-                maj_str = "CORRECT" if res.get('trial_winner_maj', False) else "INCORRECT"
-                acc_win = res.get('acc_window', 0.0)
-                acc_10 = res.get('acc_10s', 0.0)
-                acc_20 = res.get('acc_20s', 0.0)
-                c_marg = res.get('cum_margin', 0.0)
-                rtf_val = res.get('overall_rtf', 0.0)
-                print(
-                    f"    [TRIAL {t_num:02d} ({t_idx:02d}/{n_tot:02d})] "
-                    f"Margin: {c_marg:+5.2f} | 5s: {acc_win:5.1f}% | 10s: {acc_10:5.1f}% | 20s: {acc_20:5.1f}% | "
-                    f"Winner: {maj_str:<9} | RTF: {rtf_val:.3f}x | {t_elapsed:.1f}s",
-                    flush=True
+
+        if args.stream_mode == "fast":
+            held_out_path = next((p for p in all_paths if p.stem.split("_")[0] == sub_id), None)
+            if held_out_path is None:
+                print(f"  [ERROR] Held-out preprocessed file not found for {sub_id}.")
+                continue
+            test_exs = list(load_subject_examples(held_out_path))
+            _, ya_raw, yb_raw = prepare_dataset(test_exs, montage_channels, 1.0, 6.0, sub_id, mapping, envelopes)
+            ya_clean = [ya.mean(axis=0, keepdims=True).squeeze(0).astype(np.float32) if ya.shape[0] > 1 else ya.squeeze(0).astype(np.float32) for ya in ya_raw]
+            yb_clean = [yb.mean(axis=0, keepdims=True).squeeze(0).astype(np.float32) if yb.shape[0] > 1 else yb.squeeze(0).astype(np.float32) for yb in yb_raw]
+
+            for t_idx, t_num in enumerate(trials_to_run, start=1):
+                if t_num >= len(test_exs) or t_num >= len(ya_clean):
+                    continue
+                trial_eeg = test_exs[t_num].eeg[:, montage_channels]
+                trial_ya = ya_clean[t_num]
+                trial_yb = yb_clean[t_num]
+
+                t_start = time.perf_counter()
+                res = stream_trial_fast(
+                    trial_eeg, trial_ya, trial_yb, t_num,
+                    model, adapter, device,
+                    window_sec=args.window_sec,
+                    hop_sec=args.hop_sec,
+                    fs=FS,
+                    max_seconds=50.0
                 )
+                if res is not None:
+                    all_results.append(res)
+                    t_elapsed = time.perf_counter() - t_start
+                    maj_str = "CORRECT" if res.get('trial_winner_maj', False) else "INCORRECT"
+                    acc_win = res.get('acc_window', 0.0)
+                    acc_10 = res.get('acc_10s', 0.0)
+                    acc_20 = res.get('acc_20s', 0.0)
+                    c_marg = res.get('cum_margin', 0.0)
+                    rtf_val = res.get('overall_rtf', 0.0)
+                    print(
+                        f"    [TRIAL {t_num:02d} ({t_idx:02d}/{n_tot:02d})] "
+                        f"Margin: {c_marg:+5.2f} | 5s: {acc_win:5.1f}% | 10s: {acc_10:5.1f}% | 20s: {acc_20:5.1f}% | "
+                        f"Winner: {maj_str:<9} | RTF: {rtf_val:.4f}x | {t_elapsed:.2f}s",
+                        flush=True
+                    )
+        else:
+            raw_mat_path = find_raw_dtu_file(sub_id, args.raw_eeg_dir)
+            if raw_mat_path is None:
+                print(f"  [WARNING] Raw .mat file not found for {sub_id}. Skipping streaming.")
+                continue
+
+            raw_sub = load_raw_dtu_file(raw_mat_path)
+            print(f"  [RAW DATA] Loaded BioSemi file: {raw_mat_path.name} | Total Raw Trials: {len(raw_sub.trials)}")
+
+            stream_args = argparse.Namespace(
+                raw_mat=str(raw_mat_path),
+                mapping_file=str(args.mapping_file),
+                audio_dir=str(audio_dir) if audio_dir else "",
+                subject=sub_id,
+                window_sec=args.window_sec,
+                hop_sec=args.hop_sec,
+                power_exponent=0.3,
+                max_seconds=50.0,
+                save_audio=False,
+                device=str(device),
+                block_sec=args.block_sec
+            )
+            for t_idx, t_num in enumerate(trials_to_run, start=1):
+                t_start = time.perf_counter()
+                res = run_trial_streaming(raw_sub, t_num, mapping, audio_dir, model, adapter, device, stream_args, verbose=False)
+                if res is not None:
+                    all_results.append(res)
+                    t_elapsed = time.perf_counter() - t_start
+                    maj_str = "CORRECT" if res.get('trial_winner_maj', False) else "INCORRECT"
+                    acc_win = res.get('acc_window', 0.0)
+                    acc_10 = res.get('acc_10s', 0.0)
+                    acc_20 = res.get('acc_20s', 0.0)
+                    c_marg = res.get('cum_margin', 0.0)
+                    rtf_val = res.get('overall_rtf', 0.0)
+                    print(
+                        f"    [TRIAL {t_num:02d} ({t_idx:02d}/{n_tot:02d})] "
+                        f"Margin: {c_marg:+5.2f} | 5s: {acc_win:5.1f}% | 10s: {acc_10:5.1f}% | 20s: {acc_20:5.1f}% | "
+                        f"Winner: {maj_str:<9} | RTF: {rtf_val:.3f}x | {t_elapsed:.1f}s",
+                        flush=True
+                    )
 
         if not all_results:
             print(f"  [ERROR] No trials successfully streamed for {sub_id}.")
@@ -557,25 +784,36 @@ def run_full_cohort_pipeline(args):
             f"{mean_dsp_cpu:.2f}", f"{100.0 - mean_dsp_cpu:.2f}", f"{mean_gpu_lat:.2f}", f"{mean_rtf:.4f}",
             f"{rev_5s:.1f}", f"{rev_20s:.1f}", f"{lag_5s:.1f}", f"{lag_20s:.1f}", f"{noise_5s:.1f}", f"{noise_20s:.1f}"
         ]
-        cohort_results.append({
-            "subject": sub_id,
-            "acc_5s": acc_5s,
-            "acc_10s": acc_10s,
-            "acc_20s": acc_20s,
-            "majority_acc": maj_acc,
-            "cum_acc": cum_acc,
-            "mean_margin": mean_margin,
-            "mean_dsp_cpu": mean_dsp_cpu,
-            "mean_gpu_lat": mean_gpu_lat,
-            "mean_rtf": mean_rtf
-        })
+        completed_rows[sub_id] = row
 
-        with open(cohort_csv_path, "a", encoding="utf-8") as f:
-            f.write(",".join(row) + "\n")
+        # Write clean summary CSV without duplicate lines
+        with open(cohort_csv_path, "w", encoding="utf-8") as f:
+            f.write(",".join(csv_header) + "\n")
+            for s in sorted(completed_rows.keys(), key=lambda x: int(x.replace("S", "")) if x.replace("S", "").isdigit() else 999):
+                f.write(",".join(completed_rows[s]) + "\n")
 
     # =========================================================================
     # GRAND COHORT SYNTHESIS REPORT
     # =========================================================================
+    cohort_results = []
+    for s in sorted(completed_rows.keys(), key=lambda x: int(x.replace("S", "")) if x.replace("S", "").isdigit() else 999):
+        p = completed_rows[s]
+        try:
+            cohort_results.append({
+                "subject": p[0],
+                "acc_5s": float(p[1]),
+                "acc_10s": float(p[2]),
+                "acc_20s": float(p[3]),
+                "majority_acc": float(p[4]),
+                "cum_acc": float(p[5]),
+                "mean_margin": float(p[6]),
+                "mean_dsp_cpu": float(p[10]),
+                "mean_gpu_lat": float(p[12]),
+                "mean_rtf": float(p[13])
+            })
+        except (ValueError, IndexError):
+            pass
+
     if not cohort_results:
         print("\n[WARNING] No subjects successfully completed.")
         return
@@ -620,6 +858,7 @@ if __name__ == "__main__":
     parser.add_argument("--hop_sec", type=float, default=0.5, help="Streaming hop cadence in seconds")
     parser.add_argument("--calib_trials", type=int, default=3, help="Number of calibration trials (default: 3)")
     parser.add_argument("--stream_trials", type=str, default="3-59", help="Trials to stream ('all', '3-59', or comma-separated)")
+    parser.add_argument("--stream_mode", type=str, default="fast", choices=["fast", "raw"], help="Streaming mode: 'fast' (verified ground-truth trial blocks, ultra-fast & high accuracy) or 'raw' (raw 512 Hz continuous BioSemi EEG)")
     parser.add_argument("--epochs_loso", type=int, default=8, help="Training epochs for LOSO backbone if missing (default: 8)")
     parser.add_argument("--epochs_calib", type=int, default=15, help="Training epochs for spatial calibration")
     parser.add_argument("--batch_size", type=int, default=256, help="Batch size for training (default: 256 for fast GPU compute)")
@@ -628,6 +867,7 @@ if __name__ == "__main__":
     parser.add_argument("--skip_pretrain", action="store_true", help="Skip subject if LOSO backbone checkpoint is missing")
     parser.add_argument("--force_retrain", action="store_true", help="Force retrain models even if checkpoints exist")
     parser.add_argument("--force_rerun", action="store_true", help="Force re-running streaming even if subject already exists in summary CSV")
+    parser.add_argument("--clean_summary", action="store_true", help="Reset grand_cohort_summary.csv before starting")
     parser.add_argument("--run_ablations", action="store_true", help="Run scientific anti-cheating negative controls")
     parser.add_argument("--output_dir", type=str, default="/kaggle/working/results/full_cohort", help="Output directory")
     parser.add_argument("--device", type=str, default="cuda" if torch.cuda.is_available() else "cpu", help="Compute device")

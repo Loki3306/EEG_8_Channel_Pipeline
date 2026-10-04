@@ -165,7 +165,7 @@ def load_raw_dtu_file(mat_path: Union[str, Path]) -> RawDTUSubjectData:
         
         n_pairs = len(sample_indices) // 2
         if n_pairs >= 70:
-            target_intervals = COMPETING_RAW_INTERVALS
+            target_intervals = [r for r in COMPETING_RAW_INTERVALS if 2 * r < len(sample_indices)]
         else:
             target_intervals = list(range(n_pairs))
             
