@@ -437,11 +437,16 @@ def run_full_cohort_pipeline(args):
             if res is not None:
                 all_results.append(res)
                 t_elapsed = time.perf_counter() - t_start
-                maj_str = "CORRECT" if res['trial_winner_maj'] else "INCORRECT"
+                maj_str = "CORRECT" if res.get('trial_winner_maj', False) else "INCORRECT"
+                acc_win = res.get('acc_window', 0.0)
+                acc_10 = res.get('acc_10s', 0.0)
+                acc_20 = res.get('acc_20s', 0.0)
+                c_marg = res.get('cum_margin', 0.0)
+                rtf_val = res.get('overall_rtf', 0.0)
                 print(
                     f"    [TRIAL {t_num:02d} ({t_idx:02d}/{n_tot:02d})] "
-                    f"Margin: {res['cum_margin']:+5.2f} | 5s: {res['acc_5s']:5.1f}% | 10s: {res['acc_10s']:5.1f}% | 20s: {res['acc_20s']:5.1f}% | "
-                    f"Winner: {maj_str:<9} | RTF: {res['overall_rtf']:.3f}x | {t_elapsed:.1f}s",
+                    f"Margin: {c_marg:+5.2f} | 5s: {acc_win:5.1f}% | 10s: {acc_10:5.1f}% | 20s: {acc_20:5.1f}% | "
+                    f"Winner: {maj_str:<9} | RTF: {rtf_val:.3f}x | {t_elapsed:.1f}s",
                     flush=True
                 )
 
