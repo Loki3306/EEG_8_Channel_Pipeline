@@ -380,7 +380,10 @@ def main():
     ckpt_path = find_model_checkpoint(args.subject, args.checkpoint_path)
     if ckpt_path:
         print(f"[MODEL] Loading pre-trained checkpoint: {ckpt_path}")
-        ckpt = torch.load(str(ckpt_path), map_location=device)
+        try:
+            ckpt = torch.load(str(ckpt_path), map_location=device, weights_only=False)
+        except TypeError:
+            ckpt = torch.load(str(ckpt_path), map_location=device)
         if "model_state_dict" in ckpt:
             model.load_state_dict(ckpt["model_state_dict"])
         elif "model" in ckpt:

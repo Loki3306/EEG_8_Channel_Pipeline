@@ -300,8 +300,10 @@ def main():
     
     if backbone_ckpt.exists() and not args.force_retrain_backbone:
         print(f"  [CHECKPOINT] Loading backbone from: {backbone_ckpt}")
-        univ_model = CATCNDirectDecoder(eeg_channels=len(montage_channels), audio_channels=1, hidden_dim=args.hidden_dim, max_lag_samples=8).to(device)
-        raw_sd = torch.load(backbone_ckpt, map_location=device)
+        try:
+            raw_sd = torch.load(backbone_ckpt, map_location=device, weights_only=False)
+        except TypeError:
+            raw_sd = torch.load(backbone_ckpt, map_location=device)
         if "model_state_dict" in raw_sd:
             univ_model.load_state_dict(raw_sd["model_state_dict"])
         elif "model" in raw_sd:
@@ -443,12 +445,12 @@ def main():
     adapted_path = adapted_dir / f"catcn_adapted_{args.subject}.pt"
     torch.save({
         "model_state_dict": spatial_model.state_dict(),
-        "calib_trials": K,
-        "subject": args.subject,
-        "acc_5s": res_spatial['acc_5s'],
-        "acc_10s": res_spatial['acc_10s'],
-        "acc_20s": res_spatial['acc_20s'],
-        "majority_acc": res_spatial['majority_acc']
+        "calib_trials": int(K),
+        "subject": str(args.subject),
+        "acc_5s": float(res_spatial['acc_5s']),
+        "acc_10s": float(res_spatial['acc_10s']),
+        "acc_20s": float(res_spatial['acc_20s']),
+        "majority_acc": float(res_spatial['majority_acc'])
     }, adapted_path)
     print(f"  [CHECKPOINT] Saved adapted model (Spatial & BN adapted) to: {adapted_path}")
     
