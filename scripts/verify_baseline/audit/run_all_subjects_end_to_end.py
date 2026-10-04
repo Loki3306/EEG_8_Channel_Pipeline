@@ -378,15 +378,16 @@ def run_full_cohort_pipeline(args):
                 print(f"  [STAGE 1: BACKBONE] Checkpoint not found and --skip_pretrain is set. Skipping {sub_id}.")
                 continue
             print(f"  [STAGE 1: BACKBONE] Training Leave-One-Subject-Out backbone (held out: {sub_id})...")
-            class LOSOArgs:
-                epochs = args.epochs_loso
-                lr = 1e-3
-                batch_size = args.batch_size
-                window_sec = args.window_sec
-                hop_sec = 2.5
-                smoke_test = False
-                save_checkpoints = True
-            train_loso_fold(sub_id, all_paths, montage_channels, mapping, envelopes, LOSOArgs, device)
+            loso_args = argparse.Namespace(
+                epochs=args.epochs_loso,
+                lr=1e-3,
+                batch_size=args.batch_size,
+                window_sec=args.window_sec,
+                hop_sec=2.5,
+                smoke_test=False,
+                save_checkpoints=True
+            )
+            train_loso_fold(sub_id, all_paths, montage_channels, mapping, envelopes, loso_args, device)
             backbone_ckpt = Path("/kaggle/working/loso_checkpoints") / f"catcn_loso_{sub_id}.pt"
 
         # STAGE 2: 3-Minute Few-Shot Adaptation
@@ -415,19 +416,18 @@ def run_full_cohort_pipeline(args):
         model.eval()
 
         # Execute Multi-Trial Streaming
-        class StreamingArgs:
-            raw_mat = str(raw_mat_path)
-            mapping_file = str(args.mapping_file)
-            audio_dir = str(audio_dir)
-            subject = sub_id
-            window_sec = args.window_sec
-            hop_sec = args.hop_sec
-            power_exponent = 0.3
-            max_seconds = 50.0
-            save_audio = False
-            device = str(device)
-
-        stream_args = StreamingArgs()
+        stream_args = argparse.Namespace(
+            raw_mat=str(raw_mat_path),
+            mapping_file=str(args.mapping_file),
+            audio_dir=str(audio_dir),
+            subject=sub_id,
+            window_sec=args.window_sec,
+            hop_sec=args.hop_sec,
+            power_exponent=0.3,
+            max_seconds=50.0,
+            save_audio=False,
+            device=str(device)
+        )
         all_results = []
         for t_idx, t_num in enumerate(trials_to_run, start=1):
             res = run_trial_streaming(raw_sub, t_num, mapping, audio_dir, model, adapter, device, stream_args, verbose=False)
