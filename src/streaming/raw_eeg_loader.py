@@ -211,3 +211,37 @@ def load_raw_dtu_file(mat_path: Union[str, Path]) -> RawDTUSubjectData:
         heog_raw=heog,
         trials=trials
     )
+
+
+def find_raw_dtu_file(subject_id: str, raw_eeg_dir: Optional[Union[str, Path]] = None) -> Optional[Path]:
+    """
+    Resolves the path to the raw DTU BioSemi ActiveTwo .mat file for a given subject.
+    """
+    sub = subject_id.split("_")[0].upper()
+    
+    candidates = []
+    if raw_eeg_dir:
+        candidates.append(Path(raw_eeg_dir) / f"{sub}.mat")
+        candidates.append(Path(raw_eeg_dir) / f"{sub.lower()}.mat")
+        
+    candidates.extend([
+        Path(f"/kaggle/input/datasets/lokeshgile/dtu-eeg-raw/{sub}.mat"),
+        Path(f"/kaggle/input/dtu-eeg-raw/{sub}.mat"),
+        Path(f"/kaggle/input/datasets/lokeshgile/raw-s1-dtu/{sub}.mat"),
+        Path(f"/kaggle/input/raw-s1-dtu/{sub}.mat"),
+        Path(r"C:\Users\lokes\Downloads") / f"{sub}.mat",
+        Path("data/raw") / f"{sub}.mat",
+    ])
+    
+    for c in candidates:
+        if c.exists():
+            return c
+            
+    # Search recursively in /kaggle/input if available
+    if Path("/kaggle/input").exists():
+        for p in Path("/kaggle/input").rglob(f"{sub}.mat"):
+            return p
+        for p in Path("/kaggle/input").rglob(f"{sub.lower()}.mat"):
+            return p
+            
+    return None

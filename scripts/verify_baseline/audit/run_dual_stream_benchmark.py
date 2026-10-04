@@ -27,7 +27,7 @@ if str(REPO_ROOT) not in sys.path:
 if str(VERIFY_ROOT) not in sys.path:
     sys.path.insert(0, str(VERIFY_ROOT))
 
-from src.streaming.raw_eeg_loader import load_raw_dtu_file
+from src.streaming.raw_eeg_loader import load_raw_dtu_file, find_raw_dtu_file
 from src.streaming.dual_stream_ingestor import DualStreamIngestionEngine
 from src.audio.steering_engine import AudioSteeringDSP
 from models.catcn import CATCNDirectDecoder
@@ -332,15 +332,14 @@ def main():
     device = torch.device(args.device)
     
     # 1. Resolve Raw EEG File
-    raw_mat_cand = [
-        Path(args.raw_mat),
-        Path(f"/kaggle/input/datasets/lokeshgile/raw-s1-dtu/{args.subject}.mat"),
-        Path(f"/kaggle/input/raw-s1-dtu/{args.subject}.mat"),
-        Path(r"C:\Users\lokes\Downloads") / f"{args.subject}.mat"
-    ]
-    raw_mat_path = resolve_candidate_path(raw_mat_cand)
+    raw_mat_path = None
+    if args.raw_mat and Path(args.raw_mat).exists():
+        raw_mat_path = Path(args.raw_mat)
+    else:
+        raw_mat_path = find_raw_dtu_file(args.subject)
+        
     if raw_mat_path is None:
-        print(f"[ERROR] Could not locate raw EEG file: {args.raw_mat}")
+        print(f"[ERROR] Could not locate raw EEG file for subject {args.subject} (tried {args.raw_mat} and default datasets)")
         sys.exit(1)
         
     print(f"[INPUT] Loading raw DTU BioSemi ActiveTwo file: {raw_mat_path}")
