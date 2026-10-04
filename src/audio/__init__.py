@@ -9,6 +9,10 @@ from .live_visualizer import (
     build_live_streaming_html,
     save_live_streaming_dashboard,
 )
+from .causal_gammatone import (
+    StreamingCausalAudioGammatoneExtractor,
+    erb_space,
+)
 
 __all__ = [
     "AudioSteeringDSP",
@@ -18,4 +22,6 @@ __all__ = [
     "evaluate_audio_steering_trial",
     "build_live_streaming_html",
     "save_live_streaming_dashboard",
+    "StreamingCausalAudioGammatoneExtractor",
+    "erb_space",
 ]

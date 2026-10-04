@@ -9,6 +9,7 @@ from .causal_raw_preprocessor import (
     CausalRollingZScoreNormalizer,
 )
 from .raw_eeg_loader import load_raw_dtu_file, RawDTUSubjectData, RawDTUTrialMetadata
+from .dual_stream_ingestor import DualStreamIngestionEngine, DualStreamFrame
 
 __all__ = [
     "StreamingCausalEEGFilter",
@@ -22,4 +23,6 @@ __all__ = [
     "load_raw_dtu_file",
     "RawDTUSubjectData",
     "RawDTUTrialMetadata",
+    "DualStreamIngestionEngine",
+    "DualStreamFrame",
 ]
