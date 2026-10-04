@@ -39,6 +39,9 @@ def simulate_realtime_stream(
     eeg_stream: np.ndarray,
     audio_a_stream: np.ndarray,
     audio_b_stream: np.ndarray,
+    ground_truth: str = "A",
+    subject_id: str = "S1",
+    trial_idx: int = 0,
     model: torch.nn.Module = None,
     fs: float = 64.0,
     chunk_samples: int = 16, # 16 samples @ 64 Hz = 250 ms chunk
@@ -49,15 +52,7 @@ def simulate_realtime_stream(
 ):
     """
     Simulates real-time arrival of multichannel EEG and candidate audio envelopes from genuine DTU recordings.
-    
-    Parameters:
-        eeg_stream: [n_total_samples, n_channels]
-        audio_a_stream: [n_total_samples]
-        audio_b_stream: [n_total_samples]
-        model: Trained CATCNDirectDecoder
-        fs: Sampling rate (64 Hz)
-        chunk_samples: Chunk size arriving per clock tick (e.g. 16 samples = 250 ms)
-        speed_factor: 1.0 = true wall-clock real time; 0.0 = as fast as possible; >1.0 = accelerated
+    Displays side-by-side Ground Truth vs Live Prediction.
     """
     n_total, n_channels = eeg_stream.shape
     assert len(audio_a_stream) == n_total, f"Audio A length mismatch: {len(audio_a_stream)} vs {n_total}"
@@ -83,22 +78,23 @@ def simulate_realtime_stream(
     )
     
     chunk_duration_sec = chunk_samples / fs
-    print("=" * 85)
+    print("=" * 102)
     print(f"  REAL-TIME CA-TCN AAD REPLAY SIMULATOR (Decoupled Loop)")
-    print(f"  EEG Channels: {n_channels} | Rate: {fs} Hz | Window: {window_sec}s | Step: {step_sec}s")
-    print(f"  Chunk: {chunk_samples} samples ({chunk_duration_sec*1000:.1f} ms) | Speed Factor: {speed_factor}x")
-    print("=" * 85)
+    print(f"  Subject: {subject_id} (Trial {trial_idx}) | Ground Truth Attended: Speaker {ground_truth}")
+    print(f"  EEG Channels: {n_channels} | Rate: {fs} Hz | Window: {window_sec}s | Step: {step_sec}s | Speed: {speed_factor}x")
+    print("=" * 102)
     
     start_wall_time = time.perf_counter()
     sim_time_sec = 0.0
     idx = 0
     step_count = 0
+    correct_steps = 0
     switches = 0
     total_compute_ms = 0.0
     acoustic_delay_ms = 0.0
+    deltas = []
     
     while idx < n_total:
-        # Slice current incoming hardware block
         end_idx = min(idx + chunk_samples, n_total)
         chunk_e = eeg_stream[idx:end_idx]
         chunk_a = audio_a_stream[idx:end_idx]
@@ -119,15 +115,24 @@ def simulate_realtime_stream(
         if telemetry is not None:
             step_count += 1
             total_compute_ms += telemetry["compute_ms"]
+            deltas.append(telemetry["raw_delta"])
             if telemetry["switched"]:
                 switches += 1
+                
+            stream = telemetry["attended_stream"]
+            if stream == ground_truth:
+                correct_steps += 1
+                match_badge = "[✓ MATCH]"
+            elif stream == "UNCERTAIN":
+                match_badge = "[? SEARCH]"
+            else:
+                match_badge = "[✗ WRONG]"
                 
             if verbose:
                 la = telemetry["logit_a"]
                 lb = telemetry["logit_b"]
                 delta = telemetry["raw_delta"]
                 smooth = telemetry["smoothed_score"]
-                stream = telemetry["attended_stream"]
                 ga = telemetry["gain_a"]
                 gb = telemetry["gain_b"]
                 ga_db = 20.0 * np.log10(max(1e-3, ga))
@@ -138,11 +143,12 @@ def simulate_realtime_stream(
                 
                 print(
                     f"[{telemetry['timestamp_sec']:5.1f}s] "
+                    f"GT:[{ground_truth}] vs Pred:[{stream:<1}] {match_badge} | "
                     f"Logits:[A:{la:+.2f}, B:{lb:+.2f}] "
                     f"Δ:{delta:+.2f} "
                     f"EMA:{smooth:+.2f} | "
                     f"{meter} | "
-                    f"Lock: {stream:<9} ({conf:4.1f}%) | "
+                    f"Conf:{conf:4.1f}% | "
                     f"Gains:[A:{ga_db:+4.1f}dB, B:{gb_db:+4.1f}dB] | "
                     f"{telemetry['compute_ms']:4.1f}ms{flag}"
                 )
@@ -150,7 +156,6 @@ def simulate_realtime_stream(
         idx = end_idx
         sim_time_sec += actual_samples / fs
         
-        # Real-time clock synchronization
         if speed_factor > 0:
             elapsed_wall = time.perf_counter() - start_wall_time
             expected_wall = sim_time_sec / speed_factor
@@ -160,23 +165,41 @@ def simulate_realtime_stream(
                 
     total_wall_sec = time.perf_counter() - start_wall_time
     mean_compute_ms = total_compute_ms / max(1, step_count)
-    print("=" * 85)
-    print("  SIMULATION COMPLETE")
-    print(f"  Total Stream Time: {sim_time_sec:.1f} s | Wall-Clock Time: {total_wall_sec:.2f} s")
-    print(f"  Inference Steps: {step_count} | Total Speaker Switches: {switches}")
-    print(f"  Mean BCI Compute Latency (T_compute): {mean_compute_ms:.2f} ms (< 500 ms step budget)")
-    print(f"  Digital Software Mixing Computation Time: {acoustic_delay_ms:.4f} ms (Excludes physical DAC/OS latency)")
-    print("=" * 85)
+    accuracy_pct = (correct_steps / max(1, step_count)) * 100.0
+    
+    print("=" * 102)
+    print(f"  TRIAL SIMULATION COMPLETE: Subject {subject_id} (Trial {trial_idx})")
+    print(f"  Ground Truth Attended Speaker: Stream {ground_truth}")
+    print(f"  Model Real-Time Lock Accuracy: {accuracy_pct:.1f}% ({correct_steps}/{step_count} steps on Ground Truth)")
+    print(f"  Final Decision Lock: Stream {stream} | Mean Neural Margin (Δ): {float(np.mean(deltas)):+.2f}")
+    print(f"  Total Speaker Switches: {switches} | Mean BCI Latency: {mean_compute_ms:.2f} ms")
+    print("=" * 102)
+    
+    return {
+        "subject": subject_id,
+        "trial_idx": trial_idx,
+        "ground_truth": ground_truth,
+        "final_lock": stream,
+        "accuracy_pct": accuracy_pct,
+        "correct_steps": correct_steps,
+        "total_steps": step_count,
+        "switches": switches,
+        "mean_delta": float(np.mean(deltas)) if deltas else 0.0,
+        "mean_latency": mean_compute_ms
+    }
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Real-Time CA-TCN DTU Replay Simulator")
-    parser.add_argument("--subject", type=str, default="S1_data_preproc", help="DTU Subject name")
+    parser.add_argument("--subject", type=str, default="S1", help="DTU Subject name (e.g. S1, S2, S7)")
     parser.add_argument("--montage", type=str, default="near_ear_expanded", help="Electrode montage")
     parser.add_argument("--trial_idx", type=int, default=0, help="Trial index to replay")
     parser.add_argument("--checkpoint", type=str, default="", help="Path to trained model checkpoint")
     parser.add_argument("--speed_factor", type=float, default=2.0, help="Clock speedup factor (1.0=realtime, 2.0=2x speed, 0=max)")
     parser.add_argument("--window_sec", type=float, default=5.0, help="Rolling window size in seconds")
     parser.add_argument("--step_sec", type=float, default=0.5, help="Rolling step size in seconds")
+    parser.add_argument("--compare_subjects", type=str, default="", help="Comma-separated subjects to compare (e.g. S1,S2,S7,S8,S15)")
+    parser.add_argument("--compare_trials", type=str, default="", help="Comma-separated trials to compare (e.g. 0,1,2,3)")
+    parser.add_argument("--swap_streams", action="store_true", help="Swap A and B streams so Ground Truth is Stream B")
     args = parser.parse_args()
     
     montage_channels = MONTAGES[args.montage]
@@ -199,38 +222,78 @@ if __name__ == "__main__":
         print("[MODEL WARNING] No checkpoint found. Running with initialized weights.")
         
     model.eval()
-
     files = subject_files()
-    target_files = [f for f in files if f.stem == args.subject or f.stem.split("_")[0] == args.subject.split("_")[0]]
-    if not target_files:
-        raise FileNotFoundError(f"Could not find DTU subject file for {args.subject} in DATA_DIR. Provide genuine DTU data.")
-        
-    print(f"[DATA] Loading genuine DTU recording: {target_files[0].name}...")
     mapping, envelopes = get_mapping_data("gammatone")
-    test_exs = list(load_subject_examples(target_files[0]))
-    
-    _, YA_all, YB_all = prepare_dataset(test_exs, montage_channels, 1.0, 6.0, args.subject, mapping, envelopes)
-    
-    trial_idx = min(args.trial_idx, len(test_exs) - 1, len(YA_all) - 1)
-    raw_eeg = test_exs[trial_idx].eeg[:, montage_channels].astype(np.float32)
-    ya = YA_all[trial_idx].mean(axis=0).squeeze() if YA_all[trial_idx].ndim > 1 else YA_all[trial_idx].squeeze()
-    yb = YB_all[trial_idx].mean(axis=0).squeeze() if YB_all[trial_idx].ndim > 1 else YB_all[trial_idx].squeeze()
-    
-    min_len = min(len(raw_eeg), len(ya), len(yb))
-    raw_eeg = raw_eeg[:min_len]
-    ya = ya[:min_len]
-    yb = yb[:min_len]
-    
-    print(f"[DATA] Loaded Trial {trial_idx}: {min_len} samples ({min_len / FS:.1f} seconds) of genuine 8-channel EEG & speech.")
-    
-    simulate_realtime_stream(
-        eeg_stream=raw_eeg,
-        audio_a_stream=ya,
-        audio_b_stream=yb,
-        model=model,
-        fs=FS,
-        chunk_samples=16,
-        speed_factor=args.speed_factor,
-        window_sec=args.window_sec,
-        step_sec=args.step_sec
-    )
+
+    # Determine subjects to run
+    if args.compare_subjects:
+        subjects_to_run = [s.strip() for s in args.compare_subjects.split(",") if s.strip()]
+    else:
+        subjects_to_run = [args.subject]
+        
+    # Determine trials to run
+    if args.compare_trials:
+        trials_to_run = [int(t.strip()) for t in args.compare_trials.split(",") if t.strip()]
+    else:
+        trials_to_run = [args.trial_idx]
+
+    results_summary = []
+
+    for sub in subjects_to_run:
+        target_files = [f for f in files if f.stem == sub or f.stem.split("_")[0] == sub.split("_")[0]]
+        if not target_files:
+            print(f"[WARNING] Could not find DTU subject file for {sub}. Skipping.")
+            continue
+            
+        test_exs = list(load_subject_examples(target_files[0]))
+        _, YA_all, YB_all = prepare_dataset(test_exs, montage_channels, 1.0, 6.0, sub, mapping, envelopes)
+        
+        for t_idx in trials_to_run:
+            actual_t_idx = min(t_idx, len(test_exs) - 1, len(YA_all) - 1)
+            raw_eeg = test_exs[actual_t_idx].eeg[:, montage_channels].astype(np.float32)
+            ya = YA_all[actual_t_idx].mean(axis=0).squeeze() if YA_all[actual_t_idx].ndim > 1 else YA_all[actual_t_idx].squeeze()
+            yb = YB_all[actual_t_idx].mean(axis=0).squeeze() if YB_all[actual_t_idx].ndim > 1 else YB_all[actual_t_idx].squeeze()
+            
+            min_len = min(len(raw_eeg), len(ya), len(yb))
+            raw_eeg = raw_eeg[:min_len]
+            ya = ya[:min_len]
+            yb = yb[:min_len]
+            
+            if args.swap_streams:
+                # Candidate 1 is unattended, Candidate 2 is attended
+                feed_a = yb
+                feed_b = ya
+                gt = "B"
+            else:
+                feed_a = ya
+                feed_b = yb
+                gt = "A"
+                
+            res = simulate_realtime_stream(
+                eeg_stream=raw_eeg,
+                audio_a_stream=feed_a,
+                audio_b_stream=feed_b,
+                ground_truth=gt,
+                subject_id=sub,
+                trial_idx=actual_t_idx,
+                model=model,
+                fs=FS,
+                chunk_samples=16,
+                speed_factor=args.speed_factor,
+                window_sec=args.window_sec,
+                step_sec=args.step_sec,
+                verbose=True
+            )
+            results_summary.append(res)
+
+    if len(results_summary) > 1:
+        print("\n" + "=" * 98)
+        print("  MULTI-SUBJECT GROUND TRUTH vs REAL-TIME LIVESTREAM BENCHMARK")
+        print("=" * 98)
+        print(f"  {'Subject':<10} | {'Trial':<6} | {'Ground Truth':<14} | {'Final Lock':<12} | {'% On Ground Truth':<18} | {'Switches':<9} | {'Mean Margin (Δ)'}")
+        print("  " + "-" * 94)
+        for r in results_summary:
+            status_symbol = "✓" if r["final_lock"] == r["ground_truth"] else "✗"
+            print(f"  {r['subject']:<10} | {r['trial_idx']:<6} | Stream {r['ground_truth']:<7} | Stream {r['final_lock']} {status_symbol:<4} | {r['accuracy_pct']:>6.1f}% ({r['correct_steps']}/{r['total_steps']})    | {r['switches']:<9} | {r['mean_delta']:+6.2f}")
+        print("=" * 98)
+
