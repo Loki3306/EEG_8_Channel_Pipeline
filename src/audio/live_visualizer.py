@@ -1,7 +1,8 @@
 import json
 import base64
 from pathlib import Path
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, Union
+import html as html_lib
 
 def build_live_streaming_html(telemetry_data: Dict[str, Any]) -> str:
     """
@@ -1109,5 +1110,29 @@ def launch_interactive_player(telemetry_json_path: Path, embed_audio: bool = Tru
                 if wav_p.exists():
                     data[b64_k] = _wav_to_compact_base64(wav_p)
                         
-    html = build_live_streaming_html(data)
-    display(HTML(html))
+    html_doc = build_live_streaming_html(data)
+    escaped = html_lib.escape(html_doc)
+    iframe_code = (
+        f'<iframe srcdoc="{escaped}" '
+        f'style="width: 100%; height: 850px; border: 1px solid #334155; border-radius: 12px; background: #090d16;" '
+        f'allow="autoplay"></iframe>'
+    )
+    display(HTML(iframe_code))
+
+def render_player_in_kaggle(html_path: Union[str, Path] = "/kaggle/working/audio_demo_output/aad_live_streaming_player.html", height: int = 850):
+    """
+    Renders the live visualizer inside an isolated iframe with srcdoc.
+    Guarantees that all JavaScript, 60 FPS animation loops, and audio playback run smoothly
+    without Kaggle notebook React DOM stripping script tags.
+    """
+    from IPython.display import display, HTML
+    p = Path(html_path)
+    with open(p, "r", encoding="utf-8") as f:
+        content = f.read()
+    escaped = html_lib.escape(content)
+    iframe_code = (
+        f'<iframe srcdoc="{escaped}" '
+        f'style="width: 100%; height: {height}px; border: 1px solid #334155; border-radius: 12px; background: #090d16;" '
+        f'allow="autoplay"></iframe>'
+    )
+    display(HTML(iframe_code))
