@@ -429,10 +429,21 @@ def run_full_cohort_pipeline(args):
             device=str(device)
         )
         all_results = []
+        n_tot = len(trials_to_run)
+        print(f"  [STREAMING] Streaming {n_tot} held-out trials ({trials_to_run[0]} to {trials_to_run[-1]})...", flush=True)
         for t_idx, t_num in enumerate(trials_to_run, start=1):
+            t_start = time.perf_counter()
             res = run_trial_streaming(raw_sub, t_num, mapping, audio_dir, model, adapter, device, stream_args, verbose=False)
             if res is not None:
                 all_results.append(res)
+                t_elapsed = time.perf_counter() - t_start
+                maj_str = "CORRECT" if res['trial_winner_maj'] else "INCORRECT"
+                print(
+                    f"    [TRIAL {t_num:02d} ({t_idx:02d}/{n_tot:02d})] "
+                    f"Margin: {res['cum_margin']:+5.2f} | 5s: {res['acc_5s']:5.1f}% | 10s: {res['acc_10s']:5.1f}% | 20s: {res['acc_20s']:5.1f}% | "
+                    f"Winner: {maj_str:<9} | RTF: {res['overall_rtf']:.3f}x | {t_elapsed:.1f}s",
+                    flush=True
+                )
 
         if not all_results:
             print(f"  [ERROR] No trials successfully streamed for {sub_id}.")
