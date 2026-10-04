@@ -127,9 +127,7 @@ def train_spatial_adapter(adapter, frozen_backbone, calib_x, calib_ya, calib_yb,
                 
             # EEG encoder takes adapted EEG with gradient flowing to adapter
             ze = frozen_backbone.eeg_encoder(bx_adapted)
-            score_a = frozen_backbone.classifier_head(ze, za)
-            score_b = frozen_backbone.classifier_head(ze, zb)
-            margin = score_a - score_b
+            margin, _ = frozen_backbone.classifier_head(ze, za, zb)
             
             loss_task = criterion(margin, blabel)
             loss_reg = l2_identity * adapter.identity_regularization_loss()
