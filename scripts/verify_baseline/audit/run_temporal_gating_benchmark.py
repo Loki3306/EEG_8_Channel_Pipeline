@@ -222,6 +222,7 @@ def train_tiny_temporal_gate(cv_margins, cv_labels, epochs=15, lr=1e-3, device="
 
 def main():
     parser = argparse.ArgumentParser(description="Personalized Gating and Time-Series Confidence Benchmark")
+    parser.add_argument("--checkpoint_dir", type=str, default="/kaggle/working/loso_checkpoints", help="Path to checkpoint directory")
     parser.add_argument("--all_folds", action="store_true", help="Run across all 18 subjects (S1-S18)")
     parser.add_argument("--folds", type=str, default="", help="Comma-separated target subjects (e.g. S1,S2)")
     parser.add_argument("--subject", type=str, default="", help="Single target subject (e.g. S1)")
@@ -270,6 +271,8 @@ def main():
             
         # 1. Load Pre-Trained Universal Backbone
         backbone_candidates = [
+            Path(args.checkpoint_dir) / f"catcn_loso_{target_sub}.pt",
+            Path(args.checkpoint_dir) / f"catcn_univ_heldout_{target_sub}.pt",
             Path(f"/kaggle/working/loso_checkpoints/catcn_loso_{target_sub}.pt"),
             Path(f"/kaggle/working/checkpoints/catcn_loso_{target_sub}.pt"),
             Path(f"/kaggle/working/checkpoints/catcn_univ_heldout_{target_sub}.pt"),
