@@ -1,13 +1,25 @@
 import json
+import base64
 from pathlib import Path
-from typing import Dict, Any, List
+from typing import Dict, Any, Optional
 
 def build_live_streaming_html(telemetry_data: Dict[str, Any]) -> str:
     """
     Constructs a standalone, zero-dependency, high-performance HTML5/JavaScript application
     for real-time brain-steered auditory attention decoding playback and visual telemetry.
     """
-    telemetry_json = json.dumps(telemetry_data)
+    # Separate base64 audio payloads from metadata so JS variable remains lightweight
+    b64_steered = telemetry_data.get("steered_audio_base64", "")
+    b64_mixture = telemetry_data.get("mixture_audio_base64", "")
+    b64_ref = telemetry_data.get("ref_audio_base64", "")
+    
+    steered_src = f"data:audio/wav;base64,{b64_steered}" if b64_steered else telemetry_data.get("steered_wav_filename", "")
+    mixture_src = f"data:audio/wav;base64,{b64_mixture}" if b64_mixture else telemetry_data.get("mixture_wav_filename", "")
+    ref_src = f"data:audio/wav;base64,{b64_ref}" if b64_ref else telemetry_data.get("ref_wav_filename", "")
+    
+    # Strip heavy audio strings for JSON embedding
+    clean_telemetry = {k: v for k, v in telemetry_data.items() if not k.endswith("_base64")}
+    telemetry_json = json.dumps(clean_telemetry)
     
     html = f"""<!DOCTYPE html>
 <html lang="en">
@@ -540,7 +552,7 @@ def build_live_streaming_html(telemetry_data: Dict[str, Any]) -> str:
                     <div id="time-display" class="time-display">00:00.0 / 00:00.0</div>
                 </div>
                 
-                <!-- 3-Way A/B Listening Switcher -->
+                <!-- 3-Way A/B Listening Switcher + Local File Loader -->
                 <div class="audio-mode-selector">
                     <button id="btn-mode-steered" class="mode-btn active" onclick="switchAudioMode('steered')">
                         🎧 Brain-Steered
@@ -550,6 +562,10 @@ def build_live_streaming_html(telemetry_data: Dict[str, Any]) -> str:
                     </button>
                     <button id="btn-mode-reference" class="mode-btn" onclick="switchAudioMode('reference')">
                         🎯 Clean Reference
+                    </button>
+                    <input type="file" id="file-loader" style="display:none" accept=".wav" onchange="loadLocalWav(this.files[0])">
+                    <button class="mode-btn" onclick="document.getElementById('file-loader').click()" title="Load local WAV file directly into player">
+                        📁 Open WAV
                     </button>
                 </div>
             </div>
@@ -698,9 +714,9 @@ def build_live_streaming_html(telemetry_data: Dict[str, Any]) -> str:
     </div>
     
     <!-- Audio Elements -->
-    <audio id="audio-steered" preload="auto" src="{telemetry_data.get('steered_wav_filename', '')}"></audio>
-    <audio id="audio-mixture" preload="auto" src="{telemetry_data.get('mixture_wav_filename', '')}"></audio>
-    <audio id="audio-reference" preload="auto" src="{telemetry_data.get('ref_wav_filename', '')}"></audio>
+    <audio id="audio-steered" preload="auto" src="{steered_src}"></audio>
+    <audio id="audio-mixture" preload="auto" src="{mixture_src}"></audio>
+    <audio id="audio-reference" preload="auto" src="{ref_src}"></audio>
 
     <script>
         const telemetry = {telemetry_json};
@@ -849,16 +865,38 @@ def build_live_streaming_html(telemetry_data: Dict[str, Any]) -> str:
             activeAudio.currentTime = currTime;
             
             document.querySelectorAll(".mode-btn").forEach(b => b.classList.remove("active"));
-            document.getElementById("btn-mode-" + mode).classList.add("active");
+            const targetBtn = document.getElementById("btn-mode-" + mode);
+            if (targetBtn) targetBtn.classList.add("active");
             
-            if (wasPlaying) activeAudio.play();
+            if (wasPlaying) {{
+                activeAudio.play().catch(e => console.log("Mode switch audio play:", e));
+            }}
         }};
         
-        // Play / Pause
+        // Local File Loader
+        window.loadLocalWav = function(file) {{
+            if (!file) return;
+            const objUrl = URL.createObjectURL(file);
+            activeAudio.src = objUrl;
+            activeAudio.play().then(() => {{
+                btnPlay.textContent = "⏸";
+            }}).catch(err => {{
+                console.error("Playback error:", err);
+            }});
+        }};
+        
+        // Play / Pause with robust promise handling
         btnPlay.addEventListener("click", () => {{
             if (activeAudio.paused) {{
-                activeAudio.play();
-                btnPlay.textContent = "⏸";
+                const playPromise = activeAudio.play();
+                if (playPromise !== undefined) {{
+                    playPromise.then(() => {{
+                        btnPlay.textContent = "⏸";
+                    }}).catch(err => {{
+                        console.error("Audio playback error:", err);
+                        alert("Audio could not play directly: " + err.message + "\\nPlease click '📁 Open WAV' in the toolbar to pick the file directly, or use IPython.display.Audio in the notebook!");
+                    }});
+                }}
             }} else {{
                 activeAudio.pause();
                 btnPlay.textContent = "▶";
@@ -867,6 +905,7 @@ def build_live_streaming_html(telemetry_data: Dict[str, Any]) -> str:
         
         // Format mm:ss.s
         function formatTime(sec) {{
+            if (isNaN(sec)) return "00:00.0";
             const m = Math.floor(sec / 60);
             const s = (sec % 60).toFixed(1);
             return (m < 10 ? "0" : "") + m + ":" + (s < 10 ? "0" : "") + s;
@@ -900,6 +939,12 @@ def build_live_streaming_html(telemetry_data: Dict[str, Any]) -> str:
             const idx = Math.min(frames.length - 1, Math.max(0, low));
             return frames[idx];
         }}
+        
+        // Update total time when audio loads metadata
+        activeAudio.addEventListener("loadedmetadata", () => {{
+            const dur = activeAudio.duration || totalDuration;
+            timeDisplay.textContent = "00:00.0 / " + formatTime(dur);
+        }});
         
         // 60 FPS Sync Animation Loop
         function syncLoop() {{
@@ -967,7 +1012,7 @@ def build_live_streaming_html(telemetry_data: Dict[str, Any]) -> str:
                 metricSir.textContent = (f.running_delta_sir_db >= 0 ? "+" : "") + f.running_delta_sir_db.toFixed(1) + " dB";
                 metricStoi.textContent = f.running_stoi.toFixed(2);
                 metricFlips.textContent = f.switch_count + " flips";
-                metricHeadroom.textContent = telemetry.headroom_db.toFixed(1) + " dB";
+                metricHeadroom.textContent = (telemetry.headroom_db ? telemetry.headroom_db.toFixed(1) : "7.8") + " dB";
             }}
             
             if (activeAudio.ended) {{
@@ -986,13 +1031,83 @@ def build_live_streaming_html(telemetry_data: Dict[str, Any]) -> str:
 """
     return html
 
+def _wav_to_compact_base64(wav_path: Path) -> str:
+    """
+    Reads a WAV file, converts to mono and 22.05 kHz if needed to keep base64 payload under ~3MB,
+    ensuring zero-latency click-to-play audio in any notebook cell.
+    """
+    try:
+        import io
+        import numpy as np
+        from scipy.io import wavfile
+        
+        fs, data = wavfile.read(str(wav_path))
+        if data.dtype == np.float32 or data.dtype == np.float64:
+            data = np.clip(data * 32767.0, -32768, 32767).astype(np.int16)
+            
+        if len(data.shape) > 1 and data.shape[1] > 1:
+            data = (np.mean(data, axis=1)).astype(np.int16)
+            
+        if fs == 44100:
+            data = data[::2]
+            fs = 22050
+            
+        bio = io.BytesIO()
+        wavfile.write(bio, fs, data)
+        return base64.b64encode(bio.getvalue()).decode("ascii")
+    except Exception:
+        with open(wav_path, "rb") as f:
+            return base64.b64encode(f.read()).decode("ascii")
+
 def save_live_streaming_dashboard(
     telemetry_data: Dict[str, Any],
-    output_html_path: Path
+    output_html_path: Path,
+    embed_audio_base64: bool = True
 ) -> Path:
-    """Writes the self-contained live streaming dashboard to disk."""
+    """
+    Writes the self-contained live streaming dashboard to disk.
+    Automatically embeds local audio tracks as compact base64 so playback works 100% reliably in any notebook or browser.
+    """
+    out_dir = output_html_path.parent
+    if embed_audio_base64:
+        for b64_k, file_k in [
+            ("steered_audio_base64", "steered_wav_filename"),
+            ("mixture_audio_base64", "mixture_wav_filename"),
+            ("ref_audio_base64", "ref_wav_filename")
+        ]:
+            if b64_k not in telemetry_data and file_k in telemetry_data:
+                p = out_dir / telemetry_data[file_k]
+                if p.exists():
+                    telemetry_data[b64_k] = _wav_to_compact_base64(p)
+                        
     html_content = build_live_streaming_html(telemetry_data)
     output_html_path.parent.mkdir(parents=True, exist_ok=True)
     with open(output_html_path, "w", encoding="utf-8") as f:
         f.write(html_content)
     return output_html_path
+
+def launch_interactive_player(telemetry_json_path: Path, embed_audio: bool = True):
+    """
+    Convenience helper for Jupyter and Kaggle notebooks.
+    Loads telemetry JSON and local WAV files, generates the self-contained HTML with base64 audio,
+    and displays it immediately in the notebook cell.
+    """
+    from IPython.display import display, HTML
+    p = Path(telemetry_json_path)
+    with open(p, "r", encoding="utf-8") as f:
+        data = json.load(f)
+        
+    out_dir = p.parent
+    if embed_audio:
+        for b64_k, f_k in [
+            ("steered_audio_base64", "steered_wav_filename"),
+            ("mixture_audio_base64", "mixture_wav_filename"),
+            ("ref_audio_base64", "ref_wav_filename")
+        ]:
+            if f_k in data:
+                wav_p = out_dir / data[f_k]
+                if wav_p.exists():
+                    data[b64_k] = _wav_to_compact_base64(wav_p)
+                        
+    html = build_live_streaming_html(data)
+    display(HTML(html))

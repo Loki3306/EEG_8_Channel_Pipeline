@@ -7,6 +7,7 @@ import numpy as np
 import scipy.io.wavfile as wavfile
 import matplotlib.pyplot as plt
 import torch
+from typing import Optional
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 VERIFY_ROOT = Path(__file__).resolve().parents[1]
@@ -51,6 +52,7 @@ def run_live_streaming_demo(
     max_boost_db: float = 9.0,
     max_suppress_db: float = 18.0,
     tau_ms: float = 60.0,
+    duration_sec: Optional[float] = 45.0,
     realtime_pacing: bool = False,
     device_str: str = "auto"
 ):
@@ -87,8 +89,8 @@ def run_live_streaming_demo(
     ]
     found_ckpt = next((p for p in backbone_candidates if p.exists()), None)
     if not found_ckpt:
-        # Fallback: recursive search in checkpoint_dir, /kaggle/working, and ./checkpoints
-        search_roots = [Path(checkpoint_dir), Path("/kaggle/working"), Path("checkpoints")]
+        # Fallback: recursive search in checkpoint_dir, /kaggle/working, /kaggle/input, and ./checkpoints
+        search_roots = [Path(checkpoint_dir), Path("/kaggle/working"), Path("/kaggle/input"), Path("checkpoints")]
         for s_root in search_roots:
             if s_root.exists():
                 cands = list(s_root.rglob(f"*{target_sub}*.pt"))
@@ -98,12 +100,12 @@ def run_live_streaming_demo(
                     
     if not found_ckpt:
         all_pts = []
-        for s_root in [Path(checkpoint_dir), Path("/kaggle/working")]:
+        for s_root in [Path(checkpoint_dir), Path("/kaggle/working"), Path("/kaggle/input")]:
             if s_root.exists():
                 all_pts.extend([str(p) for p in s_root.rglob("*.pt")])
         avail_str = "\n".join(all_pts[:10]) if all_pts else "No .pt files found"
         raise FileNotFoundError(
-            f"Checkpoint not found for {target_sub}.\nSearched candidates in: {checkpoint_dir}, /kaggle/working\nAvailable files on disk:\n{avail_str}"
+            f"Checkpoint not found for {target_sub}.\nSearched candidates in: {checkpoint_dir}, /kaggle/working, /kaggle/input\nAvailable files on disk:\n{avail_str}"
         )
         
     print(f"[CHECKPOINT] Loaded frozen backbone from: {found_ckpt}")
@@ -156,6 +158,14 @@ def run_live_streaming_demo(
     audio_a, audio_b, actual_fs, src_a, src_b = load_or_synthesize_trial_audio(
         target_sub, target_trial_idx, mapping, audio_dir, target_ya[0], target_yb[0], target_fs=44100
     )
+    if duration_sec and duration_sec > 0:
+        target_samples = int(duration_sec * actual_fs)
+        if target_samples < len(audio_a):
+            audio_a = audio_a[:target_samples]
+            audio_b = audio_b[:target_samples]
+            max_steps = max(1, int((len(audio_a) / float(actual_fs) - 5.0) / 0.5))
+            trial_margins = trial_margins[:max_steps]
+            trial_raw_eeg = trial_raw_eeg[:max_steps]
     total_audio_sec = len(audio_a) / float(actual_fs)
     print(f"[AUDIO] Stream A: {src_a} | Stream B: {src_b} ({total_audio_sec:.1f}s @ {actual_fs} Hz)")
     
@@ -379,6 +389,9 @@ def run_live_streaming_demo(
     print("  To launch the live interactive player in Kaggle, run in the next cell:")
     print("    from IPython.display import HTML")
     print(f"    HTML(open('{html_player_path}', encoding='utf-8').read())")
+    print("\n  Or listen to high-res uncompressed 44.1 kHz WAV directly in notebook:")
+    print("    import IPython.display as ipd")
+    print(f"    ipd.Audio('{p_steered}')")
     print("=" * 115)
     
     return {
@@ -400,6 +413,7 @@ def main():
     parser.add_argument("--max_boost", type=float, default=9.0, help="Max boost in dB (default +9 dB)")
     parser.add_argument("--max_suppress", type=float, default=18.0, help="Max suppression in dB (default -18 dB)")
     parser.add_argument("--tau_ms", type=float, default=60.0, help="Slew time constant in ms (default 60 ms)")
+    parser.add_argument("--duration", type=float, default=45.0, help="Demo duration in seconds (default: 45.0s, pass 0 for full trial)")
     parser.add_argument("--realtime", action="store_true", help="Paces console output with 500ms delay to simulate real-time clock")
     args = parser.parse_args()
     
@@ -412,6 +426,7 @@ def main():
         max_boost_db=args.max_boost,
         max_suppress_db=args.max_suppress,
         tau_ms=args.tau_ms,
+        duration_sec=args.duration,
         realtime_pacing=args.realtime
     )
 
