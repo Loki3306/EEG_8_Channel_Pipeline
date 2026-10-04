@@ -164,11 +164,11 @@ def generate_html_player(demo_results: list, output_html_path: Path):
             
             <div class="metrics-grid">
                 <div class="metric-box">
-                    <div class="m-val" style="color: #10b981;">+{m['delta_sir_db']:.1f} dB</div>
+                    <div class="m-val" style="color: #10b981;">{m['delta_sir_db']:+.1f} dB</div>
                     <div class="m-lbl">SIR Separation Gain</div>
                 </div>
                 <div class="metric-box">
-                    <div class="m-val" style="color: #6366f1;">{m['mean_contrast_db']:.1f} dB</div>
+                    <div class="m-val" style="color: #6366f1;">{m['mean_contrast_db']:+.1f} dB</div>
                     <div class="m-lbl">Mean Contrast</div>
                 </div>
                 <div class="metric-box">
@@ -480,7 +480,7 @@ def run_single_demo_trial(
     plt.plot(t_audio, render_dict["gain_db_b"], color="#f59e0b", linewidth=1.5, linestyle="--", label="Stream B Gain (dB)")
     plt.axhline(0.0, color="gray", linestyle=":", alpha=0.5)
     plt.ylabel("Applied Gain (dB)")
-    plt.title(f"Dynamic Steering Trajectory (Separation: +{metrics['delta_sir_db']:.1f} dB)", fontsize=11, fontweight="bold")
+    plt.title(f"Dynamic Steering Trajectory (Separation: {metrics['delta_sir_db']:+.1f} dB)", fontsize=11, fontweight="bold")
     plt.legend(loc="upper right")
     plt.grid(True, alpha=0.2)
     
@@ -500,7 +500,7 @@ def run_single_demo_trial(
     plt.savefig(str(p_plot), dpi=150)
     plt.close()
     
-    print(f"  [METRICS] ΔSIR: +{metrics['delta_sir_db']:.1f} dB | Contrast: {metrics['mean_contrast_db']:.1f} dB | STOI: {metrics['stoi_steered']:.2f} | Acc: {metrics['decision_accuracy_pct']:.1f}%")
+    print(f"  [METRICS] ΔSIR: {metrics['delta_sir_db']:+.1f} dB | Contrast: {metrics['mean_contrast_db']:+.1f} dB | STOI: {metrics['stoi_steered']:.2f} | Acc: {metrics['decision_accuracy_pct']:.1f}%")
     print(f"  [SAVED] Audio: {p_steered.name} | Plot: {p_plot.name}")
     
     return {
