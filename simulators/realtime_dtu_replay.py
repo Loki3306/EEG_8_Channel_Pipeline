@@ -221,6 +221,9 @@ if __name__ == "__main__":
     parser.add_argument("--compare_trials", type=str, default="", help="Comma-separated trials to compare (e.g. 0,1,2,3)")
     parser.add_argument("--verbose", action="store_true", help="Force verbose 0.5s visual step meter even for multiple trials")
     parser.add_argument("--swap_streams", action="store_true", help="Swap A and B streams so Ground Truth is Stream B")
+    parser.add_argument("--zero_eeg", action="store_true", help="Ablation: zero out all EEG signals (test if model predicts without brainwaves)")
+    parser.add_argument("--noise_eeg", action="store_true", help="Ablation: replace EEG with synthetic Gaussian noise")
+    parser.add_argument("--reverse_audio", action="store_true", help="Ablation: time-reverse candidate speech envelopes")
     args = parser.parse_args()
     
     montage_channels = MONTAGES[args.montage]
@@ -278,6 +281,12 @@ if __name__ == "__main__":
             print("\n" + "=" * 110)
             print(f"  RUNNING REAL-TIME REPLAY SIMULATION: Subject {sub} ({len(trials_to_run)} trials)")
             print(f"  Window: {args.window_sec}s | Step: {args.step_sec}s | Speed: {args.speed_factor}x | EMA Alpha: {args.decision_alpha}")
+            if args.zero_eeg:
+                print("  [ABLATION ACTIVE] ALL EEG ZEROED OUT (Verifying model failure without brainwaves)")
+            elif args.noise_eeg:
+                print("  [ABLATION ACTIVE] EEG REPLACED WITH SYNTHETIC GAUSSIAN NOISE (Verifying chance collapse)")
+            elif args.reverse_audio:
+                print("  [ABLATION ACTIVE] AUDIO SPEECH TIME-REVERSED (Verifying temporal phase alignment)")
             print("=" * 110)
 
         sub_results = []
@@ -291,6 +300,16 @@ if __name__ == "__main__":
             raw_eeg = raw_eeg[:min_len]
             ya = ya[:min_len]
             yb = yb[:min_len]
+            
+            # Apply ablation transformations
+            if args.zero_eeg:
+                raw_eeg = np.zeros_like(raw_eeg)
+            elif args.noise_eeg:
+                raw_eeg = np.random.RandomState(42 + actual_t_idx).randn(*raw_eeg.shape).astype(np.float32)
+                
+            if args.reverse_audio:
+                ya = ya[::-1].copy()
+                yb = yb[::-1].copy()
             
             if args.swap_streams:
                 feed_a = yb
