@@ -37,6 +37,25 @@ from training.train_matchnet_wavlm import get_mapping_data, FS
 from scripts.verify_baseline.audit.run_audio_steering_demo import train_adapter_for_subject
 
 
+def resolve_raw_file(path_arg: Optional[str], subject: str = "S1") -> Path:
+    if path_arg and Path(path_arg).exists():
+        return Path(path_arg)
+    candidates = [
+        Path(f"/kaggle/input/datasets/lokeshgile/raw-s1-dtu/{subject}.mat"),
+        Path(f"/kaggle/input/datasets/lokeshgile/raw-s1-dtu/{subject.lower()}.mat"),
+        Path(f"/kaggle/input/raw-s1-dtu/{subject}.mat"),
+        Path(f"C:/Users/lokes/Downloads/{subject}.mat"),
+    ]
+    for c in candidates:
+        if c.exists():
+            return c
+    if Path("/kaggle/input").exists():
+        matches = [p for p in Path("/kaggle/input").rglob(f"*{subject}*.mat") if "preproc" not in p.name.lower()]
+        if matches:
+            return matches[0]
+    return Path(path_arg) if path_arg else Path(f"C:/Users/lokes/Downloads/{subject}.mat")
+
+
 def run_raw_streaming_benchmark(
     raw_mat_path: Optional[str] = None,
     subject: str = "S1",
@@ -88,7 +107,7 @@ def run_raw_streaming_benchmark(
     adapter.eval()
     
     # 3. Load or Synthesize Raw 512 Hz Multi-Channel EEG Stream
-    raw_p = Path(raw_mat_path) if raw_mat_path else Path(f"C:/Users/lokes/Downloads/{subject}.mat")
+    raw_p = resolve_raw_file(raw_mat_path, subject=subject)
     if raw_p.exists():
         print(f"[INPUT] Loading raw DTU BioSemi ActiveTwo file: {raw_p}")
         sub_data = load_raw_dtu_file(raw_p)

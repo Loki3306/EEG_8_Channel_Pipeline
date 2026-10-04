@@ -180,24 +180,63 @@ def verify_raw_eeg_parity(raw_mat_path: Path, preproc_mat_path: Path, out_dir: P
     }
 
 
+def resolve_raw_file(path_arg: str, subject: str = "S1") -> Path:
+    if path_arg and Path(path_arg).exists():
+        return Path(path_arg)
+    candidates = [
+        Path(f"/kaggle/input/datasets/lokeshgile/raw-s1-dtu/{subject}.mat"),
+        Path(f"/kaggle/input/datasets/lokeshgile/raw-s1-dtu/{subject.lower()}.mat"),
+        Path(f"/kaggle/input/raw-s1-dtu/{subject}.mat"),
+        Path(f"C:/Users/lokes/Downloads/{subject}.mat"),
+    ]
+    for c in candidates:
+        if c.exists():
+            return c
+    if Path("/kaggle/input").exists():
+        matches = [p for p in Path("/kaggle/input").rglob(f"*{subject}*.mat") if "preproc" not in p.name.lower()]
+        if matches:
+            return matches[0]
+    return Path(path_arg) if path_arg else Path(f"C:/Users/lokes/Downloads/{subject}.mat")
+
+
+def resolve_preproc_file(path_arg: str, subject: str = "S1") -> Path:
+    if path_arg and Path(path_arg).exists():
+        return Path(path_arg)
+    candidates = [
+        Path(f"/kaggle/input/datasets/lokeshgile/dataset-eeg/{subject}_data_preproc.mat"),
+        Path(f"/kaggle/input/dataset-eeg/{subject}_data_preproc.mat"),
+        Path(f"C:/Users/lokes/Downloads/{subject}_data_preproc.mat"),
+    ]
+    for c in candidates:
+        if c.exists():
+            return c
+    if Path("/kaggle/input").exists():
+        matches = list(Path("/kaggle/input").rglob(f"{subject}_data_preproc.mat"))
+        if matches:
+            return matches[0]
+    return Path(path_arg) if path_arg else Path(f"C:/Users/lokes/Downloads/{subject}_data_preproc.mat")
+
+
 def main():
     parser = argparse.ArgumentParser(description="Raw EEG Streaming Preprocessing Parity Auditor")
-    parser.add_argument("--raw_mat", type=str, default="C:/Users/lokes/Downloads/S1.mat", help="Path to raw S<id>.mat")
-    parser.add_argument("--preproc_mat", type=str, default="C:/Users/lokes/Downloads/S1_data_preproc.mat", help="Path to S<id>_data_preproc.mat")
+    parser.add_argument("--raw_mat", type=str, default="", help="Path to raw S<id>.mat")
+    parser.add_argument("--preproc_mat", type=str, default="", help="Path to S<id>_data_preproc.mat")
     parser.add_argument("--out_dir", type=str, default="analysis/raw_eeg_parity", help="Output directory")
+    parser.add_argument("--subject", type=str, default="S1", help="Target subject (default: S1)")
     parser.add_argument("--trial", type=int, default=0, help="Trial index to verify")
     args = parser.parse_args()
     
-    raw_p = Path(args.raw_mat)
-    pre_p = Path(args.preproc_mat)
+    raw_p = resolve_raw_file(args.raw_mat, subject=args.subject)
+    pre_p = resolve_preproc_file(args.preproc_mat, subject=args.subject)
     
     if not pre_p.exists():
-        print(f"Error: Preprocessed reference not found at: {pre_p}")
+        print(f"Error: Preprocessed reference not found. Checked candidate locations in /kaggle/input and Downloads.")
+        print(f"Looked for: {pre_p}")
         sys.exit(1)
         
     if not raw_p.exists():
-        print(f"\n[NOTE] Raw EEG file '{raw_p.name}' is not yet downloaded at '{raw_p}'.")
-        print("Please place the downloaded raw S1.mat in C:/Users/lokes/Downloads/ or specify with --raw_mat.")
+        print(f"\n[NOTE] Raw EEG file for '{args.subject}' was not found at '{raw_p}'.")
+        print("Please verify the dataset is attached in Kaggle or specify with --raw_mat.")
         return
         
     verify_raw_eeg_parity(raw_p, pre_p, Path(args.out_dir), trial_idx=args.trial)
