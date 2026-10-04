@@ -48,6 +48,9 @@ def simulate_realtime_stream(
     speed_factor: float = 1.0,
     window_sec: float = 5.0,
     step_sec: float = 0.5,
+    decision_alpha: float = 0.82,
+    decision_threshold: float = 0.25,
+    n_confirm: int = 3,
     verbose: bool = True
 ):
     """
@@ -62,7 +65,7 @@ def simulate_realtime_stream(
         model = CATCNDirectDecoder(eeg_channels=n_channels, audio_channels=1, hidden_dim=64, max_lag_samples=8)
     model.eval()
     
-    # Initialize streaming pipeline
+    # Initialize streaming pipeline with robust EMA hysteresis
     pipeline = StreamingAADPipeline(
         model=model,
         n_eeg_channels=n_channels,
@@ -71,18 +74,18 @@ def simulate_realtime_stream(
         window_sec=window_sec,
         step_sec=step_sec,
         engine_mode="torchscript",
-        decision_alpha=0.7,
-        decision_threshold=0.25,
-        n_confirm=2,
+        decision_alpha=decision_alpha,
+        decision_threshold=decision_threshold,
+        n_confirm=n_confirm,
         boost_db=6.0
     )
     
     chunk_duration_sec = chunk_samples / fs
-    print("=" * 102)
+    print("=" * 106)
     print(f"  REAL-TIME CA-TCN AAD REPLAY SIMULATOR (Decoupled Loop)")
     print(f"  Subject: {subject_id} (Trial {trial_idx}) | Ground Truth Attended: Speaker {ground_truth}")
-    print(f"  EEG Channels: {n_channels} | Rate: {fs} Hz | Window: {window_sec}s | Step: {step_sec}s | Speed: {speed_factor}x")
-    print("=" * 102)
+    print(f"  EEG Channels: {n_channels} | Rate: {fs} Hz | Window: {window_sec}s | Step: {step_sec}s | Speed: {speed_factor}x | EMA Alpha: {decision_alpha}")
+    print("=" * 106)
     
     start_wall_time = time.perf_counter()
     sim_time_sec = 0.0
@@ -166,25 +169,33 @@ def simulate_realtime_stream(
     total_wall_sec = time.perf_counter() - start_wall_time
     mean_compute_ms = total_compute_ms / max(1, step_count)
     accuracy_pct = (correct_steps / max(1, step_count)) * 100.0
+    mean_delta = float(np.mean(deltas)) if deltas else 0.0
     
-    print("=" * 102)
+    # Trial-level consensus decisions
+    majority_winner = ground_truth if correct_steps >= (step_count / 2) else ("B" if ground_truth == "A" else "A")
+    cumulative_winner = "A" if mean_delta > 0 else ("B" if mean_delta < 0 else "UNCERTAIN")
+    
+    print("=" * 106)
     print(f"  TRIAL SIMULATION COMPLETE: Subject {subject_id} (Trial {trial_idx})")
     print(f"  Ground Truth Attended Speaker: Stream {ground_truth}")
     print(f"  Model Real-Time Lock Accuracy: {accuracy_pct:.1f}% ({correct_steps}/{step_count} steps on Ground Truth)")
-    print(f"  Final Decision Lock: Stream {stream} | Mean Neural Margin (Δ): {float(np.mean(deltas)):+.2f}")
-    print(f"  Total Speaker Switches: {switches} | Mean BCI Latency: {mean_compute_ms:.2f} ms")
-    print("=" * 102)
+    print(f"  Trial Majority Winner: Stream {majority_winner} ({'✓ CORRECT' if majority_winner == ground_truth else '✗ WRONG'})")
+    print(f"  Cumulative Margin Decision: Stream {cumulative_winner} ({'✓ CORRECT' if cumulative_winner == ground_truth else '✗ WRONG'}) | Mean Margin: {mean_delta:+.2f}")
+    print(f"  Instantaneous Lock @ End (50s): Stream {stream} | Total Speaker Switches: {switches} | Latency: {mean_compute_ms:.2f} ms")
+    print("=" * 106)
     
     return {
         "subject": subject_id,
         "trial_idx": trial_idx,
         "ground_truth": ground_truth,
         "final_lock": stream,
+        "majority_winner": majority_winner,
+        "cumulative_winner": cumulative_winner,
         "accuracy_pct": accuracy_pct,
         "correct_steps": correct_steps,
         "total_steps": step_count,
         "switches": switches,
-        "mean_delta": float(np.mean(deltas)) if deltas else 0.0,
+        "mean_delta": mean_delta,
         "mean_latency": mean_compute_ms
     }
 
@@ -197,6 +208,8 @@ if __name__ == "__main__":
     parser.add_argument("--speed_factor", type=float, default=2.0, help="Clock speedup factor (1.0=realtime, 2.0=2x speed, 0=max)")
     parser.add_argument("--window_sec", type=float, default=5.0, help="Rolling window size in seconds")
     parser.add_argument("--step_sec", type=float, default=0.5, help="Rolling step size in seconds")
+    parser.add_argument("--decision_alpha", type=float, default=0.82, help="EMA smoothing factor (0.7=fast, 0.85=stable)")
+    parser.add_argument("--n_confirm", type=int, default=3, help="Consecutive steps required to confirm a speaker switch")
     parser.add_argument("--compare_subjects", type=str, default="", help="Comma-separated subjects to compare (e.g. S1,S2,S7,S8,S15)")
     parser.add_argument("--compare_trials", type=str, default="", help="Comma-separated trials to compare (e.g. 0,1,2,3)")
     parser.add_argument("--swap_streams", action="store_true", help="Swap A and B streams so Ground Truth is Stream B")
@@ -282,18 +295,22 @@ if __name__ == "__main__":
                 speed_factor=args.speed_factor,
                 window_sec=args.window_sec,
                 step_sec=args.step_sec,
+                decision_alpha=args.decision_alpha,
+                n_confirm=args.n_confirm,
                 verbose=True
             )
             results_summary.append(res)
 
     if len(results_summary) > 1:
-        print("\n" + "=" * 98)
+        print("\n" + "=" * 118)
         print("  MULTI-SUBJECT GROUND TRUTH vs REAL-TIME LIVESTREAM BENCHMARK")
-        print("=" * 98)
-        print(f"  {'Subject':<10} | {'Trial':<6} | {'Ground Truth':<14} | {'Final Lock':<12} | {'% On Ground Truth':<18} | {'Switches':<9} | {'Mean Margin (Δ)'}")
-        print("  " + "-" * 94)
+        print("=" * 118)
+        print(f"  {'Subject':<8} | {'Trial':<5} | {'Ground Truth':<12} | {'Time on GT (%)':<16} | {'Majority Win':<15} | {'Cumulative Margin Win':<23} | {'End-of-Trial'}")
+        print("  " + "-" * 114)
         for r in results_summary:
-            status_symbol = "✓" if r["final_lock"] == r["ground_truth"] else "✗"
-            print(f"  {r['subject']:<10} | {r['trial_idx']:<6} | Stream {r['ground_truth']:<7} | Stream {r['final_lock']} {status_symbol:<4} | {r['accuracy_pct']:>6.1f}% ({r['correct_steps']}/{r['total_steps']})    | {r['switches']:<9} | {r['mean_delta']:+6.2f}")
-        print("=" * 98)
+            maj_sym = "✓ MATCH" if r["majority_winner"] == r["ground_truth"] else "✗ WRONG"
+            cum_sym = "✓ MATCH" if r["cumulative_winner"] == r["ground_truth"] else "✗ WRONG"
+            fin_sym = "✓" if r["final_lock"] == r["ground_truth"] else "✗"
+            print(f"  {r['subject']:<8} | {r['trial_idx']:<5} | Stream {r['ground_truth']:<5} | {r['accuracy_pct']:>5.1f}% ({r['correct_steps']}/{r['total_steps']})   | Stream {r['majority_winner']} [{maj_sym:<7}] | Stream {r['cumulative_winner']} [{cum_sym:<7}] (Δ:{r['mean_delta']:+5.2f}) | Stream {r['final_lock']} {fin_sym}")
+        print("=" * 118)
 
