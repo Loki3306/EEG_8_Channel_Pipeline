@@ -86,3 +86,41 @@ def test_stoi_calculation():
     noise = np.random.randn(fs * 2).astype(np.float32)
     stoi_noisy = compute_stoi_intelligibility(ref, noise, fs)
     assert stoi_noisy < stoi_perfect
+
+def test_audio_steering_44100_hz():
+    """Verify DSP engine operates correctly at native 44.1 kHz CD audio quality."""
+    fs = 44100
+    dsp = AudioSteeringDSP(fs=fs, max_boost_db=9.0, max_suppress_db=18.0, tau_ms=60.0)
+    
+    # 2 seconds of synthetic speech
+    T = fs * 2
+    audio_a = np.random.randn(T).astype(np.float32) * 0.1
+    audio_b = np.random.randn(T).astype(np.float32) * 0.1
+    
+    control_times = np.array([0.5, 1.0, 1.5, 2.0])
+    control_states = ["A", "A", "B", "HOLD"]
+    control_margins = np.array([0.8, 0.9, -0.7, 0.0])
+    
+    render = dsp.render_full_trial(
+        audio_a=audio_a,
+        audio_b=audio_b,
+        control_timestamps_sec=control_times,
+        control_states=control_states,
+        control_margins=control_margins,
+        ground_truth_attended="A"
+    )
+    
+    assert render["steered_binaural"].shape == (2, T)
+    assert render["fs"] == 44100
+    
+    metrics = evaluate_audio_steering_trial(
+        audio_a=audio_a,
+        audio_b=audio_b,
+        render_dict=render,
+        ground_truth="A",
+        decisions=control_states,
+        step_sec=0.5
+    )
+    assert "delta_sir_db" in metrics
+    assert "stoi_steered" in metrics
+    assert metrics["headroom_db"] >= 0.0

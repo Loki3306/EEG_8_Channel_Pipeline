@@ -37,7 +37,7 @@ from src.audio.steering_engine import AudioSteeringDSP
 from src.audio.metrics import evaluate_audio_steering_trial
 
 # Helper: Synthesize speech-like modulated acoustic carrier if raw WAV is missing
-def synthesize_acoustic_speech(envelope_64hz: np.ndarray, target_fs: int = 16000) -> np.ndarray:
+def synthesize_acoustic_speech(envelope_64hz: np.ndarray, target_fs: int = 44100) -> np.ndarray:
     """
     Synthesizes natural-sounding speech-like acoustic audio from 64 Hz envelope
     using a multi-formant shaped noise carrier. Guarantees listening capability
@@ -46,7 +46,7 @@ def synthesize_acoustic_speech(envelope_64hz: np.ndarray, target_fs: int = 16000
     total_sec = len(envelope_64hz) / 64.0
     N = int(total_sec * target_fs)
     
-    # Upsample envelope to 16 kHz using linear interpolation
+    # Upsample envelope using linear interpolation
     t_env = np.linspace(0, total_sec, len(envelope_64hz))
     t_audio = np.linspace(0, total_sec, N)
     env_upsampled = np.interp(t_audio, t_env, envelope_64hz)
@@ -62,7 +62,6 @@ def synthesize_acoustic_speech(envelope_64hz: np.ndarray, target_fs: int = 16000
         0.2 * np.sin(2 * np.pi * 1500 * t) + # F2
         0.3 * noise                         # Fricatives / breath
     )
-    # Bandpass filter carrier into telephone / speech band
     audio = carrier * env_upsampled
     audio = audio / (np.max(np.abs(audio)) + 1e-6) * 0.4
     return audio.astype(np.float32)
@@ -74,10 +73,11 @@ def load_or_synthesize_trial_audio(
     audio_dir: Path,
     env_a: np.ndarray,
     env_b: np.ndarray,
-    target_fs: int = 16000
-) -> Tuple[np.ndarray, np.ndarray, str, str]:
+    target_fs: int = 44100
+) -> Tuple[np.ndarray, np.ndarray, int, str, str]:
     """
-    Attempts to load genuine 16 kHz raw WAV files for Stream A and Stream B.
+    Attempts to load genuine raw WAV files for Stream A and Stream B.
+    Preserves native audio sampling rate (e.g. 44,100 Hz on DTU) to prevent pitch and speed distortion.
     If files are unavailable or unmounted, seamlessly falls back to envelope-driven synthesis.
     """
     trial_key = f"trial_{trial_idx}"
@@ -99,6 +99,13 @@ def load_or_synthesize_trial_audio(
             if cands_b:
                 wav_b_path = cands_b[0]
                 
+    fs_a = None
+    fs_b = None
+    audio_a = None
+    audio_b = None
+    source_a = "Missing"
+    source_b = "Missing"
+    
     # Load A
     if wav_a_path and wav_a_path.exists():
         fs_a, raw_a = wavfile.read(str(wav_a_path))
@@ -106,9 +113,6 @@ def load_or_synthesize_trial_audio(
             raw_a = raw_a.mean(axis=-1)
         audio_a = (raw_a / (np.max(np.abs(raw_a)) + 1e-6) * 0.4).astype(np.float32)
         source_a = f"WAV ({wav_a_path.name})"
-    else:
-        audio_a = synthesize_acoustic_speech(env_a, target_fs=target_fs)
-        source_a = "Synthesized from Envelope"
         
     # Load B
     if wav_b_path and wav_b_path.exists():
@@ -117,12 +121,32 @@ def load_or_synthesize_trial_audio(
             raw_b = raw_b.mean(axis=-1)
         audio_b = (raw_b / (np.max(np.abs(raw_b)) + 1e-6) * 0.4).astype(np.float32)
         source_b = f"WAV ({wav_b_path.name})"
+        
+    # Master sampling rate
+    if fs_a is not None:
+        actual_fs = int(fs_a)
+    elif fs_b is not None:
+        actual_fs = int(fs_b)
     else:
-        audio_b = synthesize_acoustic_speech(env_b, target_fs=target_fs)
-        source_b = "Synthesized from Envelope"
+        actual_fs = target_fs
+        
+    # Fallback synthesis if audio files missing
+    if audio_a is None:
+        audio_a = synthesize_acoustic_speech(env_a, target_fs=actual_fs)
+        source_a = f"Synthesized from Envelope ({actual_fs} Hz)"
+        
+    if audio_b is None:
+        audio_b = synthesize_acoustic_speech(env_b, target_fs=actual_fs)
+        source_b = f"Synthesized from Envelope ({actual_fs} Hz)"
+        
+    # Resample B if sampling rates differ
+    if fs_b is not None and fs_b != actual_fs:
+        import scipy.signal as signal
+        gcd = np.gcd(actual_fs, fs_b)
+        audio_b = signal.resample_poly(audio_b, actual_fs // gcd, fs_b // gcd).astype(np.float32)
         
     min_len = min(len(audio_a), len(audio_b))
-    return audio_a[:min_len], audio_b[:min_len], source_a, source_b
+    return audio_a[:min_len], audio_b[:min_len], actual_fs, source_a, source_b
 
 def train_adapter_for_subject(univ_model, montage_channels, eeg_calib, ya_calib, yb_calib, window_sec, step_sec, device):
     """Calibrates the 64-parameter spatial adapter on 12 calibration trials."""
@@ -352,7 +376,9 @@ def run_single_demo_trial(
     causal_filter,
     audio_dir,
     out_dir,
-    dsp,
+    max_boost_db: float,
+    max_suppress_db: float,
+    tau_ms: float,
     device
 ):
     print(f"\n>>> Processing {target_sub} — Trial {target_trial_idx}...")
@@ -406,20 +432,30 @@ def run_single_demo_trial(
     control_margins = []
     
     for step_i, (m_val, w_eeg) in enumerate(zip(trial_margins, trial_raw_eeg)):
-        t_sec = (step_i + 1) * 0.5
+        # Causal window ending timestamp: 5.0s initial window + 0.5s step
+        t_sec = 5.0 + step_i * 0.5
         sq = sq_monitor.check_eeg_window(w_eeg)
         out = gate.update(m_val, is_artifact=not sq["is_valid"])
         control_times.append(t_sec)
         control_states.append(out["decision"])
         control_margins.append(out["smoothed_margin"])
         
-    # 4. Load or synthesize audio
-    audio_a, audio_b, src_a, src_b = load_or_synthesize_trial_audio(
-        target_sub, target_trial_idx, mapping, audio_dir, target_ya[0], target_yb[0], target_fs=dsp.fs
+    # 4. Load or synthesize audio with native sample rate preservation
+    audio_a, audio_b, actual_fs, src_a, src_b = load_or_synthesize_trial_audio(
+        target_sub, target_trial_idx, mapping, audio_dir, target_ya[0], target_yb[0], target_fs=44100
     )
-    print(f"  [AUDIO SOURCE] A: {src_a} | B: {src_b} ({len(audio_a)/dsp.fs:.1f}s)")
+    duration_sec = len(audio_a) / float(actual_fs)
+    print(f"  [AUDIO SOURCE] A: {src_a} | B: {src_b} ({duration_sec:.1f}s @ {actual_fs} Hz)")
     
-    # 5. Render full trial audio
+    # 5. Instantiate DSP engine matched exactly to audio sampling rate
+    dsp = AudioSteeringDSP(
+        fs=actual_fs,
+        max_boost_db=max_boost_db,
+        max_suppress_db=max_suppress_db,
+        tau_ms=tau_ms,
+        threshold_switch=best_hyst["threshold_switch"]
+    )
+    
     render_dict = dsp.render_full_trial(
         audio_a=audio_a,
         audio_b=audio_b,
@@ -439,7 +475,7 @@ def run_single_demo_trial(
         step_sec=0.5
     )
     
-    # 7. Save WAV files
+    # 7. Save WAV files with actual_fs (eliminates pitch & speed distortion)
     out_dir.mkdir(parents=True, exist_ok=True)
     p_steered = out_dir / f"{target_sub}_trial_{target_trial_idx}_steered.wav"
     p_mixture = out_dir / f"{target_sub}_trial_{target_trial_idx}_mixture.wav"
@@ -450,20 +486,21 @@ def run_single_demo_trial(
         pcm = np.clip(arr2d.T * 32767.0, -32768, 32767).astype(np.int16)
         wavfile.write(str(path), fs, pcm)
         
-    save_wav(p_steered, render_dict["steered_binaural"], dsp.fs)
-    save_wav(p_mixture, render_dict["raw_mixture"], dsp.fs)
-    save_wav(p_ref, render_dict["clean_attended_reference"], dsp.fs)
+    save_wav(p_steered, render_dict["steered_binaural"], actual_fs)
+    save_wav(p_mixture, render_dict["raw_mixture"], actual_fs)
+    save_wav(p_ref, render_dict["clean_attended_reference"], actual_fs)
     
-    # 8. Generate High-Res Diagnostic Plot
+    # 8. Generate High-Res Diagnostic Plot (matching 0-50s audio & EEG axes)
     p_plot = out_dir / f"{target_sub}_trial_{target_trial_idx}_plot.png"
     plt.figure(figsize=(12, 8))
     
-    t_audio = np.linspace(0, len(audio_a) / dsp.fs, len(audio_a))
+    t_audio = np.linspace(0, duration_sec, len(audio_a))
     
     # Subplot 1: Raw speech waveforms
     plt.subplot(3, 1, 1)
     plt.plot(t_audio, audio_a, color="#38bdf8", alpha=0.7, label="Stream A (Attended Talker)")
     plt.plot(t_audio, -audio_b, color="#f43f5e", alpha=0.5, label="Stream B (Unattended Talker)")
+    plt.xlim(0, duration_sec)
     plt.title(f"Acoustic Speech Signals ({target_sub} — Trial {target_trial_idx})", fontsize=11, fontweight="bold")
     plt.ylabel("Amplitude")
     plt.legend(loc="upper right")
@@ -474,6 +511,7 @@ def run_single_demo_trial(
     plt.plot(t_audio, render_dict["gain_db_a"], color="#10b981", linewidth=2.0, label="Stream A Gain (dB)")
     plt.plot(t_audio, render_dict["gain_db_b"], color="#f59e0b", linewidth=1.5, linestyle="--", label="Stream B Gain (dB)")
     plt.axhline(0.0, color="gray", linestyle=":", alpha=0.5)
+    plt.xlim(0, duration_sec)
     plt.ylabel("Applied Gain (dB)")
     plt.title(f"Dynamic Steering Trajectory (Separation: {metrics['delta_sir_db']:+.1f} dB)", fontsize=11, fontweight="bold")
     plt.legend(loc="upper right")
@@ -485,6 +523,7 @@ def run_single_demo_trial(
     plt.axhline(best_hyst["threshold_switch"], color="#10b981", linestyle="--", alpha=0.6, label="Switch Threshold (+)")
     plt.axhline(-best_hyst["threshold_switch"], color="#f43f5e", linestyle="--", alpha=0.6, label="Switch Threshold (-)")
     plt.axhline(0.0, color="black", linestyle="-", alpha=0.3)
+    plt.xlim(0, duration_sec)
     plt.ylabel("Confidence Margin")
     plt.xlabel("Trial Time (seconds)")
     plt.title(f"EEG Direct Decoder Decisions (Accuracy: {metrics['decision_accuracy_pct']:.1f}% | Flips: {metrics['false_switches_per_min']:.2f}/m)", fontsize=11, fontweight="bold")
@@ -496,7 +535,7 @@ def run_single_demo_trial(
     plt.close()
     
     print(f"  [METRICS] ΔSIR: {metrics['delta_sir_db']:+.1f} dB | Contrast: {metrics['mean_contrast_db']:+.1f} dB | STOI: {metrics['stoi_steered']:.2f} | Acc: {metrics['decision_accuracy_pct']:.1f}%")
-    print(f"  [SAVED] Audio: {p_steered.name} | Plot: {p_plot.name}")
+    print(f"  [SAVED] Audio: {p_steered.name} ({duration_sec:.1f}s) | Plot: {p_plot.name}")
     
     return {
         "subject": target_sub,
@@ -535,13 +574,6 @@ def main():
     mapping, envelopes = get_mapping_data("gammatone")
     all_paths = subject_files()
     
-    dsp = AudioSteeringDSP(
-        fs=16000,
-        max_boost_db=args.max_boost,
-        max_suppress_db=args.max_suppress,
-        tau_ms=args.tau_ms,
-        threshold_switch=0.35
-    )
     causal_filter = StreamingCausalEEGFilter(fs=FS, lowcut=1.0, highcut=6.0, order=2, n_channels=len(montage_channels))
     
     # Determine which trials to run
@@ -601,7 +633,9 @@ def main():
             causal_filter=causal_filter,
             audio_dir=audio_dir,
             out_dir=out_dir,
-            dsp=dsp,
+            max_boost_db=args.max_boost,
+            max_suppress_db=args.max_suppress,
+            tau_ms=args.tau_ms,
             device=device
         )
         demo_results.append(res)
@@ -617,9 +651,10 @@ def main():
         
         print("\n" + "=" * 115)
         print("  DEMO EXECUTION COMPLETE!")
-        print(f"  All WAV files, PNG timeline plots, and HTML5 dashboard saved to: {out_dir}")
-        print("  To play interactive audio directly in Kaggle, run:")
-        print("    from IPython.display import HTML; HTML(open('/kaggle/working/audio_demo_output/aad_audio_steering_dashboard.html').read())")
+        print(f"  All WAV files and PNG timeline plots saved to: {out_dir}")
+        print("  To listen immediately in your Kaggle notebook, run:")
+        print("    import IPython.display as ipd")
+        print(f"    ipd.Audio('{out_dir}/S8_trial_15_steered.wav')")
         print("=" * 115)
 
 if __name__ == "__main__":
