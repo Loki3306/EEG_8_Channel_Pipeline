@@ -254,6 +254,7 @@ def main():
     correct_evals = 0
     state_counts = {"A": 0, "B": 0, "HOLD": 0}
     steered_audio_chunks = []
+    recorded_margins = []
     
     for t_idx in range(n_ticks):
         # Slice hardware chunks
@@ -297,6 +298,7 @@ def main():
                 torch.cuda.synchronize()
             t_gpu_ms = (time.perf_counter() - t_gpu0) * 1e3
             total_gpu_ms += t_gpu_ms
+            recorded_margins.append(s_t)
             
             # Signal Quality Check & Hysteresis Decision
             sq = sq_monitor.check_eeg_window(frame.eeg_window.T)
@@ -336,18 +338,47 @@ def main():
     total_compute_sec = ((total_eeg_us + total_aud_a_us + total_aud_b_us) / 1e6) + (total_gpu_ms / 1e3)
     overall_rtf = total_compute_sec / total_stream_sec
     
+    # Compute Multi-Scale Accuracies across Trial
+    margins_arr = np.array(recorded_margins) if recorded_margins else np.array([])
+    acc_5s = (correct_evals / max(1, total_evals)) * 100.0
+    
+    step_10s = int(round(10.0 / args.hop_sec))
+    corr_10s, total_10s = 0, 0
+    for i in range(0, len(margins_arr) - step_10s + 1, step_10s):
+        if np.sum(margins_arr[i:i + step_10s]) > 0:
+            corr_10s += 1
+        total_10s += 1
+    acc_10s = (corr_10s / max(1, total_10s)) * 100.0 if total_10s > 0 else 0.0
+    
+    step_20s = int(round(20.0 / args.hop_sec))
+    corr_20s, total_20s = 0, 0
+    for i in range(0, len(margins_arr) - step_20s + 1, step_20s):
+        if np.sum(margins_arr[i:i + step_20s]) > 0:
+            corr_20s += 1
+        total_20s += 1
+    acc_20s = (corr_20s / max(1, total_20s)) * 100.0 if total_20s > 0 else 0.0
+    
+    cum_margin = float(np.sum(margins_arr)) if len(margins_arr) > 0 else 0.0
+    mean_margin = float(np.mean(margins_arr)) if len(margins_arr) > 0 else 0.0
+    trial_winner = "Talker A (Attended - CORRECT)" if cum_margin > 0 else "Talker B (Unattended - WRONG)"
+    
     print("\n" + "=" * 115)
     print("  DUAL-STREAM REAL-TIME STREAMING BENCHMARK RESULTS")
     print(f"  Total Simulated Audio/EEG Streamed: {total_stream_sec:.1f} seconds ({n_ticks} hardware packets)")
     print(f"  EEG Preprocessing CPU Load:         {eeg_cpu_pct:6.2f}% of single CPU core")
     print(f"  Audio A Gammatone CPU Load:         {aud_a_cpu_pct:6.2f}% of single CPU core")
     print(f"  Audio B Gammatone CPU Load:         {aud_b_cpu_pct:6.2f}% of single CPU core")
-    print(f"  Combined Total DSP CPU Load:        {total_dsp_pct:6.2f}% of single CPU core")
+    print(f"  Combined Total DSP CPU Load:        {total_dsp_pct:6.2f}% of single CPU core (Headroom: {100.0 - total_dsp_pct:.1f}% idle)")
     print(f"  Average GPU CA-TCN Latency:         {avg_gpu_latency:6.2f} milliseconds per evaluation")
     print(f"  Total Real-Time Factor (RTF):       {overall_rtf:6.4f}x (Budget < 1.0x, Speedup = {1.0/max(1e-6, overall_rtf):.1f}x)")
-    print(f"  Decision Distribution:              A={state_counts.get('A', 0)}, B={state_counts.get('B', 0)}, HOLD={state_counts.get('HOLD', 0)}")
-    if total_evals > 0:
-        print(f"  Raw Window Decision Accuracy:       {(correct_evals/total_evals)*100.0:.1f}% ({correct_evals}/{total_evals})")
+    print("-" * 115)
+    print(f"  ATTENTION DECODING TELEMETRY (Subject {args.subject} | Trial {args.trial}):")
+    print(f"    - Instantaneous 5.0s Window 2AFC: {acc_5s:5.1f}% ({correct_evals}/{total_evals} windows)")
+    print(f"    - Integrated 10.0s Window 2AFC:   {acc_10s:5.1f}% ({corr_10s}/{total_10s} windows)")
+    print(f"    - Integrated 20.0s Window 2AFC:   {acc_20s:5.1f}% ({corr_20s}/{total_20s} windows)")
+    print(f"    - Cumulative Neural Margin:       {cum_margin:+7.2f} (Mean: {mean_margin:+0.3f})")
+    print(f"    - Full Trial Winner Decision:     {trial_winner}")
+    print(f"    - Acoustic Gating Distribution:   A={state_counts.get('A', 0)} frames, B={state_counts.get('B', 0)} frames, HOLD={state_counts.get('HOLD', 0)} frames")
     print("=" * 115)
     
     if args.save_audio and steered_audio_chunks:
