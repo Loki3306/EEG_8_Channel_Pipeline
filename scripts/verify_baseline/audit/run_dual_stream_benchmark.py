@@ -228,7 +228,10 @@ def run_trial_streaming(
             if raw_margin > 0:
                 correct_evals += 1
                 
-            state, smooth_margin, is_switching = gate.step(raw_margin)
+            gate_out = gate.update(raw_margin)
+            state = gate_out["decision"]
+            smooth_margin = gate_out["smoothed_margin"]
+            is_switching = gate_out["switched"]
             state_counts[state] += 1
             
             if args.save_audio and verbose:
@@ -243,7 +246,8 @@ def run_trial_streaming(
                 print(f" {cur_sec:5.1f}s | Block {t_idx:<6} | {frame.dsp_timing_us.get('eeg_us', 0.0):10.1f} us | {frame.dsp_timing_us.get('audio_a_us', 0.0):8.1f} us | {frame.dsp_timing_us.get('audio_b_us', 0.0):8.1f} us | {gpu_lat_ms:10.2f} ms | s={smooth_margin:+6.2f}   | {state:<7} | {window_rtf:6.3f}x")
         else:
             if args.save_audio and verbose:
-                out_chunk = steering_dsp.process_frame(chunk_a, chunk_b, gate.current_state, gate.smoothed_margin)
+                decision_label = "A" if "A" in gate.current_state else ("B" if "B" in gate.current_state else "HOLD")
+                out_chunk = steering_dsp.process_frame(chunk_a, chunk_b, decision_label, gate.smoothed_margin)
                 steered_audio_chunks.append(out_chunk)
 
     total_stream_sec = n_ticks * (eeg_block_samples / raw_sub.fs)

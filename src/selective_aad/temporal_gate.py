@@ -109,6 +109,11 @@ class StickyHysteresisGate:
         self.gain_a = 0.5
         self.gain_b = 0.5
 
+    def step(self, raw_margin: float, is_artifact: bool = False) -> Tuple[str, float, bool]:
+        """Convenience alias for update() returning (decision, smoothed_margin, switched)."""
+        out = self.update(raw_margin, is_artifact=is_artifact)
+        return out["decision"], out["smoothed_margin"], out["switched"]
+
     def update(self, raw_margin: float, is_artifact: bool = False) -> Dict[str, Any]:
         """
         Processes single streaming control step (e.g. at 2 Hz).
