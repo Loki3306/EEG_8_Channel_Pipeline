@@ -36,32 +36,42 @@ While earlier selective gating (Method F) achieved 77.5% selective accuracy, it 
 - **Tiny GRU (67.7% Acc, 2.55 F.Sw/m):** With only 12 calibration trials (~12 minutes of EEG), recurrent weights overfit to transient baseline drift, causing boundary jitter.
 - **Sticky Pro (68.6% Acc, 2.14 F.Sw/m):** By accumulating evidence on raw instantaneous margins ($\max(-s_t, -m_t)$), single-step EEG noise spikes bypassed the temporal filter and triggered premature, unintended speaker switches.
 
+> [!NOTE]
+> **Statistical Clarification on Selective Accuracy:**
+> Selective accuracy is strictly conditional on the system accepting a decision interval (excluding intervals spent in HOLD). A selective accuracy of 74% does *not* imply 26% of all operational intervals are incorrect, because coverage is partial. The key milestone is achieving 74.0% selective accuracy while collapsing neutral HOLD from 39.9% down to 6.0%, yielding ~70% active directional amplification with ~1 false switch/min.
+
 ---
 
-## Roadmap: How to Push Accuracy Beyond 74.0%
+## Research Roadmap: Improving Raw Neural Evidence
 
-While 74.0% with 1.06 switches/min and 70% active coverage is a solid baseline, higher accuracy is necessary for a premium product. 
+The control gate is no longer the primary bottleneck. The current ceiling is the quality and SNR of the **5.0-second raw neural margin itself**.
 
-The gating mechanism has successfully eliminated the control-layer penalty. The remaining bottleneck is the **raw signal-to-noise ratio (SNR) of the 5.0-second neural margin itself**.
+The research roadmap is prioritized as follows:
 
-Here are the 4 concrete scientific paths to push accuracy to **80%+ at 5.0 seconds**:
+### Phase 1 (Immediate Highest Value): Subject-Specific 8×8 Spatial Adapter
+- **Hypothesis:** 8 near-ear electrodes sit on variable individual skull geometries, ear-canal shapes, and impedances. A subject-specific linear spatial alignment matrix $W \in \mathbb{R}^{8 \times 8}$ (64 parameters) can re-weight and rotate the physical electrodes into the canonical feature space of the pre-trained CA-TCN.
+- **Architecture:**
+  ```text
+  Raw 8-ch EEG ──► W ∈ R^(8×8) ──► Adapted 8-ch EEG ──► Frozen CA-TCN ──► 5s Margin ──► Sticky Gate
+  ```
+- **Constraint:** Train **strictly $W$** on the 12 calibration trials. All 5.0s CA-TCN weights, temporal convolutions, and audio pathways remain 100% frozen.
+- **Experimental Evaluation:**
+  1. `Zero-shot Raw CA-TCN (5s)`
+  2. `Adapted 8×8 Raw CA-TCN (5s)` (Measure whether raw margin accuracy genuinely improves)
+  3. `Adapted 8×8 + Sticky Hysteresis Gate`
 
-### Path 1: Dual-Scale Multi-Window Fusion (Anchor-Gated Decision)
-- **The Concept:** From our window sweep, we know that a 10s window achieves **82.7%** and a 20s window achieves **89.3%**.
-- **The Upgrade:** Run a fast 5.0s window at 2 Hz for low latency, combined with a slow 10.0s "Anchor" window evaluated at 0.5 Hz.
-- **The Rule:** If the 5.0s window suggests a speaker switch, but the 10.0s anchor disagrees, the switch is rejected. This injects the 83% accuracy of the 10s window into the 5s responsive stream.
+### Phase 2: Controlled Evaluation of 5s + 10s Multi-Scale Anchor
+- **Hypothesis:** Can a slower 10.0s window prevent false switches without making intentional speaker switches unacceptably sluggish?
+- **Policies to Evaluate:**
+  1. `5s only` (baseline responsiveness)
+  2. `10s only` (anchor upper bound)
+  3. `5s + 10s agreement` (conservative switching)
+  4. `5s controls, 10s confirms switches` (product candidate)
+  5. `5s controls, 10s vetoes low-confidence switches` (product candidate)
+- **Metrics:** False switches/min, Time-to-switch (latency to legitimate switch), correct-attention time, HOLD/maintenance time.
 
-### Path 2: Subject-Specific 1×1 Spatial Adapter (EEG Geometry Alignment)
-- **The Concept:** 8 near-ear electrodes sit at slightly different skull positions on each subject, causing phase and amplitude distortion across channels.
-- **The Upgrade:** Freeze the CA-TCN universal backbone, but calibrate a lightweight linear $8 \times 8$ spatial projection matrix $W_{\text{spatial}}$ on the 12 calibration trials. This aligns the subject's physical skull montage to the canonical feature space before temporal convolutions.
-
-### Path 3: Speech Representation Upgrade (Beyond Gammatone Envelopes)
-- **The Concept:** Gammatone envelopes only capture gross acoustic energy modulations; they discard phonetic, pitch, and voice identity features.
-- **The Upgrade:** Feed multi-band acoustic representations or pre-trained speech features (e.g. self-supervised representations from WavLM/Whisper encoder) into the CA-TCN audio stream.
-
-### Path 4: Calibrated Temperature-Adaptive Hysteresis
-- **The Concept:** Currently, hysteresis thresholds ($\theta_{\text{switch}}, \theta_{\text{maintain}}$) are calibrated on a coarse grid.
-- **The Upgrade:** Dynamically scale the hysteresis barriers inversely proportional to the calibrated temperature $T_{\text{calib}}$. Low-SNR subjects automatically receive wider hysteresis deadbands, preserving accuracy.
+### Phase 3 (Postponed): Multi-Band Speech Representation
+- Postponed until experimental evidence proves the current single-envelope representation is the active limiting factor. The existing benchmark demonstrates that temporal integration and spatial subject alignment are the primary drivers of performance.
 
 ---
 
