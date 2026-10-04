@@ -72,11 +72,12 @@ def load_raw_dtu_file(mat_path: Union[str, Path]) -> RawDTUSubjectData:
     chan_names: List[str] = []
     if hasattr(data, "dim") and hasattr(data.dim[0, 0], "chan") and hasattr(data.dim[0, 0].chan[0, 0], "eeg"):
         chan_arr = data.dim[0, 0].chan[0, 0].eeg[0, 0]
-        for idx in range(chan_arr.shape[1]):
-            val = _unwrap_mat_singleton(chan_arr[0, idx])
-            chan_names.append(str(val).upper())
+        for item in chan_arr.ravel():
+            while isinstance(item, np.ndarray) and item.size == 1:
+                item = item.ravel()[0]
+            chan_names.append(str(item).upper())
     elif hasattr(data, "label"):
-        for l in data.label:
+        for l in data.label.ravel():
             chan_names.append(str(_unwrap_mat_singleton(l)).upper())
     else:
         # Fallback standard BioSemi 64 scalp + 8 EXG + Status
@@ -87,19 +88,23 @@ def load_raw_dtu_file(mat_path: Union[str, Path]) -> RawDTUSubjectData:
     
     # Scalp electrodes: first 64 scalp channels (FP1 to O2)
     scalp_indices = [idx for idx, name in enumerate(chan_names) if not name.startswith("EXG") and name != "STATUS"][:64]
+    if len(scalp_indices) < 64:
+        scalp_indices = list(range(64))
     
     # 3. Continuous Multi-channel Signal
     eeg_obj = data.eeg
-    if isinstance(eeg_obj, np.ndarray) and eeg_obj.dtype == object and eeg_obj.size > 1:
+    if isinstance(eeg_obj, np.ndarray) and eeg_obj.dtype == object and eeg_obj.size == 1:
+        raw_signal = eeg_obj[0, 0].astype(np.float64)
+    elif isinstance(eeg_obj, np.ndarray) and eeg_obj.dtype == object and eeg_obj.size > 1:
         # Concatenate trial chunks if segmented
         chunks = [eeg_obj[0, i] for i in range(eeg_obj.shape[1])]
-        raw_signal = np.concatenate(chunks, axis=0)
+        raw_signal = np.concatenate(chunks, axis=0).astype(np.float64)
     elif isinstance(eeg_obj, np.ndarray) and eeg_obj.dtype != object:
         raw_signal = eeg_obj.astype(np.float64)
     else:
-        raw_signal = eeg_obj[0, 0].astype(np.float64)
+        raw_signal = np.asarray(eeg_obj, dtype=np.float64)
         
-    if raw_signal.shape[1] < len(scalp_indices):
+    if raw_signal.shape[1] < len(scalp_indices) and raw_signal.shape[0] >= 64:
         raw_signal = raw_signal.T
         
     # 4. Compute Bipolar EOG
@@ -122,32 +127,70 @@ def load_raw_dtu_file(mat_path: Union[str, Path]) -> RawDTUSubjectData:
         heog = np.zeros(n_samples, dtype=np.float64)
         
     # 5. Extract Trial Timing & Metadata
+    subject_id = mat_path.stem.split("_")[0]
+    mapping = None
+    mapping_candidates = [
+        Path(__file__).resolve().parents[2] / "scripts" / "verify_baseline" / "data" / "audio_mapping.json",
+        Path("/kaggle/working/ISEF_Project/scripts/verify_baseline/data/audio_mapping.json"),
+        Path("scripts/verify_baseline/data/audio_mapping.json"),
+        Path("data/audio_mapping.json"),
+    ]
+    for mc in mapping_candidates:
+        if mc.exists():
+            try:
+                import json
+                with open(mc, "r", encoding="utf-8") as f:
+                    mapping = json.load(f)
+                break
+            except Exception:
+                pass
+
+    # In DTU ActiveTwo raw recordings, triggers are saved in data.event.eeg
+    # 140 triggers define 70 intervals:
+    # Interval 0: Pre-stimulus baseline (trigger 254)
+    # Intervals with single-talker presentation (no competing speaker) are omitted in preprocessed DTU dataset
+    # Exactly 60 competing-talker trials are retained:
+    COMPETING_RAW_INTERVALS = [
+        1, 2, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 15, 16, 17, 18, 19, 20, 21, 22,
+        23, 24, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 41, 42,
+        43, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58, 61, 63, 65,
+        66, 67, 68, 69
+    ]
+
     trials: List[RawDTUTrialMetadata] = []
-    if expinfo is not None and hasattr(data, "event") and hasattr(data.event[0, 0], "eeg"):
+    if hasattr(data, "event") and hasattr(data.event[0, 0], "eeg"):
         event_obj = data.event[0, 0].eeg[0, 0]
         sample_indices = event_obj.sample.ravel() if hasattr(event_obj, "sample") else []
         values = event_obj.value.ravel() if hasattr(event_obj, "value") else []
         
-        attend_mf = expinfo.attend_mf.ravel() if hasattr(expinfo, "attend_mf") else []
-        wav_male = [str(_unwrap_mat_singleton(w)) for w in expinfo.wavfile_male.ravel()] if hasattr(expinfo, "wavfile_male") else []
-        wav_female = [str(_unwrap_mat_singleton(w)) for w in expinfo.wavfile_female.ravel()] if hasattr(expinfo, "wavfile_female") else []
-        
-        # In DTU, every 2 triggers corresponds to 1 audio trial
-        n_trials = min(len(attend_mf), len(sample_indices) // 2)
-        for t_idx in range(n_trials):
-            start_s = int(sample_indices[2 * t_idx])
-            if 2 * t_idx + 1 < len(sample_indices):
-                end_s = int(sample_indices[2 * t_idx + 1])
+        n_pairs = len(sample_indices) // 2
+        if n_pairs >= 70:
+            target_intervals = COMPETING_RAW_INTERVALS
+        else:
+            target_intervals = list(range(n_pairs))
+            
+        for t_idx, r_idx in enumerate(target_intervals):
+            start_s = int(sample_indices[2 * r_idx])
+            if 2 * r_idx + 1 < len(sample_indices):
+                end_s = int(sample_indices[2 * r_idx + 1])
             else:
-                end_s = min(n_samples, start_s + int(138.0 * fs))
+                end_s = min(n_samples, start_s + int(50.0 * fs))
                 
-            att_code = int(_unwrap_mat_singleton(attend_mf[t_idx]))
-            att_str = "male" if att_code == 1 else "female"
+            trig = int(_unwrap_mat_singleton(values[2 * r_idx])) if 2 * r_idx < len(values) else 0
             
-            m_wav = wav_male[t_idx] if t_idx < len(wav_male) else ""
-            f_wav = wav_female[t_idx] if t_idx < len(wav_female) else ""
-            trig = int(_unwrap_mat_singleton(values[2 * t_idx])) if 2 * t_idx < len(values) else 0
-            
+            # Lookup speaker attendance & wav filenames
+            m_wav = ""
+            f_wav = ""
+            att_str = "female" # default
+            if mapping and subject_id in mapping:
+                t_key = f"trial_{t_idx}"
+                t_info = mapping[subject_id].get(t_key, {})
+                wav_a = t_info.get("wavA", {}).get("filename", "")
+                wav_b = t_info.get("wavB", {}).get("filename", "")
+                m_wav = wav_a if "aske" in wav_a.lower() else wav_b
+                f_wav = wav_a if "marianne" in wav_a.lower() else wav_b
+                att_str = "female" if "marianne" in wav_a.lower() else "male"
+                
             trials.append(RawDTUTrialMetadata(
                 trial_index=t_idx,
                 start_sample=start_s,
@@ -158,7 +201,6 @@ def load_raw_dtu_file(mat_path: Union[str, Path]) -> RawDTUSubjectData:
                 trigger_code=trig
             ))
             
-    subject_id = mat_path.stem.split("_")[0]
     return RawDTUSubjectData(
         subject_id=subject_id,
         fs=fs,
