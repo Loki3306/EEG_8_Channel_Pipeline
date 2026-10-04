@@ -158,8 +158,9 @@ def run_trial_streaming(
     raw_veog = raw_sub.veog_raw[start_s:end_s]
     raw_heog = raw_sub.heog_raw[start_s:end_s]
     
-    eeg_block_samples = 16 # 31.25 ms @ 512 Hz
-    audio_block_samples = int(round(audio_fs * (eeg_block_samples / raw_sub.fs))) # ~1378 samples
+    block_sec = getattr(args, 'block_sec', 0.03125)
+    eeg_block_samples = max(1, int(round(raw_sub.fs * block_sec)))
+    audio_block_samples = max(1, int(round(audio_fs * (eeg_block_samples / raw_sub.fs))))
     
     n_ticks = min(
         len(raw_scalp) // eeg_block_samples,

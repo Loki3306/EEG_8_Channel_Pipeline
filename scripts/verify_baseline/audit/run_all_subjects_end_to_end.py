@@ -468,7 +468,8 @@ def run_full_cohort_pipeline(args):
             power_exponent=0.3,
             max_seconds=50.0,
             save_audio=False,
-            device=str(device)
+            device=str(device),
+            block_sec=args.block_sec
         )
         all_results = []
         n_tot = len(trials_to_run)
@@ -619,9 +620,10 @@ if __name__ == "__main__":
     parser.add_argument("--hop_sec", type=float, default=0.5, help="Streaming hop cadence in seconds")
     parser.add_argument("--calib_trials", type=int, default=3, help="Number of calibration trials (default: 3)")
     parser.add_argument("--stream_trials", type=str, default="3-59", help="Trials to stream ('all', '3-59', or comma-separated)")
-    parser.add_argument("--epochs_loso", type=int, default=10, help="Training epochs for LOSO backbone if missing")
+    parser.add_argument("--epochs_loso", type=int, default=8, help="Training epochs for LOSO backbone if missing (default: 8)")
     parser.add_argument("--epochs_calib", type=int, default=15, help="Training epochs for spatial calibration")
-    parser.add_argument("--batch_size", type=int, default=128, help="Batch size")
+    parser.add_argument("--batch_size", type=int, default=256, help="Batch size for training (default: 256 for fast GPU compute)")
+    parser.add_argument("--block_sec", type=float, default=0.03125, help="Streaming simulation block size in seconds (0.03125 for 31.25ms; 0.25 for 4x faster streaming)")
     parser.add_argument("--lr_calib", type=float, default=2e-4, help="Learning rate for spatial calibration")
     parser.add_argument("--skip_pretrain", action="store_true", help="Skip subject if LOSO backbone checkpoint is missing")
     parser.add_argument("--force_retrain", action="store_true", help="Force retrain models even if checkpoints exist")

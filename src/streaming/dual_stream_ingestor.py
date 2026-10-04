@@ -157,21 +157,23 @@ class DualStreamIngestionEngine:
         n_samples_step = min(n_eeg_out, n_audio_a_out, n_audio_b_out)
         
         if n_samples_step > 0:
-            for s in range(n_samples_step):
-                # Shift and append EEG
-                self.eeg_buffer[:-1] = self.eeg_buffer[1:]
-                self.eeg_buffer[-1] = eeg_out_64[s]
+            if n_samples_step >= self.window_samples:
+                self.eeg_buffer[:] = eeg_out_64[-self.window_samples:]
+                self.audio_a_buffer[:] = audio_a_out_64[-self.window_samples:]
+                self.audio_b_buffer[:] = audio_b_out_64[-self.window_samples:]
+                self.buffered_samples = self.window_samples
+            else:
+                self.eeg_buffer[:-n_samples_step] = self.eeg_buffer[n_samples_step:]
+                self.eeg_buffer[-n_samples_step:] = eeg_out_64[:n_samples_step]
                 
-                # Shift and append Audio A
-                self.audio_a_buffer[:-1] = self.audio_a_buffer[1:]
-                self.audio_a_buffer[-1] = audio_a_out_64[s]
+                self.audio_a_buffer[:-n_samples_step] = self.audio_a_buffer[n_samples_step:]
+                self.audio_a_buffer[-n_samples_step:] = audio_a_out_64[:n_samples_step]
                 
-                # Shift and append Audio B
-                self.audio_b_buffer[:-1] = self.audio_b_buffer[1:]
-                self.audio_b_buffer[-1] = audio_b_out_64[s]
+                self.audio_b_buffer[:-n_samples_step] = self.audio_b_buffer[n_samples_step:]
+                self.audio_b_buffer[-n_samples_step:] = audio_b_out_64[:n_samples_step]
                 
-                self.buffered_samples = min(self.window_samples, self.buffered_samples + 1)
-                self.samples_since_hop += 1
+                self.buffered_samples = min(self.window_samples, self.buffered_samples + n_samples_step)
+            self.samples_since_hop += n_samples_step
                 
         # 4. Check if CA-TCN Evaluation Hop Triggered
         ready = (self.buffered_samples >= self.window_samples) and (self.samples_since_hop >= self.hop_samples)
