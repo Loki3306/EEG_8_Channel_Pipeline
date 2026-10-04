@@ -528,6 +528,7 @@ def main():
     parser.add_argument("--live_dtu", action="store_true", help="Load genuine DTU dataset and run CA-TCN model inference")
     parser.add_argument("--save_predictions", type=str, default="", help="Path to save extracted predictions (e.g. results/real_predictions.npz)")
     parser.add_argument("--predictions_file", type=str, default="", help="Path to pre-extracted predictions NPZ file")
+    parser.add_argument("--checkpoint_dir", type=str, default="/kaggle/working/loso_checkpoints", help="Path to directory containing LOSO checkpoints")
     args = parser.parse_args()
     
     print("=" * 108)
@@ -555,7 +556,7 @@ def main():
         data_source_str = "PRE_EXTRACTED_GENUINE_DTU"
     elif args.live_dtu:
         print(f"[DATA] Attempting to load genuine DTU dataset for subjects: {test_subjects}...")
-        loso_data, status = load_real_dtu_dataset(test_subjects)
+        loso_data, status = load_real_dtu_dataset(test_subjects, checkpoint_dir=args.checkpoint_dir)
         if loso_data is not None:
             data_source_str = "GENUINE_DTU_RECORDINGS"
             print(f"[DATA SUCCESS] {status}")
