@@ -81,11 +81,12 @@ def simulate_realtime_stream(
     )
     
     chunk_duration_sec = chunk_samples / fs
-    print("=" * 106)
-    print(f"  REAL-TIME CA-TCN AAD REPLAY SIMULATOR (Decoupled Loop)")
-    print(f"  Subject: {subject_id} (Trial {trial_idx}) | Ground Truth Attended: Speaker {ground_truth}")
-    print(f"  EEG Channels: {n_channels} | Rate: {fs} Hz | Window: {window_sec}s | Step: {step_sec}s | Speed: {speed_factor}x | EMA Alpha: {decision_alpha}")
-    print("=" * 106)
+    if verbose:
+        print("=" * 106)
+        print(f"  REAL-TIME CA-TCN AAD REPLAY SIMULATOR (Decoupled Loop)")
+        print(f"  Subject: {subject_id} (Trial {trial_idx}) | Ground Truth Attended: Speaker {ground_truth}")
+        print(f"  EEG Channels: {n_channels} | Rate: {fs} Hz | Window: {window_sec}s | Step: {step_sec}s | Speed: {speed_factor}x | EMA Alpha: {decision_alpha}")
+        print("=" * 106)
     
     start_wall_time = time.perf_counter()
     sim_time_sec = 0.0
@@ -175,14 +176,18 @@ def simulate_realtime_stream(
     majority_winner = ground_truth if correct_steps >= (step_count / 2) else ("B" if ground_truth == "A" else "A")
     cumulative_winner = "A" if mean_delta > 0 else ("B" if mean_delta < 0 else "UNCERTAIN")
     
-    print("=" * 106)
-    print(f"  TRIAL SIMULATION COMPLETE: Subject {subject_id} (Trial {trial_idx})")
-    print(f"  Ground Truth Attended Speaker: Stream {ground_truth}")
-    print(f"  Model Real-Time Lock Accuracy: {accuracy_pct:.1f}% ({correct_steps}/{step_count} steps on Ground Truth)")
-    print(f"  Trial Majority Winner: Stream {majority_winner} ({'✓ CORRECT' if majority_winner == ground_truth else '✗ WRONG'})")
-    print(f"  Cumulative Margin Decision: Stream {cumulative_winner} ({'✓ CORRECT' if cumulative_winner == ground_truth else '✗ WRONG'}) | Mean Margin: {mean_delta:+.2f}")
-    print(f"  Instantaneous Lock @ End (50s): Stream {stream} | Total Speaker Switches: {switches} | Latency: {mean_compute_ms:.2f} ms")
-    print("=" * 106)
+    if verbose:
+        print("=" * 106)
+        print(f"  TRIAL SIMULATION COMPLETE: Subject {subject_id} (Trial {trial_idx})")
+        print(f"  Ground Truth Attended Speaker: Stream {ground_truth}")
+        print(f"  Model Real-Time Lock Accuracy: {accuracy_pct:.1f}% ({correct_steps}/{step_count} steps on Ground Truth)")
+        print(f"  Trial Majority Winner: Stream {majority_winner} ({'✓ CORRECT' if majority_winner == ground_truth else '✗ WRONG'})")
+        print(f"  Cumulative Margin Decision: Stream {cumulative_winner} ({'✓ CORRECT' if cumulative_winner == ground_truth else '✗ WRONG'}) | Mean Margin: {mean_delta:+.2f}")
+        print(f"  Instantaneous Lock @ End (50s): Stream {stream} | Total Speaker Switches: {switches} | Latency: {mean_compute_ms:.2f} ms")
+        print("=" * 106)
+    else:
+        maj_sym = "✓ MATCH" if majority_winner == ground_truth else "✗ WRONG"
+        print(f"  [Trial {trial_idx:02d}] GT: Stream {ground_truth} | Lock Time: {accuracy_pct:>5.1f}% ({correct_steps:02d}/{step_count:02d}) | Majority: Stream {majority_winner} [{maj_sym:<7}] | Margin: {mean_delta:+5.2f} | Switches: {switches:<2} | Latency: {mean_compute_ms:4.1f}ms")
     
     return {
         "subject": subject_id,
@@ -204,6 +209,8 @@ if __name__ == "__main__":
     parser.add_argument("--subject", type=str, default="S1", help="DTU Subject name (e.g. S1, S2, S7)")
     parser.add_argument("--montage", type=str, default="near_ear_expanded", help="Electrode montage")
     parser.add_argument("--trial_idx", type=int, default=0, help="Trial index to replay")
+    parser.add_argument("--all_trials", action="store_true", help="Simulate all available trials for the subject (e.g. all 60 trials)")
+    parser.add_argument("--num_trials", type=int, default=0, help="Number of trials to simulate (e.g. 10, 20, 60)")
     parser.add_argument("--checkpoint", type=str, default="", help="Path to trained model checkpoint")
     parser.add_argument("--speed_factor", type=float, default=2.0, help="Clock speedup factor (1.0=realtime, 2.0=2x speed, 0=max)")
     parser.add_argument("--window_sec", type=float, default=5.0, help="Rolling window size in seconds")
@@ -212,6 +219,7 @@ if __name__ == "__main__":
     parser.add_argument("--n_confirm", type=int, default=3, help="Consecutive steps required to confirm a speaker switch")
     parser.add_argument("--compare_subjects", type=str, default="", help="Comma-separated subjects to compare (e.g. S1,S2,S7,S8,S15)")
     parser.add_argument("--compare_trials", type=str, default="", help="Comma-separated trials to compare (e.g. 0,1,2,3)")
+    parser.add_argument("--verbose", action="store_true", help="Force verbose 0.5s visual step meter even for multiple trials")
     parser.add_argument("--swap_streams", action="store_true", help="Swap A and B streams so Ground Truth is Stream B")
     args = parser.parse_args()
     
@@ -243,14 +251,8 @@ if __name__ == "__main__":
         subjects_to_run = [s.strip() for s in args.compare_subjects.split(",") if s.strip()]
     else:
         subjects_to_run = [args.subject]
-        
-    # Determine trials to run
-    if args.compare_trials:
-        trials_to_run = [int(t.strip()) for t in args.compare_trials.split(",") if t.strip()]
-    else:
-        trials_to_run = [args.trial_idx]
 
-    results_summary = []
+    all_subject_results = {}
 
     for sub in subjects_to_run:
         target_files = [f for f in files if f.stem == sub or f.stem.split("_")[0] == sub.split("_")[0]]
@@ -261,6 +263,24 @@ if __name__ == "__main__":
         test_exs = list(load_subject_examples(target_files[0]))
         _, YA_all, YB_all = prepare_dataset(test_exs, montage_channels, 1.0, 6.0, sub, mapping, envelopes)
         
+        # Determine trials to run for this subject
+        if args.all_trials:
+            trials_to_run = list(range(len(test_exs)))
+        elif args.num_trials > 0:
+            trials_to_run = list(range(min(args.num_trials, len(test_exs))))
+        elif args.compare_trials:
+            trials_to_run = [int(t.strip()) for t in args.compare_trials.split(",") if t.strip()]
+        else:
+            trials_to_run = [args.trial_idx]
+
+        is_verbose = args.verbose if (len(trials_to_run) > 1 or len(subjects_to_run) > 1) else True
+        if not is_verbose:
+            print("\n" + "=" * 110)
+            print(f"  RUNNING REAL-TIME REPLAY SIMULATION: Subject {sub} ({len(trials_to_run)} trials)")
+            print(f"  Window: {args.window_sec}s | Step: {args.step_sec}s | Speed: {args.speed_factor}x | EMA Alpha: {args.decision_alpha}")
+            print("=" * 110)
+
+        sub_results = []
         for t_idx in trials_to_run:
             actual_t_idx = min(t_idx, len(test_exs) - 1, len(YA_all) - 1)
             raw_eeg = test_exs[actual_t_idx].eeg[:, montage_channels].astype(np.float32)
@@ -273,7 +293,6 @@ if __name__ == "__main__":
             yb = yb[:min_len]
             
             if args.swap_streams:
-                # Candidate 1 is unattended, Candidate 2 is attended
                 feed_a = yb
                 feed_b = ya
                 gt = "B"
@@ -297,20 +316,50 @@ if __name__ == "__main__":
                 step_sec=args.step_sec,
                 decision_alpha=args.decision_alpha,
                 n_confirm=args.n_confirm,
-                verbose=True
+                verbose=is_verbose
             )
-            results_summary.append(res)
+            sub_results.append(res)
 
-    if len(results_summary) > 1:
+        all_subject_results[sub] = sub_results
+
+        # Subject Grand Summary Report
+        if len(sub_results) > 1:
+            total_t = len(sub_results)
+            maj_correct = sum(1 for r in sub_results if r["majority_winner"] == r["ground_truth"])
+            cum_correct = sum(1 for r in sub_results if r["cumulative_winner"] == r["ground_truth"])
+            mean_lock_pct = np.mean([r["accuracy_pct"] for r in sub_results])
+            mean_delta = np.mean([r["mean_delta"] for r in sub_results])
+            total_duration_min = (total_t * 50.0) / 60.0
+            total_switches = sum(r["switches"] for r in sub_results)
+            switches_per_min = total_switches / max(0.1, total_duration_min)
+            mean_lat = np.mean([r["mean_latency"] for r in sub_results])
+
+            print("\n" + "=" * 106)
+            print(f"  FULL-SUBJECT REAL-TIME LIVESTREAM BENCHMARK: Subject {sub}")
+            print(f"  Total Trials: {total_t} ({total_duration_min:.1f} minutes of continuous EEG) | Speed: {args.speed_factor}x")
+            print("=" * 106)
+            print(f"  Trial Majority Decoding Accuracy:       {maj_correct:>2d} / {total_t:<2d} ({maj_correct/total_t*100.0:5.1f}%)")
+            print(f"  Cumulative Margin Decoding Accuracy:    {cum_correct:>2d} / {total_t:<2d} ({cum_correct/total_t*100.0:5.1f}%)")
+            print(f"  Mean Time Locked on Ground Truth:       {mean_lock_pct:5.1f}%")
+            print(f"  Grand Mean Neural Margin (Δ_A - Δ_B):   {mean_delta:+5.2f}")
+            print(f"  Switching Stability:                    {switches_per_min:5.2f} switches/min ({total_switches} total)")
+            print(f"  Mean BCI Compute Latency:               {mean_lat:5.2f} ms")
+            print("=" * 106)
+
+    # Multi-Subject Overall Table
+    total_runs = sum(len(res) for res in all_subject_results.values())
+    if len(subjects_to_run) > 1 and total_runs > len(subjects_to_run):
         print("\n" + "=" * 118)
-        print("  MULTI-SUBJECT GROUND TRUTH vs REAL-TIME LIVESTREAM BENCHMARK")
+        print("  MULTI-SUBJECT GRAND SUMMARY BENCHMARK")
         print("=" * 118)
-        print(f"  {'Subject':<8} | {'Trial':<5} | {'Ground Truth':<12} | {'Time on GT (%)':<16} | {'Majority Win':<15} | {'Cumulative Margin Win':<23} | {'End-of-Trial'}")
+        print(f"  {'Subject':<8} | {'Trials':<6} | {'Majority Win Acc':<18} | {'Cumulative Win Acc':<20} | {'Mean Time on GT':<17} | {'Mean Margin'}")
         print("  " + "-" * 114)
-        for r in results_summary:
-            maj_sym = "✓ MATCH" if r["majority_winner"] == r["ground_truth"] else "✗ WRONG"
-            cum_sym = "✓ MATCH" if r["cumulative_winner"] == r["ground_truth"] else "✗ WRONG"
-            fin_sym = "✓" if r["final_lock"] == r["ground_truth"] else "✗"
-            print(f"  {r['subject']:<8} | {r['trial_idx']:<5} | Stream {r['ground_truth']:<5} | {r['accuracy_pct']:>5.1f}% ({r['correct_steps']}/{r['total_steps']})   | Stream {r['majority_winner']} [{maj_sym:<7}] | Stream {r['cumulative_winner']} [{cum_sym:<7}] (Δ:{r['mean_delta']:+5.2f}) | Stream {r['final_lock']} {fin_sym}")
+        for sub, res_list in all_subject_results.items():
+            t_cnt = len(res_list)
+            m_acc = sum(1 for r in res_list if r["majority_winner"] == r["ground_truth"]) / max(1, t_cnt) * 100.0
+            c_acc = sum(1 for r in res_list if r["cumulative_winner"] == r["ground_truth"]) / max(1, t_cnt) * 100.0
+            l_time = np.mean([r["accuracy_pct"] for r in res_list])
+            m_del = np.mean([r["mean_delta"] for r in res_list])
+            print(f"  {sub:<8} | {t_cnt:<6} | {m_acc:>15.1f}%    | {c_acc:>17.1f}%     | {l_time:>14.1f}%   | {m_del:+6.2f}")
         print("=" * 118)
 

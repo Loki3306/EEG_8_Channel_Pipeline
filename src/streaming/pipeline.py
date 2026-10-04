@@ -134,6 +134,12 @@ class StreamingAADPipeline:
         """Runs single-window inference from current ring buffer snapshot."""
         eeg_win, a_win, b_win = self.ring_buffer.snapshot()
         
+        # Causal window-level standardization (matching the N(0, 1) training distribution)
+        # Slicing axis=-1 (time) preserves inter-channel relative amplitude ratios (Rule 1)
+        eeg_win = (eeg_win - np.mean(eeg_win, axis=-1, keepdims=True)) / (np.std(eeg_win, axis=-1, keepdims=True) + 1e-8)
+        a_win = (a_win - np.mean(a_win, axis=-1, keepdims=True)) / (np.std(a_win, axis=-1, keepdims=True) + 1e-8)
+        b_win = (b_win - np.mean(b_win, axis=-1, keepdims=True)) / (np.std(b_win, axis=-1, keepdims=True) + 1e-8)
+        
         # Forward pass through model
         inf_result = self.engine.predict(eeg_win, a_win, b_win)
         raw_delta = inf_result["delta"]
