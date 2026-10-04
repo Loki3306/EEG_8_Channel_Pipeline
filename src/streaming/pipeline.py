@@ -8,6 +8,7 @@ from .causal_envelope import StreamingCausalEnvelopeExtractor
 from .circular_buffer import SynchronizedRingBuffer
 from ..deployment.engine import StreamingCATCNEngine
 from ..deployment.decision_smoother import EMAHysteresisDecisionLayer
+from ..selective_aad.streaming_gate import SelectiveStreamingGate
 
 class StreamingAADPipeline:
     """
@@ -34,6 +35,8 @@ class StreamingAADPipeline:
         decision_threshold: float = 0.25,
         n_confirm: int = 2,
         boost_db: float = 6.0,
+        decision_layer: Optional[Any] = None,
+        use_selective_gate: bool = True,
     ):
         self.fs = fs
         self.audio_fs = audio_fs
@@ -62,10 +65,21 @@ class StreamingAADPipeline:
             model=model, mode=engine_mode, device="cpu", dummy_window_samples=self.window_samples
         )
         
-        # 4. Temporal Decision Smoother
-        self.decision_layer = EMAHysteresisDecisionLayer(
-            alpha=decision_alpha, threshold=decision_threshold, n_confirm=n_confirm, boost_db=boost_db
-        )
+        # 4. Temporal Decision Smoother / Selective AAD Layer
+        if decision_layer is not None:
+            self.decision_layer = decision_layer
+        elif use_selective_gate:
+            self.decision_layer = SelectiveStreamingGate(
+                alpha=decision_alpha,
+                threshold_switch=decision_threshold,
+                threshold_maintain=decision_threshold * 0.4,
+                n_confirm=n_confirm,
+                boost_db=boost_db
+            )
+        else:
+            self.decision_layer = EMAHysteresisDecisionLayer(
+                alpha=decision_alpha, threshold=decision_threshold, n_confirm=n_confirm, boost_db=boost_db
+            )
         
         # Internal step bookkeeping
         self.samples_since_last_step = 0
@@ -154,7 +168,7 @@ class StreamingAADPipeline:
             "logit_a": inf_result["logit_a"],
             "logit_b": inf_result["logit_b"],
             "compute_ms": inf_result["compute_ms"],
-            "smoothed_score": decision["smoothed_score"],
+            "smoothed_score": decision.get("smoothed_score", decision.get("smoothed_margin", 0.0)),
             "attended_stream": decision["attended_stream"],
             "confidence": decision["confidence"],
             "gain_a": decision["gain_a"],
