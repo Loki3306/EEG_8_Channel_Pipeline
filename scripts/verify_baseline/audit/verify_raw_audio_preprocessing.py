@@ -10,6 +10,7 @@ import sys
 import json
 import time
 from pathlib import Path
+from typing import Optional, List, Dict, Tuple
 import numpy as np
 import scipy.io as sio
 from scipy.io import wavfile

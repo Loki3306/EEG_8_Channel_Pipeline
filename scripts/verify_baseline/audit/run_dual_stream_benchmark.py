@@ -29,8 +29,9 @@ if str(VERIFY_ROOT) not in sys.path:
 from src.streaming.raw_eeg_loader import load_raw_dtu_file
 from src.streaming.dual_stream_ingestor import DualStreamIngestionEngine
 from src.audio.steering_engine import AudioSteeringDSP
-from models.catcn import CATCNDirectDecoder, EEGChannelAdapter
-from baselines.sticky_gate import StickyHysteresisGate, SignalQualityMonitor
+from models.catcn import CATCNDirectDecoder
+from src.models.spatial_adapter import SpatialEEGAdapter
+from src.selective_aad.temporal_gate import StickyHysteresisGate, SignalQualityMonitor
 
 
 def resolve_candidate_path(candidates):
@@ -174,7 +175,7 @@ def main():
     
     # 3. Model Architecture & Checkpoint Setup
     print("\n[MODEL] Initializing CA-TCN Direct Decoder & 8-Channel Spatial Adapter...")
-    adapter = EEGChannelAdapter(in_channels=8, out_channels=8).to(device)
+    adapter = SpatialEEGAdapter(channels=8).to(device)
     model = CATCNDirectDecoder(eeg_channels=8, audio_channels=1, hidden_dim=64, max_lag_samples=8).to(device)
     
     ckpt_path = find_model_checkpoint(args.subject, args.checkpoint_path)
