@@ -336,6 +336,7 @@ def run_full_cohort_pipeline(args):
         trials_to_run = [int(x.strip()) for x in args.stream_trials.split(",") if x.strip()]
 
     cohort_results = []
+    completed_subs = set()
     cohort_csv_path = out_dir / "grand_cohort_summary.csv"
     
     # Prepare CSV Header
@@ -348,11 +349,42 @@ def run_full_cohort_pipeline(args):
     if not cohort_csv_path.exists():
         with open(cohort_csv_path, "w", encoding="utf-8") as f:
             f.write(",".join(csv_header) + "\n")
+    else:
+        # Load previously completed subjects to support resume
+        with open(cohort_csv_path, "r", encoding="utf-8") as f:
+            for line in f:
+                parts = [p.strip() for p in line.split(",")]
+                if parts and parts[0] != "subject" and len(parts) >= 14:
+                    completed_subs.add(parts[0])
+                    try:
+                        cohort_results.append({
+                            "subject": parts[0],
+                            "acc_5s": float(parts[1]),
+                            "acc_10s": float(parts[2]),
+                            "acc_20s": float(parts[3]),
+                            "majority_acc": float(parts[4]),
+                            "cum_acc": float(parts[5]),
+                            "mean_margin": float(parts[6]),
+                            "mean_dsp_cpu": float(parts[10]),
+                            "mean_gpu_lat": float(parts[12]),
+                            "mean_rtf": float(parts[13])
+                        })
+                    except (ValueError, IndexError):
+                        pass
+        if completed_subs:
+            print(f"  [CHECKPOINT] Found {len(completed_subs)} already-completed subject(s) in {cohort_csv_path.name}: {sorted(list(completed_subs))}")
 
     # =========================================================================
     # COHORT EXECUTION LOOP
     # =========================================================================
     for sub_idx, sub_id in enumerate(target_subs, start=1):
+        if sub_id in completed_subs and not args.force_rerun:
+            print("\n" + "#" * 115)
+            print(f"  [COHORT {sub_idx:02d}/{len(target_subs):02d}] TARGET SUBJECT {sub_id} ALREADY COMPLETED IN SUMMARY CSV")
+            print(f"  Skipping re-computation (pass --force_rerun to overwrite).")
+            print("#" * 115)
+            continue
+
         print("\n" + "#" * 115)
         print(f"  [COHORT {sub_idx:02d}/{len(target_subs):02d}] PROCESSING TARGET SUBJECT: {sub_id}")
         print("#" * 115)
@@ -384,11 +416,21 @@ def run_full_cohort_pipeline(args):
                 batch_size=args.batch_size,
                 window_sec=args.window_sec,
                 hop_sec=2.5,
+                lowcut=1.0,
+                highcut=6.0,
+                hidden_dim=64,
                 smoke_test=False,
                 save_checkpoints=True
             )
             train_loso_fold(sub_id, all_paths, montage_channels, mapping, envelopes, loso_args, device)
-            backbone_ckpt = Path("/kaggle/working/loso_checkpoints") / f"catcn_loso_{sub_id}.pt"
+            backbone_ckpt = resolve_candidate_path([
+                Path(f"/kaggle/working/loso_checkpoints/catcn_loso_{sub_id}.pt"),
+                ckpt_dir / f"catcn_loso_{sub_id}.pt",
+                Path(f"checkpoints/loso/catcn_loso_{sub_id}.pt")
+            ])
+            if backbone_ckpt is None:
+                print(f"  [ERROR] Trained backbone checkpoint for {sub_id} not found on disk.")
+                continue
 
         # STAGE 2: 3-Minute Few-Shot Adaptation
         adapted_ckpt = run_subject_adaptation(
@@ -583,6 +625,7 @@ if __name__ == "__main__":
     parser.add_argument("--lr_calib", type=float, default=2e-4, help="Learning rate for spatial calibration")
     parser.add_argument("--skip_pretrain", action="store_true", help="Skip subject if LOSO backbone checkpoint is missing")
     parser.add_argument("--force_retrain", action="store_true", help="Force retrain models even if checkpoints exist")
+    parser.add_argument("--force_rerun", action="store_true", help="Force re-running streaming even if subject already exists in summary CSV")
     parser.add_argument("--run_ablations", action="store_true", help="Run scientific anti-cheating negative controls")
     parser.add_argument("--output_dir", type=str, default="/kaggle/working/results/full_cohort", help="Output directory")
     parser.add_argument("--device", type=str, default="cuda" if torch.cuda.is_available() else "cpu", help="Compute device")
