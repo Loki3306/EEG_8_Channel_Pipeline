@@ -234,8 +234,7 @@ def run_ablation_test(args):
         print("  -> Model Training Complete.")
 
     # 3. Load Test Data for Held-out Subject
-    print(f"
-[Stage 3]: Loading Held-out Evaluation Subject: {target_sub}...")
+    print(f"\n[Stage 3]: Loading Held-out Evaluation Subject: {target_sub}...")
     causal_filter = StreamingCausalEEGFilter(fs=FS, lowcut=1.0, highcut=6.0, order=2, n_channels=len(montage_channels))
     test_exs = list(load_subject_examples(held_out_path))
     _, ya_raw, yb_raw = prepare_dataset(test_exs, montage_channels, 1.0, 6.0, target_sub, mapping, envelopes)
@@ -267,8 +266,7 @@ def run_ablation_test(args):
     ablation_results = {}
 
     # 1. BASELINE (Unaltered, Ground Truth)
-    print("
---- Running Control 0: Ground Truth Baseline ---")
+    print("\n--- Running Control 0: Ground Truth Baseline ---")
     res_base = evaluate_catcn_windows(model, eeg_all, ya_all, yb_all, windows=[5, 10, 20, 40], fs=FS, device=device)
     ablation_results["Ground Truth Baseline"] = res_base
 
