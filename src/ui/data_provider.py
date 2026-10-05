@@ -188,10 +188,8 @@ class StreamDataProvider:
                 else:
                     sig_b = sig_b[:n_audio_samples]
 
-                max_a = np.max(np.abs(sig_a)) + 1e-8
-                max_b = np.max(np.abs(sig_b)) + 1e-8
-                audio_a = (sig_a / max_a * 0.35).astype(np.float32)
-                audio_b = (sig_b / max_b * 0.35).astype(np.float32)
+                audio_a = (sig_a / max_a * 0.70).astype(np.float32)
+                audio_b = (sig_b / max_b * 0.70).astype(np.float32)
                 print(f"[DATA PROVIDER] Ingested RAW audio: {path_a.name} and {path_b.name}")
             except Exception as e:
                 print(f"[DATA PROVIDER] Error loading raw audio {path_a}, {path_b}: {e}")

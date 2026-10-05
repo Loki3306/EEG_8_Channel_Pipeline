@@ -283,21 +283,26 @@ class StreamingSimulationSession:
         self.last_gain_a_db = float(g_a_db)
         self.last_gain_b_db = float(g_b_db)
 
-        # 4. Select Audio Signal for Headphone Output
+        # 4. Select Audio Signal for Headphone Output (Stereo Binaural)
         if self.listening_mode == "steered":
-            out_audio = steered_chunk
+            out_audio = stereo_out
         elif self.listening_mode == "mixture":
-            out_audio = 0.5 * (chunk_a + chunk_b)
+            mix = 0.5 * (chunk_a + chunk_b)
+            out_audio = np.stack([mix, mix], axis=0)
         elif self.listening_mode == "speaker_a":
-            out_audio = chunk_a
+            out_audio = np.stack([chunk_a, chunk_a], axis=0)
         elif self.listening_mode == "speaker_b":
-            out_audio = chunk_b
+            out_audio = np.stack([chunk_b, chunk_b], axis=0)
         else:
-            out_audio = steered_chunk
+            out_audio = stereo_out
 
-        # Encode PCM 16-bit for low-overhead browser streaming
-        pcm_int16 = (np.clip(out_audio, -1.0, 1.0) * 32767).astype(np.int16)
-        audio_b64 = base64.b64encode(pcm_int16.tobytes()).decode("ascii")
+        # Encode interleaved stereo 16-bit PCM for immersive spatial headphone playback
+        left = (np.clip(out_audio[0], -1.0, 1.0) * 32767).astype(np.int16)
+        right = (np.clip(out_audio[1], -1.0, 1.0) * 32767).astype(np.int16)
+        interleaved = np.empty(len(left) + len(right), dtype=np.int16)
+        interleaved[0::2] = left
+        interleaved[1::2] = right
+        audio_b64 = base64.b64encode(interleaved.tobytes()).decode("ascii")
 
         # Telemetry Package
         current_time = self.current_tick * self.block_sec

@@ -148,13 +148,10 @@ class AudioSteeringDSP:
         steered_a = audio_a * g_a_traj
         steered_b = audio_b * g_b_traj
 
-        # Apply causal presence EQ (+2.5 dB @ 3 kHz) to the boosted stream for vocal clarity
-        if curr_a > 1.2:
-            from scipy import signal
-            steered_a, self.zi_eq_a = signal.lfilter(self.b_eq, self.a_eq, steered_a, zi=self.zi_eq_a)
-        if curr_b > 1.2:
-            from scipy import signal
-            steered_b, self.zi_eq_b = signal.lfilter(self.b_eq, self.a_eq, steered_b, zi=self.zi_eq_b)
+        # Apply causal presence EQ (+2.5 dB @ 3 kHz) continuously to preserve vocal presence without switching clicks
+        from scipy import signal
+        steered_a, self.zi_eq_a = signal.lfilter(self.b_eq, self.a_eq, steered_a, zi=self.zi_eq_a)
+        steered_b, self.zi_eq_b = signal.lfilter(self.b_eq, self.a_eq, steered_b, zi=self.zi_eq_b)
         
         # Binaural spatial panner
         left = self.pan_a_left * steered_a + self.pan_b_left * steered_b
