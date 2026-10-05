@@ -276,6 +276,8 @@ class StreamingSimulationSession:
         action = msg.get("action")
         
         if action == "play":
+            if self.current_tick >= self.total_ticks:
+                self.reset_playback()
             self.is_playing = True
             return {"status": "ok", "state": "playing"}
             

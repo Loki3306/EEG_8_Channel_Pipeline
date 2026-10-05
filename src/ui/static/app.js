@@ -485,8 +485,8 @@ class NeuroSteerApp {
     // =========================================================================
     updateDecoderGauge(data) {
         const margin = data.smoothed_margin || 0.0;
-        // Clamp margin [-100, +100] to percentage [0%, 100%]
-        const pct = Math.max(0, Math.min(100, 50 + (margin / 2.0)));
+        // Map margin [-1.5, +1.5] to meter percentage [0%, 100%]
+        const pct = Math.max(0, Math.min(100, 50 + ((margin / 1.5) * 50)));
         this.meterNeedle.style.left = `${pct}%`;
 
         const signStr = margin >= 0 ? `+${margin.toFixed(2)}` : margin.toFixed(2);
@@ -510,9 +510,9 @@ class NeuroSteerApp {
         const attended = data.attended_speaker === "A" ? "Speaker A (Marianne)" : "Speaker B (Aske)";
         this.groundTruthTarget.textContent = attended;
 
-        // Confidence
-        const conf = Math.min(100, Math.abs(margin) * 1.8).toFixed(1);
-        this.decoderConfidence.textContent = `${conf}%`;
+        // Sigmoid Confidence (50% = neutral, >85% = strong lock)
+        const conf = (1.0 / (1.0 + Math.exp(-3.0 * Math.abs(margin)))) * 100.0;
+        this.decoderConfidence.textContent = `${conf.toFixed(1)}%`;
 
         // Tracking accuracy indicator
         if (data.is_correct) {
