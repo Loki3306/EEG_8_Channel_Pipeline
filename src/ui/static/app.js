@@ -126,6 +126,21 @@ class NeuroSteerApp {
         this.eegHistoryLength = 128; // ~2 seconds of rolling EEG at 64 Hz
         this.eegBuffers = Array.from({ length: 8 }, () => new Array(this.eegHistoryLength).fill(0));
 
+        // Telemetry Throttling: accumulate and refresh every 2.0s for calm, steady readability
+        this.telemetryIntervalMs = 2000;
+        this.lastTelemetryUpdateTime = 0;
+        this.telemetryAcc = {
+            count: 0,
+            rtf: 0,
+            speedup: 0,
+            totalLatency: 0,
+            gpuLat: 0,
+            dspUs: 0,
+            cpuLoad: 0,
+            headroom: 0,
+            memMb: 0
+        };
+
         // DOM Elements
         this.initDOMElements();
         this.initCanvas();
@@ -390,6 +405,18 @@ class NeuroSteerApp {
         this.updateTimeDisplay(0.0);
         this.resetOscilloscope();
         this.resetGauges();
+        this.lastTelemetryUpdateTime = 0;
+        this.telemetryAcc = {
+            count: 0,
+            rtf: 0,
+            speedup: 0,
+            totalLatency: 0,
+            gpuLat: 0,
+            dspUs: 0,
+            cpuLoad: 0,
+            headroom: 0,
+            memMb: 0
+        };
     }
 
     sendSeek(timeSec) {
@@ -639,51 +666,90 @@ class NeuroSteerApp {
     }
 
     // =========================================================================
-    // Telemetry Numbers (Top HUD & Bottom Panel)
+    // Telemetry Numbers (Top HUD & Bottom Panel) - Throttled to every 2.0s
     // =========================================================================
     updateTelemetry(data) {
-        // 1. Top Right Live Telemetry HUD
-        if (this.topRtfVal && data.rtf !== undefined) {
-            this.topRtfVal.textContent = `${data.rtf.toFixed(4)}x`;
-        }
-        if (this.topSpeedupVal && data.speedup_x !== undefined) {
-            this.topSpeedupVal.textContent = `(${data.speedup_x.toFixed(1)}x)`;
-        }
-        if (this.topLatencyVal && data.total_latency_ms !== undefined) {
-            this.topLatencyVal.textContent = `${data.total_latency_ms.toFixed(1)} ms`;
-        }
-        if (this.topNeuralVal && data.gpu_latency_ms !== undefined) {
-            this.topNeuralVal.textContent = `${data.gpu_latency_ms.toFixed(2)} ms`;
-        }
-        if (this.topDspVal && data.dsp_latency_us !== undefined) {
-            this.topDspVal.textContent = `${(data.dsp_latency_us / 1000.0).toFixed(1)} ms`;
-        }
-        if (this.topCpuVal && data.cpu_load_pct !== undefined) {
-            this.topCpuVal.textContent = `${data.cpu_load_pct.toFixed(1)}%`;
-        }
-        if (this.topRamVal && data.mem_mb !== undefined) {
-            this.topRamVal.textContent = `${data.mem_mb.toFixed(0)} MB`;
-        }
+        // Accumulate incoming measurements across the 2-second interval
+        this.telemetryAcc.count += 1;
+        if (data.rtf !== undefined) this.telemetryAcc.rtf += data.rtf;
+        if (data.speedup_x !== undefined) this.telemetryAcc.speedup += data.speedup_x;
+        if (data.total_latency_ms !== undefined) this.telemetryAcc.totalLatency += data.total_latency_ms;
+        if (data.gpu_latency_ms !== undefined) this.telemetryAcc.gpuLat += data.gpu_latency_ms;
+        if (data.dsp_latency_us !== undefined) this.telemetryAcc.dspUs += data.dsp_latency_us;
+        if (data.cpu_load_pct !== undefined) this.telemetryAcc.cpuLoad += data.cpu_load_pct;
+        if (data.headroom_pct !== undefined) this.telemetryAcc.headroom += data.headroom_pct;
+        if (data.mem_mb !== undefined) this.telemetryAcc.memMb = data.mem_mb;
 
-        // 2. Bottom Right Embedded Hardware Telemetry Panel
-        if (this.dspTimeVal && data.dsp_latency_us !== undefined) {
-            const ms = (data.dsp_latency_us / 1000.0).toFixed(1);
-            this.dspTimeVal.textContent = `${ms} ms (${data.dsp_latency_us.toFixed(0)} µs)`;
-        }
-        if (this.gpuTimeVal && data.gpu_latency_ms !== undefined) {
-            this.gpuTimeVal.textContent = `${data.gpu_latency_ms.toFixed(2)} ms`;
-        }
-        if (this.cpuLoadVal && data.cpu_load_pct !== undefined) {
-            this.cpuLoadVal.textContent = `${data.cpu_load_pct.toFixed(1)}%`;
-        }
-        if (this.headroomSub && data.headroom_pct !== undefined) {
-            this.headroomSub.textContent = `${data.headroom_pct.toFixed(1)}% Headroom Idle`;
-        }
-        if (this.rtfVal && data.rtf !== undefined) {
-            this.rtfVal.textContent = `${data.rtf.toFixed(4)}x`;
-        }
-        if (this.chipSpeedupBadge && data.speedup_x !== undefined) {
-            this.chipSpeedupBadge.textContent = `${data.speedup_x.toFixed(1)}x Real-Time`;
+        const now = performance.now();
+        // Update DOM on first tick or every 2000 ms
+        if (this.lastTelemetryUpdateTime === 0 || (now - this.lastTelemetryUpdateTime) >= this.telemetryIntervalMs) {
+            const count = Math.max(1, this.telemetryAcc.count);
+            const rtfAvg = this.telemetryAcc.rtf / count;
+            const speedupAvg = this.telemetryAcc.speedup / count;
+            const totalLatAvg = this.telemetryAcc.totalLatency / count;
+            const gpuLatAvg = this.telemetryAcc.gpuLat / count;
+            const dspUsAvg = this.telemetryAcc.dspUs / count;
+            const cpuLoadAvg = this.telemetryAcc.cpuLoad / count;
+            const headroomAvg = this.telemetryAcc.headroom / count;
+            const memMbVal = this.telemetryAcc.memMb || 125.0;
+
+            // 1. Top Right Live Telemetry HUD
+            if (this.topRtfVal) {
+                this.topRtfVal.textContent = `${rtfAvg.toFixed(4)}x`;
+            }
+            if (this.topSpeedupVal) {
+                this.topSpeedupVal.textContent = `(${speedupAvg.toFixed(1)}x)`;
+            }
+            if (this.topLatencyVal) {
+                this.topLatencyVal.textContent = `${totalLatAvg.toFixed(1)} ms`;
+            }
+            if (this.topNeuralVal) {
+                this.topNeuralVal.textContent = `${gpuLatAvg.toFixed(2)} ms`;
+            }
+            if (this.topDspVal) {
+                this.topDspVal.textContent = `${(dspUsAvg / 1000.0).toFixed(1)} ms`;
+            }
+            if (this.topCpuVal) {
+                this.topCpuVal.textContent = `${cpuLoadAvg.toFixed(1)}%`;
+            }
+            if (this.topRamVal) {
+                this.topRamVal.textContent = `${memMbVal.toFixed(0)} MB`;
+            }
+
+            // 2. Bottom Right Embedded Hardware Telemetry Panel
+            if (this.dspTimeVal) {
+                const ms = (dspUsAvg / 1000.0).toFixed(1);
+                this.dspTimeVal.textContent = `${ms} ms (${dspUsAvg.toFixed(0)} µs)`;
+            }
+            if (this.gpuTimeVal) {
+                this.gpuTimeVal.textContent = `${gpuLatAvg.toFixed(2)} ms`;
+            }
+            if (this.cpuLoadVal) {
+                this.cpuLoadVal.textContent = `${cpuLoadAvg.toFixed(1)}%`;
+            }
+            if (this.headroomSub) {
+                this.headroomSub.textContent = `${headroomAvg.toFixed(1)}% Headroom Idle`;
+            }
+            if (this.rtfVal) {
+                this.rtfVal.textContent = `${rtfAvg.toFixed(4)}x`;
+            }
+            if (this.chipSpeedupBadge) {
+                this.chipSpeedupBadge.textContent = `${speedupAvg.toFixed(1)}x Real-Time`;
+            }
+
+            // Reset accumulator and update timestamp
+            this.lastTelemetryUpdateTime = now;
+            this.telemetryAcc = {
+                count: 0,
+                rtf: 0,
+                speedup: 0,
+                totalLatency: 0,
+                gpuLat: 0,
+                dspUs: 0,
+                cpuLoad: 0,
+                headroom: 0,
+                memMb: memMbVal
+            };
         }
     }
 }
