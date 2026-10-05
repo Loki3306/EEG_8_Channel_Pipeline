@@ -104,16 +104,60 @@ class SingleChannelNeuralSeparator:
 
         return s1_out, s2_out
 
+    def _load_any_audio(self, path: Path) -> Tuple[np.ndarray, int]:
+        """Loads audio from any audio/video container (.mp4, .wav, .mp3, .m4a, .mov, etc.)."""
+        # 1. Try torchaudio
+        try:
+            waveform, orig_fs = torchaudio.load(str(path))
+            return waveform.numpy(), int(orig_fs)
+        except Exception:
+            pass
+
+        # 2. Try scipy wavfile
+        try:
+            orig_fs, audio_np = wavfile.read(str(path))
+            if audio_np.dtype == np.int16:
+                audio_np = audio_np.astype(np.float32) / 32768.0
+            elif audio_np.dtype == np.int32:
+                audio_np = audio_np.astype(np.float32) / 2147483648.0
+            return audio_np, int(orig_fs)
+        except Exception:
+            pass
+
+        # 3. Try ffmpeg via imageio_ffmpeg (for MP4/M4A/MOV video containers)
+        try:
+            import subprocess, imageio_ffmpeg, tempfile
+            ffmpeg_exe = imageio_ffmpeg.get_ffmpeg_exe()
+            with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
+                tmp_path = Path(tmp.name)
+
+            cmd = [
+                ffmpeg_exe, "-y",
+                "-i", str(path),
+                "-vn",
+                "-ac", "1",
+                "-ar", "16000",
+                str(tmp_path)
+            ]
+            subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True)
+            orig_fs, audio_np = wavfile.read(str(tmp_path))
+            tmp_path.unlink(missing_ok=True)
+            if audio_np.dtype == np.int16:
+                audio_np = audio_np.astype(np.float32) / 32768.0
+            return audio_np, int(orig_fs)
+        except Exception as e:
+            raise RuntimeError(f"Failed to load audio from {path}: {e}")
+
     def separate_file(
         self,
         input_audio_path: Union[str, Path],
         output_dir: Optional[Union[str, Path]] = None,
     ) -> Tuple[np.ndarray, np.ndarray, Path, Path]:
         """
-        Loads an audio file (e.g. phone recording), separates it, and writes output WAVs.
+        Loads an audio/video file (e.g. phone recording), separates it, and writes output WAVs.
         
         Parameters:
-            input_audio_path: Path to phone recording (.wav, .mp3, etc.).
+            input_audio_path: Path to phone recording (.wav, .mp3, .mp4, .m4a, etc.).
             output_dir: Directory where separated tracks will be saved.
             
         Returns:
@@ -126,15 +170,8 @@ class SingleChannelNeuralSeparator:
         if not input_path.exists():
             raise FileNotFoundError(f"Input audio file not found: {input_path}")
 
-        # Load audio via torchaudio or scipy
-        try:
-            waveform, orig_fs = torchaudio.load(str(input_path))
-            audio_np = waveform.numpy()
-        except Exception:
-            orig_fs, audio_np = wavfile.read(str(input_path))
-            if audio_np.dtype == np.int16:
-                audio_np = audio_np.astype(np.float32) / 32768.0
-
+        # Load audio (supports WAV, MP4, M4A, MP3, etc.)
+        audio_np, orig_fs = self._load_any_audio(input_path)
         s1_out, s2_out = self.separate_waveform(audio_np, orig_fs)
 
         if output_dir is None:
