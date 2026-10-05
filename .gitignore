@@ -77,6 +77,8 @@ venv.bak/
 *.tar.gz
 data_cache/
 checkpoints/
-results/
+results/*
+!results/full_cohort/
 logs/
 scratch/
+
