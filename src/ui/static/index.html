@@ -1,0 +1,294 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NeuroSteer Clinical Suite — Brain-Steered Hearing Aid</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <div class="app-layout">
+        <!-- System Top Navigation Bar -->
+        <header class="top-nav">
+            <div class="nav-left">
+                <div class="system-logo">
+                    <span class="logo-mark">NS</span>
+                    <span class="system-title">NeuroSteer Clinical Suite</span>
+                    <span class="version-tag">v2.0.4 Clinical</span>
+                </div>
+                <div class="status-indicator" id="connectionBadge">
+                    <span class="status-dot online"></span>
+                    <span class="status-text" id="connectionText">SYSTEM CONNECTED</span>
+                </div>
+            </div>
+
+            <div class="nav-right">
+                <div class="meta-pill">
+                    <span class="meta-label">PIPELINE:</span>
+                    <span class="meta-val">CA-TCN + Spatial Adapter</span>
+                </div>
+                <div class="meta-pill">
+                    <span class="meta-label">HARDWARE:</span>
+                    <span class="meta-val" id="deviceStatusText">BioSemi ActiveTwo (Simulated)</span>
+                </div>
+                <div class="meta-pill highlight">
+                    <span class="meta-label">COHORT MEAN:</span>
+                    <span class="meta-val">86.8% Win Rate</span>
+                </div>
+            </div>
+        </header>
+
+        <!-- Command & Control Bar -->
+        <section class="control-panel">
+            <div class="selectors-group">
+                <div class="control-field">
+                    <label for="subjectSelect">SUBJECT COHORT</label>
+                    <select id="subjectSelect">
+                        <option value="S1">Subject S1 (87.7% Win Rate)</option>
+                        <!-- Populated by JS -->
+                    </select>
+                </div>
+
+                <div class="control-field">
+                    <label for="trialSelect">STREAMING TRIAL</label>
+                    <select id="trialSelect">
+                        <option value="4">Trial 04 (Attending Marianne - A)</option>
+                        <!-- Populated by JS -->
+                    </select>
+                </div>
+
+                <div class="control-field">
+                    <label for="sourceSelect">INPUT MODE</label>
+                    <select id="sourceSelect">
+                        <option value="dataset">BioSemi EEG Dataset (50s Trial)</option>
+                        <option value="respeaker">ReSpeaker 4-Mic USB Array (Live)</option>
+                    </select>
+                </div>
+            </div>
+
+            <div class="playback-group">
+                <button class="btn btn-primary" id="playBtn">
+                    <span class="btn-icon" id="playIcon">▶</span>
+                    <span id="playBtnText">START SIMULATION</span>
+                </button>
+                <button class="btn btn-secondary" id="resetBtn">RESET</button>
+                
+                <div class="time-readout">
+                    <span id="currentTime">00:00.0</span>
+                    <span class="time-sep">/</span>
+                    <span id="totalTime">00:50.0</span>
+                </div>
+            </div>
+
+            <!-- Scrubbable Timeline Seeker -->
+            <div class="scrubber-bar">
+                <input type="range" id="timeScrubber" min="0" max="50" step="0.1" value="0">
+                <div class="scrubber-track-fill" id="scrubberFill"></div>
+            </div>
+        </section>
+
+        <!-- Interactive Headphone Audio Listening Strip -->
+        <section class="headphone-strip">
+            <div class="strip-header">
+                <span class="strip-title">HEADPHONE MONITORING OUTPUT</span>
+                <span class="strip-subtitle">Select which acoustic stream is routed to your ears in real-time</span>
+            </div>
+            <div class="listening-modes" id="listeningModesGroup">
+                <button class="mode-tab active" data-mode="steered">
+                    <span class="tab-indicator">●</span>
+                    <span class="tab-label">Hearing Aid Steered Output</span>
+                    <span class="tab-desc">Attended +9 dB Boost / Distractor -18 dB Suppressed</span>
+                </button>
+                <button class="mode-tab" data-mode="mixture">
+                    <span class="tab-indicator">○</span>
+                    <span class="tab-label">Raw Natural Mixture</span>
+                    <span class="tab-desc">Unassisted Ear (Both Voices Overlapping 0 dB)</span>
+                </button>
+                <button class="mode-tab" data-mode="speaker_a">
+                    <span class="tab-indicator">○</span>
+                    <span class="tab-label">Speaker A Only</span>
+                    <span class="tab-desc">Marianne Clean Laboratory Acoustic Reference</span>
+                </button>
+                <button class="mode-tab" data-mode="speaker_b">
+                    <span class="tab-indicator">○</span>
+                    <span class="tab-label">Speaker B Only</span>
+                    <span class="tab-desc">Aske Clean Laboratory Acoustic Reference</span>
+                </button>
+            </div>
+        </section>
+
+        <!-- Main Clinical Telemetry Grid -->
+        <main class="dashboard-grid">
+            <!-- Panel 1: 8-Channel Rolling EEG Oscilloscope -->
+            <div class="card panel-eeg">
+                <div class="card-header">
+                    <div class="header-left">
+                        <span class="card-title">8-CHANNEL CONTINUOUS CORTICAL OSCILLOSCOPE</span>
+                        <span class="card-subtitle">Causal 1.0–6.0 Hz IIR Bandpass (BioSemi Montage)</span>
+                    </div>
+                    <div class="header-right">
+                        <span class="scale-badge">±50 µV Scale</span>
+                        <span class="rate-badge">fs = 64 Hz</span>
+                    </div>
+                </div>
+                <div class="canvas-container">
+                    <canvas id="eegCanvas"></canvas>
+                </div>
+                <div class="eeg-channel-legend" id="channelLegend">
+                    <!-- Populated by JS -->
+                </div>
+            </div>
+
+            <!-- Panel 2: Live Attention Decoder Gauge -->
+            <div class="card panel-gauge">
+                <div class="card-header">
+                    <div class="header-left">
+                        <span class="card-title">ATTENTION DECODER (CA-TCN)</span>
+                        <span class="card-subtitle">Signed Neural Margin (m_t = logit_A - logit_B)</span>
+                    </div>
+                    <div class="header-right">
+                        <span class="state-badge" id="decisionBadge">INITIALIZING</span>
+                    </div>
+                </div>
+
+                <div class="gauge-body">
+                    <!-- Needle / Linear Margin Meter -->
+                    <div class="margin-meter-wrapper">
+                        <div class="meter-labels">
+                            <span class="meter-label speaker-b">← ATTENDING ASKE (B)</span>
+                            <span class="meter-label center">0.0 (NEUTRAL)</span>
+                            <span class="meter-label speaker-a">ATTENDING MARIANNE (A) →</span>
+                        </div>
+                        <div class="meter-track">
+                            <div class="meter-zone-b"></div>
+                            <div class="meter-zone-center"></div>
+                            <div class="meter-zone-a"></div>
+                            <div class="meter-needle" id="meterNeedle" style="left: 50%;"></div>
+                        </div>
+                        <div class="margin-values">
+                            <span>-100</span>
+                            <span id="currentMarginReadout" class="readout-large">m_t = +0.00</span>
+                            <span>+100</span>
+                        </div>
+                    </div>
+
+                    <!-- Target Match & Confidence Summary -->
+                    <div class="decoder-stats-grid">
+                        <div class="stat-box">
+                            <span class="stat-label">PATIENT ATTENTION TARGET</span>
+                            <span class="stat-val" id="groundTruthTarget">Speaker A (Marianne)</span>
+                        </div>
+                        <div class="stat-box">
+                            <span class="stat-label">DECODER CONFIDENCE</span>
+                            <span class="stat-val" id="decoderConfidence">0.0%</span>
+                        </div>
+                        <div class="stat-box">
+                            <span class="stat-label">TRACKING STATUS</span>
+                            <span class="stat-val correct" id="accuracyIndicator">LOCKED ON TARGET</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Panel 3: Binaural Hearing Aid Gain Meters -->
+            <div class="card panel-gains">
+                <div class="card-header">
+                    <div class="header-left">
+                        <span class="card-title">BINAURAL GAIN STEERING DSP</span>
+                        <span class="card-subtitle">Smooth Acoustic Amplification & Suppression</span>
+                    </div>
+                    <div class="header-right">
+                        <span class="gain-spec-badge">+9 dB / -18 dB Dynamic Range</span>
+                    </div>
+                </div>
+
+                <div class="gains-body">
+                    <div class="gain-channel">
+                        <div class="channel-info">
+                            <span class="speaker-name speaker-a">Speaker A (Marianne)</span>
+                            <span class="db-readout" id="gainReadoutA">+0.0 dB</span>
+                        </div>
+                        <div class="gain-bar-track">
+                            <div class="gain-bar-fill fill-a" id="gainFillA" style="width: 50%;"></div>
+                        </div>
+                        <div class="bar-scale">
+                            <span>-18 dB</span>
+                            <span>0 dB</span>
+                            <span>+9 dB</span>
+                        </div>
+                    </div>
+
+                    <div class="gain-channel">
+                        <div class="channel-info">
+                            <span class="speaker-name speaker-b">Speaker B (Aske)</span>
+                            <span class="db-readout" id="gainReadoutB">-0.0 dB</span>
+                        </div>
+                        <div class="gain-bar-track">
+                            <div class="gain-bar-fill fill-b" id="gainFillB" style="width: 50%;"></div>
+                        </div>
+                        <div class="bar-scale">
+                            <span>-18 dB</span>
+                            <span>0 dB</span>
+                            <span>+9 dB</span>
+                        </div>
+                    </div>
+
+                    <div class="steering-explanation">
+                        <span class="info-icon">ℹ</span>
+                        <span class="info-text" id="steeringExplanationText">
+                            Audio steering engine smoothly amplifies the attended talker while placing an acoustic suppression null on the competing voice.
+                        </span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Panel 4: Real-Time Hardware Performance Telemetry -->
+            <div class="card panel-telemetry">
+                <div class="card-header">
+                    <div class="header-left">
+                        <span class="card-title">EMBEDDED HARDWARE TELEMETRY</span>
+                        <span class="card-subtitle">Deterministic Real-Time Benchmarks</span>
+                    </div>
+                    <div class="header-right">
+                        <span class="chip-badge">87.0x Real-Time</span>
+                    </div>
+                </div>
+
+                <div class="telemetry-metrics-grid">
+                    <div class="telemetry-card">
+                        <span class="metric-title">DSP EXECUTION TIME</span>
+                        <span class="metric-value" id="dspTimeVal">45.0 µs</span>
+                        <span class="metric-sub">IIR filter per 31.25 ms</span>
+                    </div>
+
+                    <div class="telemetry-card">
+                        <span class="metric-title">NEURAL INFERENCE</span>
+                        <span class="metric-value" id="gpuTimeVal">5.94 ms</span>
+                        <span class="metric-sub">CA-TCN per 500 ms hop</span>
+                    </div>
+
+                    <div class="telemetry-card">
+                        <span class="metric-title">CPU CORE LOAD</span>
+                        <span class="metric-value" id="cpuLoadVal">0.10%</span>
+                        <span class="metric-sub">99.9% Headroom Idle</span>
+                    </div>
+
+                    <div class="telemetry-card">
+                        <span class="metric-title">REAL-TIME FACTOR</span>
+                        <span class="metric-value" id="rtfVal">0.0115x</span>
+                        <span class="metric-sub">&lt; 0.05x Safety Bound</span>
+                    </div>
+                </div>
+            </div>
+        </main>
+
+        <!-- System Footer -->
+        <footer class="system-footer">
+            <span class="footer-left">NeuroSteer Brain-Computer Interface Laboratory — Clinical Hearing Aid Protocol</span>
+            <span class="footer-right">Validated across 18 DTU Subjects (1,026 Streaming Trials)</span>
+        </footer>
+    </div>
+
+    <script src="/static/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,799 @@
+/* ==========================================================================
+   NeuroSteer Clinical Suite — Scientific White System UI Stylesheet
+   Medical-grade, high-contrast, zero-neon clinical neuro-telemetry design.
+   ========================================================================== */
+
+:root {
+    /* Scientific White & Neutral Palette */
+    --bg-app: #f8fafc;
+    --bg-card: #ffffff;
+    --bg-card-sub: #f1f5f9;
+    --bg-input: #ffffff;
+    
+    /* Slate Borders & Dividers */
+    --border-subtle: #e2e8f0;
+    --border-strong: #cbd5e1;
+    --border-focus: #3b82f6;
+
+    /* High-Contrast Clinical Typography */
+    --text-primary: #0f172a;
+    --text-secondary: #334155;
+    --text-muted: #64748b;
+    --text-inverted: #ffffff;
+
+    /* Clinical Speaker & Status Accents (Muted & Professional) */
+    --color-speaker-a: #16a34a;       /* Forest / Emerald Green */
+    --color-speaker-a-bg: #f0fdf4;
+    --color-speaker-a-border: #bbf7d0;
+
+    --color-speaker-b: #d97706;       /* Deep Amber */
+    --color-speaker-b-bg: #fffbeb;
+    --color-speaker-b-border: #fde68a;
+
+    --color-hold: #475569;            /* Clinical Slate */
+    --color-hold-bg: #f1f5f9;
+    
+    --color-primary: #1d4ed8;         /* Deep Medical Blue */
+    --color-primary-hover: #1e40af;
+    --color-primary-bg: #eff6ff;
+
+    --color-success: #15803d;
+    --color-danger: #b91c1c;
+
+    /* Geometry & Shadows */
+    --radius-sm: 4px;
+    --radius-md: 6px;
+    --radius-lg: 8px;
+    --shadow-card: 0 1px 3px 0 rgba(0, 0, 0, 0.05), 0 1px 2px -1px rgba(0, 0, 0, 0.05);
+    --shadow-modal: 0 10px 15px -3px rgba(0, 0, 0, 0.08), 0 4px 6px -4px rgba(0, 0, 0, 0.05);
+
+    /* Fonts */
+    --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Inter", "Helvetica Neue", Arial, sans-serif;
+    --font-mono: "SF Mono", "Segoe UI Mono", "Roboto Mono", Menlo, Consolas, monospace;
+}
+
+* {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+}
+
+body {
+    background-color: var(--bg-app);
+    color: var(--text-primary);
+    font-family: var(--font-sans);
+    font-size: 14px;
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+}
+
+/* Main Layout */
+.app-layout {
+    max-width: 1380px;
+    margin: 0 auto;
+    padding: 16px 24px 32px 24px;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+}
+
+/* ==========================================================================
+   1. Top Navigation Bar
+   ========================================================================== */
+.top-nav {
+    background-color: var(--bg-card);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-md);
+    padding: 12px 20px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    box-shadow: var(--shadow-card);
+}
+
+.nav-left {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+}
+
+.system-logo {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.logo-mark {
+    background-color: var(--color-primary);
+    color: var(--text-inverted);
+    font-weight: 700;
+    font-size: 13px;
+    padding: 4px 8px;
+    border-radius: var(--radius-sm);
+    letter-spacing: 0.5px;
+}
+
+.system-title {
+    font-size: 16px;
+    font-weight: 700;
+    color: var(--text-primary);
+    letter-spacing: -0.2px;
+}
+
+.version-tag {
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--text-muted);
+    background-color: var(--bg-card-sub);
+    padding: 2px 6px;
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--border-subtle);
+}
+
+.status-indicator {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 3px 10px;
+    border-radius: 9999px;
+    background-color: #ecfdf5;
+    border: 1px solid #a7f3d0;
+}
+
+.status-dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background-color: #059669;
+}
+
+.status-text {
+    font-size: 11px;
+    font-weight: 600;
+    color: #065f46;
+    letter-spacing: 0.3px;
+}
+
+.nav-right {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.meta-pill {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    background-color: var(--bg-card-sub);
+    border: 1px solid var(--border-subtle);
+    padding: 4px 10px;
+    border-radius: var(--radius-sm);
+    font-size: 12px;
+}
+
+.meta-label {
+    color: var(--text-muted);
+    font-weight: 600;
+    font-size: 11px;
+}
+
+.meta-val {
+    color: var(--text-secondary);
+    font-weight: 600;
+}
+
+.meta-pill.highlight {
+    background-color: var(--color-primary-bg);
+    border-color: #bfdbfe;
+}
+
+.meta-pill.highlight .meta-val {
+    color: var(--color-primary);
+}
+
+/* ==========================================================================
+   2. Control Panel & Seeker Bar
+   ========================================================================== */
+.control-panel {
+    background-color: var(--bg-card);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-md);
+    padding: 16px 20px;
+    box-shadow: var(--shadow-card);
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+}
+
+.selectors-group {
+    display: flex;
+    gap: 16px;
+    flex-wrap: wrap;
+}
+
+.control-field {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    flex: 1;
+    min-width: 220px;
+}
+
+.control-field label {
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--text-muted);
+    letter-spacing: 0.4px;
+}
+
+.control-field select {
+    background-color: var(--bg-input);
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius-sm);
+    padding: 7px 10px;
+    font-size: 13px;
+    color: var(--text-primary);
+    font-weight: 500;
+    cursor: pointer;
+    outline: none;
+    transition: border-color 0.15s ease;
+}
+
+.control-field select:focus {
+    border-color: var(--border-focus);
+}
+
+.playback-group {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    padding: 8px 16px;
+    border-radius: var(--radius-sm);
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background-color 0.15s ease, border-color 0.15s ease;
+    border: 1px solid transparent;
+}
+
+.btn-primary {
+    background-color: var(--color-primary);
+    color: var(--text-inverted);
+}
+
+.btn-primary:hover {
+    background-color: var(--color-primary-hover);
+}
+
+.btn-primary.paused {
+    background-color: #d97706;
+}
+
+.btn-secondary {
+    background-color: var(--bg-card);
+    border-color: var(--border-strong);
+    color: var(--text-secondary);
+}
+
+.btn-secondary:hover {
+    background-color: var(--bg-card-sub);
+}
+
+.time-readout {
+    font-family: var(--font-mono);
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--text-secondary);
+    background-color: var(--bg-card-sub);
+    padding: 6px 12px;
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--border-subtle);
+}
+
+.time-sep {
+    color: var(--text-muted);
+    margin: 0 4px;
+}
+
+.scrubber-bar {
+    position: relative;
+    width: 100%;
+    height: 18px;
+    display: flex;
+    align-items: center;
+}
+
+.scrubber-bar input[type="range"] {
+    width: 100%;
+    -webkit-appearance: none;
+    appearance: none;
+    background: transparent;
+    cursor: pointer;
+    z-index: 2;
+}
+
+.scrubber-bar input[type="range"]::-webkit-slider-runnable-track {
+    height: 6px;
+    background: #e2e8f0;
+    border-radius: 3px;
+}
+
+.scrubber-bar input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    background: var(--color-primary);
+    border: 2px solid #ffffff;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.3);
+    margin-top: -4px;
+}
+
+/* ==========================================================================
+   3. Headphone Monitoring Output Strip
+   ========================================================================== */
+.headphone-strip {
+    background-color: var(--bg-card);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-md);
+    padding: 14px 20px;
+    box-shadow: var(--shadow-card);
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.strip-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.strip-title {
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--text-muted);
+    letter-spacing: 0.5px;
+}
+
+.strip-subtitle {
+    font-size: 12px;
+    color: var(--text-muted);
+}
+
+.listening-modes {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 10px;
+}
+
+.mode-tab {
+    background-color: var(--bg-card-sub);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-sm);
+    padding: 10px 14px;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 2px;
+    cursor: pointer;
+    text-align: left;
+    transition: all 0.15s ease;
+}
+
+.mode-tab:hover {
+    background-color: #e2e8f0;
+}
+
+.mode-tab.active {
+    background-color: var(--color-primary-bg);
+    border-color: var(--color-primary);
+}
+
+.tab-indicator {
+    font-size: 10px;
+    color: var(--text-muted);
+}
+
+.mode-tab.active .tab-indicator {
+    color: var(--color-primary);
+}
+
+.tab-label {
+    font-weight: 700;
+    font-size: 13px;
+    color: var(--text-primary);
+}
+
+.mode-tab.active .tab-label {
+    color: var(--color-primary);
+}
+
+.tab-desc {
+    font-size: 11px;
+    color: var(--text-muted);
+    line-height: 1.3;
+}
+
+/* ==========================================================================
+   4. Main Telemetry Grid (2x2)
+   ========================================================================== */
+.dashboard-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+}
+
+.card {
+    background-color: var(--bg-card);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-md);
+    padding: 18px 20px;
+    box-shadow: var(--shadow-card);
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+}
+
+.card-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    border-bottom: 1px solid var(--border-subtle);
+    padding-bottom: 10px;
+}
+
+.header-left {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.card-title {
+    font-size: 13px;
+    font-weight: 700;
+    color: var(--text-primary);
+    letter-spacing: -0.1px;
+}
+
+.card-subtitle {
+    font-size: 11px;
+    color: var(--text-muted);
+}
+
+.scale-badge, .rate-badge, .gain-spec-badge, .chip-badge {
+    font-size: 11px;
+    font-weight: 600;
+    padding: 3px 8px;
+    border-radius: var(--radius-sm);
+    background-color: var(--bg-card-sub);
+    border: 1px solid var(--border-subtle);
+    color: var(--text-secondary);
+}
+
+/* Panel 1: EEG Oscilloscope */
+.canvas-container {
+    width: 100%;
+    height: 240px;
+    background-color: #ffffff;
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-sm);
+    overflow: hidden;
+}
+
+#eegCanvas {
+    width: 100%;
+    height: 100%;
+    display: block;
+}
+
+.eeg-channel-legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.legend-item {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--text-secondary);
+    background-color: var(--bg-card-sub);
+    padding: 2px 8px;
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--border-subtle);
+}
+
+/* Panel 2: Attention Decoder Gauge */
+.gauge-body {
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+    padding-top: 6px;
+}
+
+.margin-meter-wrapper {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.meter-labels {
+    display: flex;
+    justify-content: space-between;
+    font-size: 11px;
+    font-weight: 700;
+}
+
+.meter-label.speaker-a { color: var(--color-speaker-a); }
+.meter-label.speaker-b { color: var(--color-speaker-b); }
+.meter-label.center { color: var(--text-muted); }
+
+.meter-track {
+    position: relative;
+    width: 100%;
+    height: 18px;
+    background-color: #f1f5f9;
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius-sm);
+    display: flex;
+    overflow: hidden;
+}
+
+.meter-zone-b {
+    flex: 1;
+    background: linear-gradient(to right, rgba(217, 119, 6, 0.35), rgba(217, 119, 6, 0.05));
+}
+
+.meter-zone-center {
+    width: 20px;
+    background-color: #e2e8f0;
+}
+
+.meter-zone-a {
+    flex: 1;
+    background: linear-gradient(to right, rgba(22, 163, 74, 0.05), rgba(22, 163, 74, 0.35));
+}
+
+.meter-needle {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    width: 4px;
+    background-color: var(--text-primary);
+    transform: translateX(-50%);
+    box-shadow: 0 0 3px rgba(0,0,0,0.5);
+    transition: left 0.15s cubic-bezier(0.1, 0.8, 0.2, 1);
+}
+
+.margin-values {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-family: var(--font-mono);
+    font-size: 12px;
+    color: var(--text-muted);
+}
+
+.readout-large {
+    font-size: 16px;
+    font-weight: 700;
+    color: var(--text-primary);
+}
+
+.state-badge {
+    font-size: 12px;
+    font-weight: 700;
+    padding: 4px 10px;
+    border-radius: var(--radius-sm);
+    letter-spacing: 0.4px;
+}
+
+.state-badge.speaker-a {
+    background-color: var(--color-speaker-a-bg);
+    border: 1px solid var(--color-speaker-a-border);
+    color: var(--color-speaker-a);
+}
+
+.state-badge.speaker-b {
+    background-color: var(--color-speaker-b-bg);
+    border: 1px solid var(--color-speaker-b-border);
+    color: var(--color-speaker-b);
+}
+
+.state-badge.hold {
+    background-color: var(--color-hold-bg);
+    border: 1px solid var(--border-strong);
+    color: var(--color-hold);
+}
+
+.decoder-stats-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 12px;
+}
+
+.stat-box {
+    background-color: var(--bg-card-sub);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-sm);
+    padding: 10px 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.stat-label {
+    font-size: 10px;
+    font-weight: 700;
+    color: var(--text-muted);
+    letter-spacing: 0.3px;
+}
+
+.stat-val {
+    font-size: 13px;
+    font-weight: 700;
+    color: var(--text-primary);
+}
+
+.stat-val.correct {
+    color: var(--color-success);
+}
+
+.stat-val.incorrect {
+    color: var(--color-danger);
+}
+
+/* Panel 3: Binaural Gain Steering */
+.gains-body {
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
+    padding-top: 6px;
+}
+
+.gain-channel {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.channel-info {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.speaker-name {
+    font-size: 13px;
+    font-weight: 700;
+}
+
+.speaker-name.speaker-a { color: var(--color-speaker-a); }
+.speaker-name.speaker-b { color: var(--color-speaker-b); }
+
+.db-readout {
+    font-family: var(--font-mono);
+    font-size: 14px;
+    font-weight: 700;
+    color: var(--text-primary);
+}
+
+.gain-bar-track {
+    width: 100%;
+    height: 14px;
+    background-color: #f1f5f9;
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius-sm);
+    overflow: hidden;
+}
+
+.gain-bar-fill {
+    height: 100%;
+    transition: width 0.15s ease;
+}
+
+.gain-bar-fill.fill-a {
+    background-color: var(--color-speaker-a);
+}
+
+.gain-bar-fill.fill-b {
+    background-color: var(--color-speaker-b);
+}
+
+.bar-scale {
+    display: flex;
+    justify-content: space-between;
+    font-size: 10px;
+    font-weight: 600;
+    color: var(--text-muted);
+}
+
+.steering-explanation {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    background-color: #f8fafc;
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-sm);
+    padding: 10px 12px;
+}
+
+.info-icon {
+    font-size: 14px;
+    color: var(--color-primary);
+    line-height: 1.2;
+}
+
+.info-text {
+    font-size: 11px;
+    color: var(--text-secondary);
+    line-height: 1.4;
+}
+
+/* Panel 4: Hardware Telemetry */
+.telemetry-metrics-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 12px;
+    padding-top: 4px;
+}
+
+.telemetry-card {
+    background-color: var(--bg-card-sub);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-sm);
+    padding: 14px 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.metric-title {
+    font-size: 10px;
+    font-weight: 700;
+    color: var(--text-muted);
+    letter-spacing: 0.4px;
+}
+
+.metric-value {
+    font-family: var(--font-mono);
+    font-size: 20px;
+    font-weight: 700;
+    color: var(--text-primary);
+}
+
+.metric-sub {
+    font-size: 11px;
+    color: var(--text-muted);
+}
+
+/* ==========================================================================
+   5. System Footer
+   ========================================================================== */
+.system-footer {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    border-top: 1px solid var(--border-subtle);
+    padding-top: 12px;
+    font-size: 11px;
+    color: var(--text-muted);
+}
+
+/* Responsiveness */
+@media (max-width: 1024px) {
+    .dashboard-grid {
+        grid-template-columns: 1fr;
+    }
+    .listening-modes {
+        grid-template-columns: repeat(2, 1fr);
+    }
+}
