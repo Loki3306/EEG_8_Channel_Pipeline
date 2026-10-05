@@ -4,6 +4,7 @@ FastAPI Backend Server for Brain-Steered Hearing Aid Clinical Software Dashboard
 
 import asyncio
 import json
+import time
 from pathlib import Path
 from typing import Dict, Any
 
@@ -12,10 +13,23 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 
+from contextlib import asynccontextmanager
 from src.ui.data_provider import StreamDataProvider
 from src.ui.session_manager import StreamingSimulationSession
 
-app = FastAPI(title="NeuroSteer Clinical Brain-Steered Hearing Aid Suite", version="2.0.0")
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    global broadcast_task
+    broadcast_task = asyncio.create_task(broadcast_loop())
+    yield
+    if broadcast_task:
+        broadcast_task.cancel()
+
+app = FastAPI(
+    title="NeuroSteer Clinical Brain-Steered Hearing Aid Suite",
+    version="2.0.0",
+    lifespan=lifespan
+)
 
 app.add_middleware(
     CORSMiddleware,
@@ -67,6 +81,13 @@ async def get_device_status():
     }
 
 
+# Enable 1ms high-precision multimedia timer on Windows
+try:
+    import ctypes
+    ctypes.windll.winmm.timeBeginPeriod(1)
+except Exception:
+    pass
+
 # Active WebSocket Clients & Centralized Broadcaster
 active_connections = set()
 broadcast_task = None
@@ -74,18 +95,28 @@ broadcast_task = None
 
 async def broadcast_loop():
     """
-    Centralized real-time clock and telemetry broadcaster.
-    Ensures session.step_simulation() is called exactly once per 31.25 ms frame,
-    eliminating multi-client race conditions and ensuring deterministic 1.0x pacing.
+    Centralized real-time clock and telemetry broadcaster with absolute deadline scheduling.
+    Maintains exact 32.000 Hz real-time pacing with zero cumulative drift, eliminating
+    audio starvation, buffer underruns, and hiccups.
     """
+    start_time = None
+    initial_tick = 0
+    was_playing = False
+
     while True:
         try:
             if session.is_playing and active_connections:
-                t_start = asyncio.get_event_loop().time()
+                now = time.perf_counter()
+                if not was_playing or start_time is None:
+                    start_time = now
+                    initial_tick = session.current_tick
+                    was_playing = True
+
                 telemetry = session.step_simulation()
                 if telemetry is None:
                     msg = json.dumps({"type": "end_of_trial"})
                     session.is_playing = False
+                    was_playing = False
                 else:
                     msg = json.dumps(telemetry)
 
@@ -98,19 +129,21 @@ async def broadcast_loop():
                 for ws in dead:
                     active_connections.discard(ws)
 
-                elapsed = asyncio.get_event_loop().time() - t_start
-                sleep_time = max(0.001, session.block_sec - elapsed)
-                await asyncio.sleep(sleep_time)
+                # Target timestamp relative to playback start
+                target_time = start_time + (session.current_tick - initial_tick) * session.block_sec
+                delay = target_time - time.perf_counter()
+                if delay > 0.001:
+                    await asyncio.sleep(delay)
+                else:
+                    await asyncio.sleep(0)
             else:
+                was_playing = False
+                start_time = None
                 await asyncio.sleep(0.02)
-        except Exception:
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
             await asyncio.sleep(0.02)
-
-
-@app.on_event("startup")
-async def on_startup():
-    global broadcast_task
-    broadcast_task = asyncio.create_task(broadcast_loop())
 
 
 @app.websocket("/ws/stream")
@@ -119,6 +152,9 @@ async def websocket_stream(websocket: WebSocket):
     Bidirectional streaming WebSocket.
     Clients receive broadcasted telemetry frames and send control actions.
     """
+    global broadcast_task
+    if broadcast_task is None or broadcast_task.done():
+        broadcast_task = asyncio.create_task(broadcast_loop())
     await websocket.accept()
     active_connections.add(websocket)
     try:
