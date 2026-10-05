@@ -170,11 +170,22 @@ class NeuroSteerApp {
         this.gainFillA = document.getElementById("gainFillA");
         this.gainFillB = document.getElementById("gainFillB");
 
-        // Telemetry Elements
+        // Top Hardware Telemetry HUD Elements
+        this.topRtfVal = document.getElementById("topRtfVal");
+        this.topSpeedupVal = document.getElementById("topSpeedupVal");
+        this.topLatencyVal = document.getElementById("topLatencyVal");
+        this.topNeuralVal = document.getElementById("topNeuralVal");
+        this.topDspVal = document.getElementById("topDspVal");
+        this.topCpuVal = document.getElementById("topCpuVal");
+        this.topRamVal = document.getElementById("topRamVal");
+
+        // Bottom Telemetry Panel Elements
         this.dspTimeVal = document.getElementById("dspTimeVal");
         this.gpuTimeVal = document.getElementById("gpuTimeVal");
         this.cpuLoadVal = document.getElementById("cpuLoadVal");
         this.rtfVal = document.getElementById("rtfVal");
+        this.chipSpeedupBadge = document.getElementById("chipSpeedupBadge");
+        this.headroomSub = document.getElementById("headroomSub");
 
         this.channelLegend = document.getElementById("channelLegend");
         this.eegCanvas = document.getElementById("eegCanvas");
@@ -184,11 +195,14 @@ class NeuroSteerApp {
     initCanvas() {
         const dpr = window.devicePixelRatio || 1;
         const rect = this.eegCanvas.getBoundingClientRect();
-        this.eegCanvas.width = rect.width * dpr;
-        this.eegCanvas.height = rect.height * dpr;
-        this.ctx.scale(dpr, dpr);
-        this.canvasWidth = rect.width;
-        this.canvasHeight = rect.height;
+        const w = rect.width > 0 ? rect.width : (this.eegCanvas.parentElement ? this.eegCanvas.parentElement.clientWidth : 600);
+        const h = rect.height > 0 ? rect.height : 240;
+
+        this.eegCanvas.width = Math.floor(w * dpr);
+        this.eegCanvas.height = Math.floor(h * dpr);
+        this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        this.canvasWidth = w;
+        this.canvasHeight = h;
 
         // Render legend
         this.channelLegend.innerHTML = "";
@@ -418,8 +432,16 @@ class NeuroSteerApp {
             this.audioPlayer.enqueueAudioChunk(data.audio_b64);
         }
 
-        // 2. Push EEG Sample to Rolling Buffer
-        if (data.eeg_sample && data.eeg_sample.length === 8) {
+        // 2. Push EEG Sample(s) to Rolling Oscilloscope Buffer
+        if (data.eeg_block && Array.isArray(data.eeg_block)) {
+            data.eeg_block.forEach(sample => {
+                for (let ch = 0; ch < 8; ch++) {
+                    this.eegBuffers[ch].shift();
+                    this.eegBuffers[ch].push(sample[ch]);
+                }
+            });
+            this.drawOscilloscope();
+        } else if (data.eeg_sample && data.eeg_sample.length === 8) {
             for (let ch = 0; ch < 8; ch++) {
                 this.eegBuffers[ch].shift();
                 this.eegBuffers[ch].push(data.eeg_sample[ch]);
@@ -433,7 +455,7 @@ class NeuroSteerApp {
         // 4. Update Gain Steering Meters
         this.updateGainMeters(data);
 
-        // 5. Update Telemetry Numbers
+        // 5. Update Telemetry Numbers (Top HUD & Performance Panel)
         this.updateTelemetry(data);
     }
 
@@ -502,7 +524,8 @@ class NeuroSteerApp {
         const chHeight = h / 8;
         const nPoints = this.eegHistoryLength;
         const stepX = w / (nPoints - 1);
-        const microvoltScale = (chHeight * 0.45) / 50.0; // 50 uV full height scale
+        // Optimal clinical scale: 25 uV gives ~12 px biological wave deflections
+        const microvoltScale = (chHeight * 0.70) / 25.0;
 
         for (let ch = 0; ch < 8; ch++) {
             const baseY = chHeight * (ch + 0.5);
@@ -522,7 +545,7 @@ class NeuroSteerApp {
 
             // Physiological EEG voltage trace
             ctx.strokeStyle = "#2563eb"; // Clinical Medical Blue
-            ctx.lineWidth = 1.3;
+            ctx.lineWidth = 1.4;
             ctx.beginPath();
 
             const buf = this.eegBuffers[ch];
@@ -566,9 +589,11 @@ class NeuroSteerApp {
             this.decisionBadge.textContent = "HYSTERESIS HOLD (UNCERTAIN)";
         }
 
-        // Ground truth comparison
-        const attended = data.attended_speaker === "A" ? "Speaker A (Marianne)" : "Speaker B (Aske)";
-        this.groundTruthTarget.textContent = attended;
+        // Ground truth comparison (if element exists)
+        if (this.groundTruthTarget) {
+            const attended = data.attended_speaker === "A" ? "Speaker A (Marianne)" : "Speaker B (Aske)";
+            this.groundTruthTarget.textContent = attended;
+        }
 
         // Sigmoid Confidence (50% = neutral, >85% = strong lock)
         const conf = (1.0 / (1.0 + Math.exp(-3.0 * Math.abs(margin)))) * 100.0;
@@ -614,20 +639,51 @@ class NeuroSteerApp {
     }
 
     // =========================================================================
-    // Telemetry Numbers
+    // Telemetry Numbers (Top HUD & Bottom Panel)
     // =========================================================================
     updateTelemetry(data) {
-        if (data.dsp_latency_us !== undefined) {
-            this.dspTimeVal.textContent = `${data.dsp_latency_us.toFixed(1)} µs`;
+        // 1. Top Right Live Telemetry HUD
+        if (this.topRtfVal && data.rtf !== undefined) {
+            this.topRtfVal.textContent = `${data.rtf.toFixed(4)}x`;
         }
-        if (data.gpu_latency_ms !== undefined) {
+        if (this.topSpeedupVal && data.speedup_x !== undefined) {
+            this.topSpeedupVal.textContent = `(${data.speedup_x.toFixed(1)}x)`;
+        }
+        if (this.topLatencyVal && data.total_latency_ms !== undefined) {
+            this.topLatencyVal.textContent = `${data.total_latency_ms.toFixed(1)} ms`;
+        }
+        if (this.topNeuralVal && data.gpu_latency_ms !== undefined) {
+            this.topNeuralVal.textContent = `${data.gpu_latency_ms.toFixed(2)} ms`;
+        }
+        if (this.topDspVal && data.dsp_latency_us !== undefined) {
+            this.topDspVal.textContent = `${(data.dsp_latency_us / 1000.0).toFixed(1)} ms`;
+        }
+        if (this.topCpuVal && data.cpu_load_pct !== undefined) {
+            this.topCpuVal.textContent = `${data.cpu_load_pct.toFixed(1)}%`;
+        }
+        if (this.topRamVal && data.mem_mb !== undefined) {
+            this.topRamVal.textContent = `${data.mem_mb.toFixed(0)} MB`;
+        }
+
+        // 2. Bottom Right Embedded Hardware Telemetry Panel
+        if (this.dspTimeVal && data.dsp_latency_us !== undefined) {
+            const ms = (data.dsp_latency_us / 1000.0).toFixed(1);
+            this.dspTimeVal.textContent = `${ms} ms (${data.dsp_latency_us.toFixed(0)} µs)`;
+        }
+        if (this.gpuTimeVal && data.gpu_latency_ms !== undefined) {
             this.gpuTimeVal.textContent = `${data.gpu_latency_ms.toFixed(2)} ms`;
         }
-        if (data.cpu_load_pct !== undefined) {
-            this.cpuLoadVal.textContent = `${data.cpu_load_pct.toFixed(2)}%`;
+        if (this.cpuLoadVal && data.cpu_load_pct !== undefined) {
+            this.cpuLoadVal.textContent = `${data.cpu_load_pct.toFixed(1)}%`;
         }
-        if (data.rtf !== undefined) {
+        if (this.headroomSub && data.headroom_pct !== undefined) {
+            this.headroomSub.textContent = `${data.headroom_pct.toFixed(1)}% Headroom Idle`;
+        }
+        if (this.rtfVal && data.rtf !== undefined) {
             this.rtfVal.textContent = `${data.rtf.toFixed(4)}x`;
+        }
+        if (this.chipSpeedupBadge && data.speedup_x !== undefined) {
+            this.chipSpeedupBadge.textContent = `${data.speedup_x.toFixed(1)}x Real-Time`;
         }
     }
 }

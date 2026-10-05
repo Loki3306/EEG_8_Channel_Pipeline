@@ -22,18 +22,56 @@
                 </div>
             </div>
 
-            <div class="nav-right">
-                <div class="meta-pill">
-                    <span class="meta-label">PIPELINE:</span>
-                    <span class="meta-val">CA-TCN + Spatial Adapter</span>
+            <div class="nav-right" id="topHardwareHud">
+                <div class="hud-chip">
+                    <span class="hud-dot live-blink"></span>
+                    <div class="hud-content">
+                        <span class="hud-label">REAL-TIME FACTOR</span>
+                        <div class="hud-val-row">
+                            <span class="hud-val green" id="topRtfVal">0.0150x</span>
+                            <span class="hud-sub" id="topSpeedupVal">(66.7x)</span>
+                        </div>
+                    </div>
                 </div>
-                <div class="meta-pill">
-                    <span class="meta-label">HARDWARE:</span>
-                    <span class="meta-val" id="deviceStatusText">BioSemi ActiveTwo (Simulated)</span>
+                <div class="hud-chip">
+                    <div class="hud-content">
+                        <span class="hud-label">TOTAL LATENCY</span>
+                        <div class="hud-val-row">
+                            <span class="hud-val" id="topLatencyVal">22.8 ms</span>
+                        </div>
+                    </div>
                 </div>
-                <div class="meta-pill highlight">
-                    <span class="meta-label">COHORT MEAN:</span>
-                    <span class="meta-val">86.8% Win Rate</span>
+                <div class="hud-chip">
+                    <div class="hud-content">
+                        <span class="hud-label">NEURAL HOP</span>
+                        <div class="hud-val-row">
+                            <span class="hud-val" id="topNeuralVal">18.5 ms</span>
+                        </div>
+                    </div>
+                </div>
+                <div class="hud-chip">
+                    <div class="hud-content">
+                        <span class="hud-label">DSP FRAME</span>
+                        <div class="hud-val-row">
+                            <span class="hud-val" id="topDspVal">4.2 ms</span>
+                        </div>
+                    </div>
+                </div>
+                <div class="hud-chip">
+                    <div class="hud-content">
+                        <span class="hud-label">CPU LOAD</span>
+                        <div class="hud-val-row">
+                            <span class="hud-val" id="topCpuVal">2.1%</span>
+                        </div>
+                    </div>
+                </div>
+                <div class="hud-chip">
+                    <div class="hud-content">
+                        <span class="hud-label">RAM RSS</span>
+                        <div class="hud-val-row">
+                            <span class="hud-val" id="topRamVal">125 MB</span>
+                        </div>
+                    </div>
                 </div>
             </div>
         </header>
@@ -127,7 +165,7 @@
                         <span class="card-subtitle">Causal 1.0–6.0 Hz IIR Bandpass (BioSemi Montage)</span>
                     </div>
                     <div class="header-right">
-                        <span class="scale-badge">±50 µV Scale</span>
+                        <span class="scale-badge" id="eegScaleBadge">±25 µV Scale</span>
                         <span class="rate-badge">fs = 64 Hz</span>
                     </div>
                 </div>
@@ -172,12 +210,8 @@
                         </div>
                     </div>
 
-                    <!-- Target Match & Confidence Summary -->
+                    <!-- Confidence & Tracking Status Summary -->
                     <div class="decoder-stats-grid">
-                        <div class="stat-box">
-                            <span class="stat-label">PATIENT ATTENTION TARGET</span>
-                            <span class="stat-val" id="groundTruthTarget">Speaker A (Marianne)</span>
-                        </div>
                         <div class="stat-box">
                             <span class="stat-label">DECODER CONFIDENCE</span>
                             <span class="stat-val" id="decoderConfidence">0.0%</span>
@@ -250,33 +284,33 @@
                         <span class="card-subtitle">Deterministic Real-Time Benchmarks</span>
                     </div>
                     <div class="header-right">
-                        <span class="chip-badge">87.0x Real-Time</span>
+                        <span class="chip-badge" id="chipSpeedupBadge">66.7x Real-Time</span>
                     </div>
                 </div>
 
                 <div class="telemetry-metrics-grid">
                     <div class="telemetry-card">
                         <span class="metric-title">DSP EXECUTION TIME</span>
-                        <span class="metric-value" id="dspTimeVal">45.0 µs</span>
-                        <span class="metric-sub">IIR filter per 31.25 ms</span>
+                        <span class="metric-value" id="dspTimeVal">4.2 ms</span>
+                        <span class="metric-sub" id="dspSub">28 Gammatone / 31.25 ms</span>
                     </div>
 
                     <div class="telemetry-card">
                         <span class="metric-title">NEURAL INFERENCE</span>
-                        <span class="metric-value" id="gpuTimeVal">5.94 ms</span>
-                        <span class="metric-sub">CA-TCN per 500 ms hop</span>
+                        <span class="metric-value" id="gpuTimeVal">18.50 ms</span>
+                        <span class="metric-sub" id="gpuSub">CA-TCN per 500 ms hop</span>
                     </div>
 
                     <div class="telemetry-card">
                         <span class="metric-title">CPU CORE LOAD</span>
-                        <span class="metric-value" id="cpuLoadVal">0.10%</span>
-                        <span class="metric-sub">99.9% Headroom Idle</span>
+                        <span class="metric-value" id="cpuLoadVal">2.1%</span>
+                        <span class="metric-sub" id="headroomSub">97.9% Headroom Idle</span>
                     </div>
 
                     <div class="telemetry-card">
                         <span class="metric-title">REAL-TIME FACTOR</span>
-                        <span class="metric-value" id="rtfVal">0.0115x</span>
-                        <span class="metric-sub">&lt; 0.05x Safety Bound</span>
+                        <span class="metric-value" id="rtfVal">0.0150x</span>
+                        <span class="metric-sub" id="rtfSub">&lt; 0.05x Safety Bound</span>
                     </div>
                 </div>
             </div>

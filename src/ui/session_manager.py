@@ -81,14 +81,23 @@ class StreamingSimulationSession:
         self.trial_eeg: np.ndarray = np.array([], dtype=np.float32)
         self.attended_speaker: str = "A"
         
-        # Telemetry State Caches
+        # Hardware Telemetry State Caches
         self.last_margin = 0.0
         self.last_smoothed_margin = 0.0
         self.last_decision = "HOLD"
         self.last_gain_a_db = 0.0
         self.last_gain_b_db = 0.0
-        self.last_dsp_us = 45.0
-        self.last_gpu_lat_ms = 5.9
+        self.last_dsp_us = 4200.0
+        self.last_steer_us = 80.0
+        self.last_gpu_lat_ms = 18.5
+        self.smoothed_rtf = 0.015
+        self.smoothed_cpu_pct = 2.1
+        self.mem_mb = 125.0
+        try:
+            import psutil
+            self.process = psutil.Process()
+        except Exception:
+            self.process = None
         
         # Load default trial
         self.load_trial(self.current_subject, self.current_trial)
@@ -220,6 +229,8 @@ class StreamingSimulationSession:
             self.is_playing = False
             return None
 
+        t_tick_start = time.perf_counter()
+
         # 1. Causal DSP Conditioning
         t_dsp_start = time.perf_counter()
         filt_eeg = self.eeg_filter.process_chunk(chunk_eeg)
@@ -276,9 +287,11 @@ class StreamingSimulationSession:
             self.last_decision = gate_out["decision"]
 
         # 3. Dynamic Audio Steering (+9 dB / -18 dB)
+        t_steer_start = time.perf_counter()
         decision_label = "A" if "A" in self.last_decision else ("B" if "B" in self.last_decision else "HOLD")
         g_a_db, g_b_db = self.steering_dsp.compute_target_gains_db(decision_label, self.last_smoothed_margin)
         stereo_out, ga_traj, gb_traj = self.steering_dsp.process_block(chunk_a, chunk_b, g_a_db, g_b_db)
+        self.last_steer_us = (time.perf_counter() - t_steer_start) * 1e6
         steered_chunk = np.mean(stereo_out, axis=0).astype(np.float32)
         self.last_gain_a_db = float(g_a_db)
         self.last_gain_b_db = float(g_b_db)
@@ -304,6 +317,25 @@ class StreamingSimulationSession:
         interleaved[1::2] = right
         audio_b64 = base64.b64encode(interleaved.tobytes()).decode("ascii")
 
+        # Dynamic Real-Time Benchmarks
+        t_tick_total_sec = time.perf_counter() - t_tick_start
+        instant_rtf = t_tick_total_sec / self.block_sec
+        self.smoothed_rtf = 0.85 * self.smoothed_rtf + 0.15 * instant_rtf
+        speedup_x = 1.0 / max(self.smoothed_rtf, 1e-4)
+        headroom_pct = max(0.0, 100.0 - (self.smoothed_rtf * 100.0))
+
+        if self.current_tick % 8 == 0 and self.process is not None:
+            try:
+                proc_cpu = self.process.cpu_percent(interval=None)
+                duty_cycle = (t_tick_total_sec / self.block_sec) * 100.0
+                active_cpu = proc_cpu if proc_cpu > 0.1 else duty_cycle
+                self.smoothed_cpu_pct = 0.8 * self.smoothed_cpu_pct + 0.2 * active_cpu
+                self.mem_mb = self.process.memory_info().rss / (1024.0 * 1024.0)
+            except Exception:
+                pass
+        
+        total_lat_ms = (self.last_dsp_us + self.last_steer_us) / 1000.0 + (self.last_gpu_lat_ms if (self.current_tick % self.hop_ticks == 0) else 0.0)
+
         # Telemetry Package
         current_time = self.current_tick * self.block_sec
         target_winner = (decision_label == self.attended_speaker)
@@ -314,8 +346,9 @@ class StreamingSimulationSession:
             "progress_pct": round((current_time / self.total_duration_sec) * 100.0, 1),
             "current_tick": self.current_tick,
             "total_ticks": self.total_ticks,
-            # EEG multi-channel slice (microvolts)
-            "eeg_sample": [round(float(chunk_eeg[-1, ch]), 2) for ch in range(8)],
+            # EEG multi-channel slice (microvolts, 1.0-6.0 Hz bandpass filtered with zero DC offset)
+            "eeg_sample": [round(float(filt_eeg[-1, ch]), 2) for ch in range(8)],
+            "eeg_block": [[round(float(filt_eeg[s, ch]), 2) for ch in range(8)] for s in range(filt_eeg.shape[0])],
             "channel_names": MONTAGE_CHANNEL_NAMES,
             # Decoding telemetry
             "raw_margin": round(self.last_margin, 2),
@@ -328,12 +361,16 @@ class StreamingSimulationSession:
             "gain_a_db": round(self.last_gain_a_db, 1),
             "gain_b_db": round(self.last_gain_b_db, 1),
             "listening_mode": self.listening_mode,
-            # Hardware Telemetry
+            # Real Measured Hardware Telemetry (100% Live)
             "dsp_latency_us": round(self.last_dsp_us, 1),
+            "steer_latency_us": round(self.last_steer_us, 1),
             "gpu_latency_ms": round(self.last_gpu_lat_ms, 2),
-            "cpu_load_pct": 0.10,
-            "headroom_pct": 99.9,
-            "rtf": 0.0115,
+            "total_latency_ms": round(total_lat_ms, 2),
+            "cpu_load_pct": round(self.smoothed_cpu_pct, 1),
+            "headroom_pct": round(headroom_pct, 1),
+            "rtf": round(self.smoothed_rtf, 4),
+            "speedup_x": round(speedup_x, 1),
+            "mem_mb": round(self.mem_mb, 1),
             # Audio packet
             "audio_b64": audio_b64
         }
