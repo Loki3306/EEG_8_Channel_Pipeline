@@ -49,6 +49,7 @@ class StreamDataProvider:
         self.mapping_path = Path(mapping_path) if mapping_path else DEFAULT_MAPPING_PATH
         self.data_dir = Path(data_dir) if data_dir else Path("data")
         self.mapping: Dict[str, Any] = {}
+        self._raw_cache: Dict[str, Any] = {}
         self._load_mapping()
         
         # Hardware beamformer for live mic mode
@@ -154,26 +155,85 @@ class StreamDataProvider:
         else:
             audio_a, audio_b = self._synthesize_speech_pair(n_audio_samples, fs_audio, trial_id)
 
-        # Check for raw EEG .mat file
-        mat_path = eeg_dir / f"{subject_id}.mat"
-        if mat_path.exists():
-            try:
-                from src.streaming.raw_eeg_loader import load_raw_dtu_file
-                raw_sub = load_raw_dtu_file(mat_path)
-                trial_eeg = raw_sub.trials.get(trial_id)
-                if trial_eeg is not None:
-                    # Select 8 channels and resample to 64 Hz
-                    eeg_raw = trial_eeg[:, :8]
-                    resamp_samples = int(len(eeg_raw) * (fs_eeg / raw_sub.fs))
-                    eeg_8ch = signal.resample(eeg_raw, resamp_samples)[:n_eeg_samples].astype(np.float32)
-                else:
-                    eeg_8ch = self._synthesize_cortical_eeg(audio_a, audio_b, attended_speaker, subject_id, fs_audio, fs_eeg, n_eeg_samples)
-            except Exception:
-                eeg_8ch = self._synthesize_cortical_eeg(audio_a, audio_b, attended_speaker, subject_id, fs_audio, fs_eeg, n_eeg_samples)
-        else:
+        # Exclusively load completely unprocessed raw 512 Hz continuous EEG
+        eeg_8ch = self._load_raw_eeg_trial(subject_id, trial_id, n_eeg_samples)
+
+        if eeg_8ch is None:
             eeg_8ch = self._synthesize_cortical_eeg(audio_a, audio_b, attended_speaker, subject_id, fs_audio, fs_eeg, n_eeg_samples)
 
         return audio_a, audio_b, eeg_8ch, attended_speaker
+
+    def _load_raw_eeg_trial(self, subject_id: str, trial_id: int, n_eeg_samples: int) -> Optional[np.ndarray]:
+        """
+        Parses completely raw, unprocessed 512 Hz multi-channel BioSemi ActiveTwo EEG from S<id>.mat,
+        detects trial event markers from hardware trigger pulses, extracts the 8 clinical channels,
+        and downsamples to 64 Hz.
+        """
+        raw_candidates = [
+            Path(f"C:/Users/lokes/Downloads/{subject_id}.mat"),
+            self.data_dir / "eeg" / f"{subject_id}.mat",
+            Path(f"data/eeg/{subject_id}.mat"),
+        ]
+        raw_path = None
+        for p in raw_candidates:
+            if p.exists() and p.stat().st_size > 100 * 1024 * 1024:  # > 100 MB confirms full raw continuous recording
+                raw_path = p
+                break
+                
+        if not raw_path:
+            return None
+
+        # Cache raw data in memory so subsequent trial switches are instant (<1 ms)
+        if subject_id not in self._raw_cache:
+            try:
+                import scipy.io as sio
+                print(f"[DATA PROVIDER] Ingesting RAW 512 Hz continuous EEG recording from {raw_path}...")
+                mat = sio.loadmat(str(raw_path), struct_as_record=False, squeeze_me=False)
+                data = mat["data"][0, 0]
+                raw_eeg = data.eeg[0, 0] # (N_samples, 73)
+                ev_obj = data.event[0, 0].eeg[0, 0]
+                samples = ev_obj.sample.squeeze()
+                values = [int(v.ravel()[0]) if hasattr(v, "ravel") else int(v) for v in ev_obj.value.squeeze()]
+
+                # Parse trial trigger markers (duration ~50s, end trigger code = 191)
+                trials = {}
+                i = 0
+                tr_id = 1
+                while i < len(samples) - 1:
+                    s_start = int(samples[i])
+                    s_end = int(samples[i+1])
+                    val_end = values[i+1]
+                    dur = (s_end - s_start) / 512.0
+                    if 45.0 <= dur <= 55.0 and val_end == 191:
+                        trials[tr_id] = (s_start, s_end)
+                        tr_id += 1
+                        i += 2
+                    else:
+                        i += 1
+
+                self._raw_cache[subject_id] = {
+                    "raw_eeg": raw_eeg,
+                    "trials": trials,
+                    "filename": raw_path.name
+                }
+                print(f"[DATA PROVIDER] Successfully parsed {len(trials)} raw trials from {raw_path.name}!")
+            except Exception as e:
+                print(f"[DATA PROVIDER] Failed loading raw recording {raw_path}: {e}")
+                return None
+
+        cache = self._raw_cache.get(subject_id)
+        if not cache or trial_id not in cache["trials"]:
+            return None
+
+        s0, s1 = cache["trials"][trial_id]
+        # BioSemi 64-channel montage indices for: Cz, FCz, Fz, C3, C4, CPz, Pz, Oz
+        dtu_8ch_indices = [47, 46, 37, 12, 49, 31, 30, 28]
+        raw_512hz = cache["raw_eeg"][s0:s1, dtu_8ch_indices].astype(np.float32)
+
+        # Causal decimation from 512 Hz to 64 Hz (factor of 8)
+        eeg_64hz = signal.resample_poly(raw_512hz, 1, 8, axis=0)[:n_eeg_samples].astype(np.float32)
+        print(f"[DATA PROVIDER] Extracted RAW 512 Hz EEG for {subject_id} Trial {trial_id} from {cache['filename']} (Shape: {eeg_64hz.shape})")
+        return eeg_64hz
 
     def _synthesize_speech_pair(self, n_samples: int, fs: int, seed: int) -> Tuple[np.ndarray, np.ndarray]:
         """
