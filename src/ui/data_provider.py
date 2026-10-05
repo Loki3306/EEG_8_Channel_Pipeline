@@ -188,6 +188,8 @@ class StreamDataProvider:
                 else:
                     sig_b = sig_b[:n_audio_samples]
 
+                max_a = float(np.max(np.abs(sig_a))) + 1e-8
+                max_b = float(np.max(np.abs(sig_b))) + 1e-8
                 audio_a = (sig_a / max_a * 0.70).astype(np.float32)
                 audio_b = (sig_b / max_b * 0.70).astype(np.float32)
                 print(f"[DATA PROVIDER] Ingested RAW audio: {path_a.name} and {path_b.name}")
