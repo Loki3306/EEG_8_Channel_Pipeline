@@ -81,4 +81,5 @@ results/*
 !results/full_cohort/
 logs/
 scratch/
+*.wav
 

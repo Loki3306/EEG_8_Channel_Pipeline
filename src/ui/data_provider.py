@@ -92,6 +92,8 @@ class StreamDataProvider:
         if not filename:
             return None
         candidates = [
+            Path(r"C:/Users/lokes/Downloads/archive") / filename,
+            Path(r"C:/Users/lokes/Downloads/archive") / filename.lower(),
             self.data_dir / "audio" / filename,
             Path("data/audio") / filename,
             Path(f"C:/Users/lokes/Downloads/{filename}"),
