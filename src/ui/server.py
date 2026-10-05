@@ -26,8 +26,8 @@ async def lifespan(app: FastAPI):
         broadcast_task.cancel()
 
 app = FastAPI(
-    title="NeuroSteer Clinical Brain-Steered Hearing Aid Suite",
-    version="2.0.0",
+    title="USCAPES Clinical Brain-Steered Hearing Aid Suite",
+    version="2.4.0",
     lifespan=lifespan
 )
 

@@ -1,5 +1,5 @@
 /**
- * NeuroSteer Clinical Suite — Client Application Logic
+ * USCAPES Clinical Suite — Client Application Logic
  * 
  * Features:
  * - Real-time WebSocket telemetry ingestion
@@ -108,7 +108,7 @@ class ContinuousAudioStreamPlayer {
     }
 }
 
-class NeuroSteerApp {
+class UscapesApp {
     constructor() {
         this.ws = null;
         this.isPlaying = false;
@@ -764,5 +764,6 @@ function jsonParse(str) {
 
 // Initialize on DOM Ready
 document.addEventListener("DOMContentLoaded", () => {
-    window.neuroSteerApp = new NeuroSteerApp();
+    window.uscapesApp = new UscapesApp();
+    window.neuroSteerApp = window.uscapesApp;
 });

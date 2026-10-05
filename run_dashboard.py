@@ -1,5 +1,5 @@
 """
-NeuroSteer Clinical Suite — Standalone Brain-Steered Hearing Aid Software Launcher.
+USCAPES Clinical Suite — Standalone Brain-Steered Hearing Aid Software Launcher.
 
 Usage:
     python run_dashboard.py [--port 8000] [--no-browser]
@@ -40,7 +40,7 @@ def open_browser_when_ready(url: str, host: str, port: int, max_wait_sec: float 
 
 
 def main():
-    parser = argparse.ArgumentParser(description="NeuroSteer Clinical Brain-Steered Hearing Aid Suite")
+    parser = argparse.ArgumentParser(description="USCAPES Clinical Brain-Steered Hearing Aid Suite")
     parser.add_argument("--host", type=str, default="127.0.0.1", help="Host interface to bind (default: 127.0.0.1)")
     parser.add_argument("--port", type=int, default=8000, help="Port to bind (default: 8000)")
     parser.add_argument("--no-browser", action="store_true", help="Do not open browser automatically")
@@ -50,7 +50,7 @@ def main():
     url = f"http://{args.host}:{args.port}"
 
     print("=" * 80)
-    print("  NEUROSTEER CLINICAL SUITE — BRAIN-STEERED HEARING AID SOFTWARE")
+    print("  USCAPES CLINICAL SUITE — BRAIN-STEERED HEARING AID SOFTWARE")
     print("=" * 80)
     print(f"  • Architecture:     CA-TCN Neural Decoder + Spatial Matrix Adapter")
     print(f"  • Grand Cohort:     18 Subjects (1,026 Trials Validated)")

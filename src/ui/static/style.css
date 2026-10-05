@@ -1,5 +1,5 @@
 /* ==========================================================================
-   NeuroSteer Clinical Suite — Scientific White System UI Stylesheet
+   USCAPES Clinical Suite — Scientific White System UI Stylesheet
    Medical-grade, high-contrast, zero-neon clinical neuro-telemetry design.
    ========================================================================== */
 
@@ -114,10 +114,10 @@ body {
 }
 
 .system-title {
-    font-size: 16px;
-    font-weight: 700;
+    font-size: 18px;
+    font-weight: 800;
     color: var(--text-primary);
-    letter-spacing: -0.2px;
+    letter-spacing: 1.2px;
 }
 
 .version-tag {
