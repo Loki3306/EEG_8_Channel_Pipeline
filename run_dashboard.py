@@ -20,9 +20,19 @@ if str(REPO_ROOT) not in sys.path:
 import uvicorn
 
 
-def open_browser_delayed(url: str, delay: float = 1.2):
-    """Opens default browser after server initializes."""
-    time.sleep(delay)
+import socket
+
+
+def open_browser_when_ready(url: str, host: str, port: int, max_wait_sec: float = 20.0):
+    """Waits until the server is actively accepting connections before opening browser."""
+    start = time.time()
+    while time.time() - start < max_wait_sec:
+        try:
+            with socket.create_connection((host, port), timeout=0.5):
+                break
+        except OSError:
+            time.sleep(0.3)
+    time.sleep(0.2)
     try:
         webbrowser.open(url)
     except Exception:
@@ -51,7 +61,7 @@ def main():
     print(f"  Starting clinical dashboard server on {url} ...")
 
     if not args.no_browser:
-        threading.Thread(target=open_browser_delayed, args=(url,), daemon=True).start()
+        threading.Thread(target=open_browser_when_ready, args=(url, args.host, args.port), daemon=True).start()
 
     uvicorn.run("src.ui.server:app", host=args.host, port=args.port, reload=args.reload, log_level="warning")
 
