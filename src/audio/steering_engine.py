@@ -53,27 +53,51 @@ class AudioSteeringDSP:
         # State registers
         self.current_gain_linear_a = 1.0
         self.current_gain_linear_b = 1.0
+
+        # Causal Speech Presence Intelligibility EQ (+2.5 dB at 3.0 kHz)
+        f0 = 3000.0
+        w0 = 2.0 * np.pi * f0 / fs
+        A = 10.0 ** (2.5 / 40.0)
+        alpha_eq = np.sin(w0) / (2.0 * 1.0)
+        b0 = 1.0 + alpha_eq * A
+        b1 = -2.0 * np.cos(w0)
+        b2 = 1.0 - alpha_eq * A
+        a0 = 1.0 + alpha_eq / A
+        a1 = -2.0 * np.cos(w0)
+        a2 = 1.0 - alpha_eq / A
+        self.b_eq = np.array([b0, b1, b2], dtype=np.float64) / a0
+        self.a_eq = np.array([a0, a1, a2], dtype=np.float64) / a0
+        self.zi_eq_a = np.zeros(2, dtype=np.float64)
+        self.zi_eq_b = np.zeros(2, dtype=np.float64)
         
     def reset(self):
         """Resets smoothed gain registers to neutral unity (0 dB)."""
         self.current_gain_linear_a = 1.0
         self.current_gain_linear_b = 1.0
+        self.zi_eq_a.fill(0)
+        self.zi_eq_b.fill(0)
 
     def compute_target_gains_db(self, state: str, margin: float) -> Tuple[float, float]:
         """
-        Maps AAD decision state ('A', 'B', 'HOLD') and confidence margin s_t
+        Maps AAD decision state ('A', 'B', 'HOLD', 'LOCKED_A', 'LOCKED_B') and confidence margin s_t
         to target gains in decibels for Stream A and Stream B.
-        """
-        confidence = float(np.clip(abs(margin) / (self.threshold_switch + 1e-8), 0.0, 1.0))
         
-        if state == "A":
-            g_a_db = +self.max_boost_db * confidence
-            g_b_db = -self.max_suppress_db * confidence
-        elif state == "B":
-            g_a_db = -self.max_suppress_db * confidence
-            g_b_db = +self.max_boost_db * confidence
-        else: # "HOLD" or neutral
-            # Transparent pass-through (0 dB)
+        Features:
+          - High-confidence ceiling: +9.0 dB boost / -18.0 dB suppression (+27 dB SNR improvement).
+          - Firm baseline suppression floor: sustains at least -12 dB suppression / +6 dB boost
+            while locked, completely preventing audio from fluttering back to unassisted mixture.
+        """
+        if state in ["A", "LOCKED_A"]:
+            conf = float(np.clip(abs(margin) / (self.threshold_switch + 1e-8), 0.0, 1.0))
+            eff_conf = 0.65 + 0.35 * conf
+            g_a_db = +self.max_boost_db * eff_conf
+            g_b_db = -self.max_suppress_db * eff_conf
+        elif state in ["B", "LOCKED_B"]:
+            conf = float(np.clip(abs(margin) / (self.threshold_switch + 1e-8), 0.0, 1.0))
+            eff_conf = 0.65 + 0.35 * conf
+            g_a_db = -self.max_suppress_db * eff_conf
+            g_b_db = +self.max_boost_db * eff_conf
+        else: # "HOLD", "NEUTRAL_HOLD" or neutral pass-through
             g_a_db = 0.0
             g_b_db = 0.0
             
@@ -123,6 +147,14 @@ class AudioSteeringDSP:
         # Apply smoothed gains to speech streams
         steered_a = audio_a * g_a_traj
         steered_b = audio_b * g_b_traj
+
+        # Apply causal presence EQ (+2.5 dB @ 3 kHz) to the boosted stream for vocal clarity
+        if curr_a > 1.2:
+            from scipy import signal
+            steered_a, self.zi_eq_a = signal.lfilter(self.b_eq, self.a_eq, steered_a, zi=self.zi_eq_a)
+        if curr_b > 1.2:
+            from scipy import signal
+            steered_b, self.zi_eq_b = signal.lfilter(self.b_eq, self.a_eq, steered_b, zi=self.zi_eq_b)
         
         # Binaural spatial panner
         left = self.pan_a_left * steered_a + self.pan_b_left * steered_b

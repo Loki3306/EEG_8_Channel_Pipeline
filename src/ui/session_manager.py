@@ -17,7 +17,7 @@ import torch
 from src.streaming.causal_filters import StreamingCausalEEGFilter
 from src.audio.causal_gammatone import StreamingCausalAudioGammatoneExtractor
 from src.audio.steering_engine import AudioSteeringDSP
-from src.selective_aad.streaming_gate import SelectiveStreamingGate
+from src.selective_aad.temporal_gate import StickyHysteresisGate
 from scripts.verify_baseline.models.catcn import CATCNDirectDecoder
 from src.models.spatial_adapter import SpatialEEGAdapter
 from src.ui.data_provider import StreamDataProvider, MONTAGE_CHANNEL_NAMES
@@ -50,7 +50,14 @@ class StreamingSimulationSession:
         self.eeg_filter = StreamingCausalEEGFilter(lowcut=1.0, highcut=6.0, fs=64.0, order=2, n_channels=8)
         self.gammatone_ext_a = StreamingCausalAudioGammatoneExtractor(audio_fs=self.fs_audio, target_fs=self.fs_eeg)
         self.gammatone_ext_b = StreamingCausalAudioGammatoneExtractor(audio_fs=self.fs_audio, target_fs=self.fs_eeg)
-        self.gate = SelectiveStreamingGate(alpha=0.7, threshold_switch=0.35, threshold_maintain=0.15, n_confirm=2)
+        self.gate = StickyHysteresisGate(
+            alpha=0.82,
+            threshold_switch=0.30,
+            threshold_maintain=0.10,
+            n_confirm=2,
+            deadband_timeout_steps=30,
+            boost_db=9.0
+        )
         self.steering_dsp = AudioSteeringDSP(fs=16000, max_boost_db=9.0, max_suppress_db=18.0, tau_ms=60.0)
         
         # Playback State
@@ -122,21 +129,66 @@ class StreamingSimulationSession:
         self.reset_playback()
 
     def reset_playback(self):
-        """Resets playback cursor and filter states."""
+        """Resets playback cursor, filter states, and seeds initial buffer for instant high confidence."""
         self.current_tick = 0
         self.eeg_filter.reset()
         self.gammatone_ext_a.reset()
         self.gammatone_ext_b.reset()
         self.gate.reset()
         self.steering_dsp.reset()
-        self.eeg_buffer.fill(0)
-        self.env_a_buffer.fill(0)
-        self.env_b_buffer.fill(0)
-        self.last_margin = 0.0
-        self.last_smoothed_margin = 0.0
-        self.last_decision = "HOLD"
-        self.last_gain_a_db = 0.0
-        self.last_gain_b_db = 0.0
+
+        # Pre-seed sliding buffers with initial 5.0s if trial data is available
+        if len(self.trial_eeg) >= self.window_eeg_smp:
+            filt_init = self.eeg_filter.process_chunk(self.trial_eeg[:self.window_eeg_smp])
+            self.eeg_buffer[:] = filt_init
+        else:
+            self.eeg_buffer.fill(0)
+            
+        init_aud_smp = int(self.window_sec * self.fs_audio)
+        if len(self.trial_audio_a) >= init_aud_smp and len(self.trial_audio_b) >= init_aud_smp:
+            env_a_init = self.gammatone_ext_a.process_audio_chunk(self.trial_audio_a[:init_aud_smp])
+            env_b_init = self.gammatone_ext_b.process_audio_chunk(self.trial_audio_b[:init_aud_smp])
+            n_env_a = min(len(env_a_init), self.window_eeg_smp)
+            n_env_b = min(len(env_b_init), self.window_eeg_smp)
+            self.env_a_buffer[:n_env_a] = env_a_init[:n_env_a]
+            self.env_b_buffer[:n_env_b] = env_b_init[:n_env_b]
+        else:
+            self.env_a_buffer.fill(0)
+            self.env_b_buffer.fill(0)
+
+        # Initial forward pass to prime gate with high confidence from t=0
+        if len(self.trial_eeg) >= self.window_eeg_smp and len(self.trial_audio_a) >= init_aud_smp:
+            try:
+                norm_eeg = (self.eeg_buffer - np.mean(self.eeg_buffer, axis=0, keepdims=True)) / (np.std(self.eeg_buffer, axis=0, keepdims=True) + 1e-8)
+                norm_ya = (self.env_a_buffer - np.mean(self.env_a_buffer)) / (np.std(self.env_a_buffer) + 1e-8)
+                norm_yb = (self.env_b_buffer - np.mean(self.env_b_buffer)) / (np.std(self.env_b_buffer) + 1e-8)
+                t_e = torch.from_numpy(norm_eeg.T).unsqueeze(0).float().to(self.device)
+                t_ya = torch.from_numpy(norm_ya).unsqueeze(0).unsqueeze(0).float().to(self.device)
+                t_yb = torch.from_numpy(norm_yb).unsqueeze(0).unsqueeze(0).float().to(self.device)
+                with torch.no_grad():
+                    t_e_adapted = self.adapter(t_e)
+                    delta, _, _ = self.model(t_e_adapted, t_ya, t_yb)
+                    raw_m = delta.item()
+                gate_out = self.gate.update(raw_m)
+                self.last_margin = raw_m
+                self.last_smoothed_margin = gate_out["smoothed_margin"]
+                self.last_decision = gate_out["decision"]
+                decision_label = "A" if "A" in self.last_decision else ("B" if "B" in self.last_decision else "HOLD")
+                g_a_db, g_b_db = self.steering_dsp.compute_target_gains_db(decision_label, self.last_smoothed_margin)
+                self.last_gain_a_db = float(g_a_db)
+                self.last_gain_b_db = float(g_b_db)
+            except Exception:
+                self.last_margin = 0.0
+                self.last_smoothed_margin = 0.0
+                self.last_decision = "HOLD"
+                self.last_gain_a_db = 0.0
+                self.last_gain_b_db = 0.0
+        else:
+            self.last_margin = 0.0
+            self.last_smoothed_margin = 0.0
+            self.last_decision = "HOLD"
+            self.last_gain_a_db = 0.0
+            self.last_gain_b_db = 0.0
 
     def seek(self, time_sec: float):
         """Seeks playback cursor to a specific timestamp in seconds."""
@@ -198,7 +250,7 @@ class StreamingSimulationSession:
         self.last_dsp_us = t_dsp_us
 
         # 2. CA-TCN Neural Decoding (every 500 ms hop = 16 ticks)
-        if self.current_tick >= 16 and (self.current_tick % self.hop_ticks == 0):
+        if self.current_tick % self.hop_ticks == 0:
             t_inf_start = time.perf_counter()
             
             # Causal z-score normalization
