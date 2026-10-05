@@ -15,6 +15,7 @@ import numpy as np
 import torch
 
 from src.streaming.causal_filters import StreamingCausalEEGFilter
+from src.audio.causal_gammatone import StreamingCausalAudioGammatoneExtractor
 from src.audio.steering_engine import AudioSteeringDSP
 from src.selective_aad.streaming_gate import SelectiveStreamingGate
 from scripts.verify_baseline.models.catcn import CATCNDirectDecoder
@@ -47,6 +48,8 @@ class StreamingSimulationSession:
         self._init_model_weights()
 
         self.eeg_filter = StreamingCausalEEGFilter(lowcut=1.0, highcut=6.0, fs=64.0, order=2, n_channels=8)
+        self.gammatone_ext_a = StreamingCausalAudioGammatoneExtractor(audio_fs=self.fs_audio, target_fs=self.fs_eeg)
+        self.gammatone_ext_b = StreamingCausalAudioGammatoneExtractor(audio_fs=self.fs_audio, target_fs=self.fs_eeg)
         self.gate = SelectiveStreamingGate(alpha=0.7, threshold_switch=0.35, threshold_maintain=0.15, n_confirm=2)
         self.steering_dsp = AudioSteeringDSP(fs=16000, max_boost_db=9.0, max_suppress_db=18.0, tau_ms=60.0)
         
@@ -122,6 +125,8 @@ class StreamingSimulationSession:
         """Resets playback cursor and filter states."""
         self.current_tick = 0
         self.eeg_filter.reset()
+        self.gammatone_ext_a.reset()
+        self.gammatone_ext_b.reset()
         self.gate.reset()
         self.steering_dsp.reset()
         self.eeg_buffer.fill(0)
@@ -167,9 +172,17 @@ class StreamingSimulationSession:
         t_dsp_start = time.perf_counter()
         filt_eeg = self.eeg_filter.process_chunk(chunk_eeg)
         
-        # Audio envelopes for CA-TCN ingestion
-        env_a_chunk = np.mean(np.abs(chunk_a)).repeat(self.eeg_block_smp)
-        env_b_chunk = np.mean(np.abs(chunk_b)).repeat(self.eeg_block_smp)
+        # Causal Gammatone Auditory Envelope Extraction (28 ERB subbands -> power-law 0.3 -> 8 Hz lowpass -> 64 Hz)
+        env_a_chunk = self.gammatone_ext_a.process_audio_chunk(chunk_a)
+        env_b_chunk = self.gammatone_ext_b.process_audio_chunk(chunk_b)
+        if len(env_a_chunk) < self.eeg_block_smp:
+            env_a_chunk = np.pad(env_a_chunk, (0, self.eeg_block_smp - len(env_a_chunk)), mode='edge')
+        elif len(env_a_chunk) > self.eeg_block_smp:
+            env_a_chunk = env_a_chunk[:self.eeg_block_smp]
+        if len(env_b_chunk) < self.eeg_block_smp:
+            env_b_chunk = np.pad(env_b_chunk, (0, self.eeg_block_smp - len(env_b_chunk)), mode='edge')
+        elif len(env_b_chunk) > self.eeg_block_smp:
+            env_b_chunk = env_b_chunk[:self.eeg_block_smp]
 
         # Update sliding ring buffers (320 samples = 5.0s)
         n_c = self.eeg_block_smp

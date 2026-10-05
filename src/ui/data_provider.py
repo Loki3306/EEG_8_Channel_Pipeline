@@ -88,6 +88,22 @@ class StreamDataProvider:
             })
         return result
 
+    def _find_audio_file(self, filename: str) -> Optional[Path]:
+        if not filename:
+            return None
+        candidates = [
+            self.data_dir / "audio" / filename,
+            Path("data/audio") / filename,
+            Path(f"C:/Users/lokes/Downloads/{filename}"),
+            Path(f"C:/Users/lokes/Downloads/audio/{filename}"),
+            Path(f"C:/Users/lokes/Downloads/stimuli/{filename}"),
+            Path(f"scripts/verify_baseline/data/audio/{filename}"),
+        ]
+        for p in candidates:
+            if p.exists() and p.is_file():
+                return p
+        return None
+
     def get_trials_for_subject(self, subject_id: str) -> List[Dict[str, Any]]:
         """Returns the list of 57 held-out streaming trials for the chosen subject."""
         sub_map = self.mapping.get(subject_id, {})
@@ -97,14 +113,18 @@ class StreamDataProvider:
             t_info = sub_map.get(t_key, {})
             wav_a = t_info.get("wavA", {}).get("filename", f"speaker_A_trial_{t_num}.wav")
             wav_b = t_info.get("wavB", {}).get("filename", f"speaker_B_trial_{t_num}.wav")
-            # In DTU protocol, speaker attended is mapped (even trials typically attended A, odd attended B or vice-versa)
-            attended_speaker = "A" if (t_num % 2 == 0) else "B"
+            # In DTU protocol, wavA is always attended, wavB is unattended
+            spk_a_name = "Marianne" if "marianne" in wav_a.lower() else ("Aske" if "aske" in wav_a.lower() else "Speaker A")
+            spk_b_name = "Aske" if "aske" in wav_b.lower() else ("Marianne" if "marianne" in wav_b.lower() else "Speaker B")
+            attended_speaker = "A"
             trials.append({
                 "trial_id": t_num,
-                "label": f"Trial {t_num:02d} ({'Attending Marianne (A)' if attended_speaker == 'A' else 'Attending Aske (B)'})",
+                "label": f"Trial {t_num:02d} (Attending: {spk_a_name} | {wav_a})",
                 "wav_a": wav_a,
                 "wav_b": wav_b,
                 "attended": attended_speaker,
+                "speaker_a_name": spk_a_name,
+                "speaker_b_name": spk_b_name,
                 "duration_sec": 50.0
             })
         return trials
@@ -126,31 +146,53 @@ class StreamDataProvider:
             eeg_8ch: (n_eeg_samples, 8) @ 64 Hz float32 (in microvolts)
             attended_speaker: 'A' or 'B'
         """
-        attended_speaker = "A" if (trial_id % 2 == 0) else "B"
+        attended_speaker = "A"
         n_audio_samples = int(duration_sec * fs_audio)
         n_eeg_samples = int(duration_sec * fs_eeg)
 
-        # Check if local raw dataset files exist
-        audio_dir = self.data_dir / "audio"
-        eeg_dir = self.data_dir / "eeg"
+        # Check if local raw dataset audio files exist
         sub_map = self.mapping.get(subject_id, {}).get(f"trial_{trial_id}", {})
         file_a = sub_map.get("wavA", {}).get("filename", "")
         file_b = sub_map.get("wavB", {}).get("filename", "")
 
-        path_a = audio_dir / file_a if file_a else None
-        path_b = audio_dir / file_b if file_b else None
+        path_a = self._find_audio_file(file_a)
+        path_b = self._find_audio_file(file_b)
 
-        # If files exist on disk, read them
+        # If files exist on disk, read raw wav
         if path_a and path_b and path_a.exists() and path_b.exists():
             try:
                 import soundfile as sf
-                sig_a, orig_fs = sf.read(str(path_a), dtype="float32")
-                sig_b, _ = sf.read(str(path_b), dtype="float32")
-                if len(sig_a.shape) > 1: sig_a = sig_a[:, 0]
-                if len(sig_b.shape) > 1: sig_b = sig_b[:, 0]
-                audio_a = sig_a[:n_audio_samples]
-                audio_b = sig_b[:n_audio_samples]
-            except Exception:
+                sig_a, orig_fs_a = sf.read(str(path_a), dtype="float32")
+                sig_b, orig_fs_b = sf.read(str(path_b), dtype="float32")
+                if sig_a.ndim > 1: sig_a = np.mean(sig_a, axis=1)
+                if sig_b.ndim > 1: sig_b = np.mean(sig_b, axis=1)
+
+                if orig_fs_a != fs_audio:
+                    import math
+                    g_a = math.gcd(fs_audio, orig_fs_a)
+                    sig_a = signal.resample_poly(sig_a, fs_audio // g_a, orig_fs_a // g_a).astype(np.float32)
+                if orig_fs_b != fs_audio:
+                    import math
+                    g_b = math.gcd(fs_audio, orig_fs_b)
+                    sig_b = signal.resample_poly(sig_b, fs_audio // g_b, orig_fs_b // g_b).astype(np.float32)
+
+                if len(sig_a) < n_audio_samples:
+                    sig_a = np.pad(sig_a, (0, n_audio_samples - len(sig_a)))
+                else:
+                    sig_a = sig_a[:n_audio_samples]
+
+                if len(sig_b) < n_audio_samples:
+                    sig_b = np.pad(sig_b, (0, n_audio_samples - len(sig_b)))
+                else:
+                    sig_b = sig_b[:n_audio_samples]
+
+                max_a = np.max(np.abs(sig_a)) + 1e-8
+                max_b = np.max(np.abs(sig_b)) + 1e-8
+                audio_a = (sig_a / max_a * 0.9).astype(np.float32)
+                audio_b = (sig_b / max_b * 0.9).astype(np.float32)
+                print(f"[DATA PROVIDER] Ingested RAW audio: {path_a.name} and {path_b.name}")
+            except Exception as e:
+                print(f"[DATA PROVIDER] Error loading raw audio {path_a}, {path_b}: {e}")
                 audio_a, audio_b = self._synthesize_speech_pair(n_audio_samples, fs_audio, trial_id)
         else:
             audio_a, audio_b = self._synthesize_speech_pair(n_audio_samples, fs_audio, trial_id)
