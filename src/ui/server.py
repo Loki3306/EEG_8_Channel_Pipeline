@@ -67,55 +67,75 @@ async def get_device_status():
     }
 
 
+# Active WebSocket Clients & Centralized Broadcaster
+active_connections = set()
+broadcast_task = None
+
+
+async def broadcast_loop():
+    """
+    Centralized real-time clock and telemetry broadcaster.
+    Ensures session.step_simulation() is called exactly once per 31.25 ms frame,
+    eliminating multi-client race conditions and ensuring deterministic 1.0x pacing.
+    """
+    while True:
+        try:
+            if session.is_playing and active_connections:
+                t_start = asyncio.get_event_loop().time()
+                telemetry = session.step_simulation()
+                if telemetry is None:
+                    msg = json.dumps({"type": "end_of_trial"})
+                    session.is_playing = False
+                else:
+                    msg = json.dumps(telemetry)
+
+                dead = set()
+                for ws in list(active_connections):
+                    try:
+                        await ws.send_text(msg)
+                    except Exception:
+                        dead.add(ws)
+                for ws in dead:
+                    active_connections.discard(ws)
+
+                elapsed = asyncio.get_event_loop().time() - t_start
+                sleep_time = max(0.001, session.block_sec - elapsed)
+                await asyncio.sleep(sleep_time)
+            else:
+                await asyncio.sleep(0.02)
+        except Exception:
+            await asyncio.sleep(0.02)
+
+
+@app.on_event("startup")
+async def on_startup():
+    global broadcast_task
+    broadcast_task = asyncio.create_task(broadcast_loop())
+
+
 @app.websocket("/ws/stream")
 async def websocket_stream(websocket: WebSocket):
     """
-    High-frequency bidirectional streaming WebSocket.
-    Dispatches 31.25 ms telemetry packets and handles interactive commands.
+    Bidirectional streaming WebSocket.
+    Clients receive broadcasted telemetry frames and send control actions.
     """
     await websocket.accept()
-
-    async def receive_loop():
-        try:
-            while True:
-                raw_text = await websocket.receive_text()
-                try:
-                    data = json.loads(raw_text)
-                    resp = session.handle_client_message(data)
-                    await websocket.send_text(json.dumps({"type": "response", **resp}))
-                except Exception as e:
-                    await websocket.send_text(json.dumps({"type": "error", "message": str(e)}))
-        except WebSocketDisconnect:
-            session.is_playing = False
-        except Exception:
-            session.is_playing = False
-
-    async def send_loop():
-        try:
-            while True:
-                if session.is_playing:
-                    t_start = asyncio.get_event_loop().time()
-                    telemetry = session.step_simulation()
-                    if telemetry is None:
-                        await websocket.send_text(json.dumps({"type": "end_of_trial"}))
-                        session.is_playing = False
-                    else:
-                        await websocket.send_text(json.dumps(telemetry))
-                    
-                    # 1.0x Real-Time Lockstep pacing (31.25 ms frame time)
-                    elapsed = asyncio.get_event_loop().time() - t_start
-                    sleep_time = max(0.001, session.block_sec - elapsed)
-                    await asyncio.sleep(sleep_time)
-                else:
-                    await asyncio.sleep(0.05)
-        except WebSocketDisconnect:
-            session.is_playing = False
-        except Exception:
+    active_connections.add(websocket)
+    try:
+        while True:
+            raw_text = await websocket.receive_text()
+            try:
+                data = json.loads(raw_text)
+                resp = session.handle_client_message(data)
+                await websocket.send_text(json.dumps({"type": "response", **resp}))
+            except Exception as e:
+                await websocket.send_text(json.dumps({"type": "error", "message": str(e)}))
+    except WebSocketDisconnect:
+        pass
+    except Exception:
+        pass
+    finally:
+        active_connections.discard(websocket)
+        if not active_connections:
             session.is_playing = False
 
-    recv_task = asyncio.create_task(receive_loop())
-    send_task = asyncio.create_task(send_loop())
-    
-    done, pending = await asyncio.wait([recv_task, send_task], return_when=asyncio.FIRST_COMPLETED)
-    for task in pending:
-        task.cancel()

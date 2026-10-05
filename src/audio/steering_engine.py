@@ -129,10 +129,10 @@ class AudioSteeringDSP:
         right = self.pan_a_right * steered_a + self.pan_b_right * steered_b
         stereo_out = np.stack([left, right], axis=0).astype(np.float32)
         
-        # Soft-knee peak limiter
+        # Soft-knee peak limiter using smooth saturation
         peak = np.max(np.abs(stereo_out))
         if peak > self.max_peak_amplitude:
-            stereo_out = stereo_out * (self.max_peak_amplitude / (peak + 1e-8))
+            stereo_out = np.tanh(stereo_out / self.max_peak_amplitude) * self.max_peak_amplitude
             
         return stereo_out, g_a_traj, g_b_traj
 

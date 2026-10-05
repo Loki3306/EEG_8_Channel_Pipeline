@@ -250,6 +250,7 @@ class NeuroSteerApp {
     togglePlay() {
         this.initAudioContext();
         if (!this.isPlaying) {
+            this.resetAudioQueue();
             this.sendWs({ action: "play" });
             this.isPlaying = true;
             this.playBtn.classList.add("paused");
@@ -266,6 +267,7 @@ class NeuroSteerApp {
 
     sendReset() {
         this.sendWs({ action: "reset" });
+        this.resetAudioQueue();
         this.isPlaying = false;
         this.playBtn.classList.remove("paused");
         this.playIcon.textContent = "▶";
@@ -278,6 +280,7 @@ class NeuroSteerApp {
     }
 
     sendSeek(timeSec) {
+        this.resetAudioQueue();
         this.sendWs({ action: "seek", time_sec: timeSec });
         this.currentTime = timeSec;
         this.updateTimeDisplay(timeSec);
@@ -289,6 +292,7 @@ class NeuroSteerApp {
     }
 
     sendSetTrial(trialId) {
+        this.resetAudioQueue();
         this.sendWs({ action: "set_trial", trial_id: trialId });
         this.sendReset();
     }
@@ -353,29 +357,39 @@ class NeuroSteerApp {
     initAudioContext() {
         if (!this.audioCtx) {
             const AudioContextClass = window.AudioContext || window.webkitAudioContext;
-            this.audioCtx = new AudioContextClass({ sampleRate: this.sampleRate });
-            this.nextAudioTime = this.audioCtx.currentTime + 0.05;
+            this.audioCtx = new AudioContextClass(); // Use system native rate for zero clock drift
+            this.nextAudioTime = 0;
         } else if (this.audioCtx.state === "suspended") {
             this.audioCtx.resume();
         }
     }
 
+    resetAudioQueue() {
+        if (this.audioCtx) {
+            this.nextAudioTime = this.audioCtx.currentTime + 0.12; // 120 ms jitter buffer priming
+        }
+    }
+
     enqueueAudioChunk(base64Data) {
         if (!this.audioCtx) return;
+        if (this.audioCtx.state === "suspended") {
+            this.audioCtx.resume();
+        }
 
         const binary = atob(base64Data);
         const len = binary.length / 2;
-        const int16Array = new Int16Array(len);
-        for (let i = 0; i < len; i++) {
-            int16Array[i] = binary.charCodeAt(i * 2) | (binary.charCodeAt(i * 2 + 1) << 8);
+        const bytes = new Uint8Array(binary.length);
+        for (let i = 0; i < binary.length; i++) {
+            bytes[i] = binary.charCodeAt(i);
         }
-
+        const int16Array = new Int16Array(bytes.buffer);
         const floatArray = new Float32Array(len);
         for (let i = 0; i < len; i++) {
             floatArray[i] = int16Array[i] / 32768.0;
         }
 
-        const buffer = this.audioCtx.createBuffer(1, len, this.sampleRate);
+        // Web Audio automatically resamples 16 kHz buffer to native output rate (e.g. 48 kHz)
+        const buffer = this.audioCtx.createBuffer(1, len, 16000);
         buffer.copyToChannel(floatArray, 0);
 
         const source = this.audioCtx.createBufferSource();
@@ -383,8 +397,8 @@ class NeuroSteerApp {
         source.connect(this.audioCtx.destination);
 
         const now = this.audioCtx.currentTime;
-        if (this.nextAudioTime < now) {
-            this.nextAudioTime = now + 0.02;
+        if (!this.nextAudioTime || this.nextAudioTime < now) {
+            this.nextAudioTime = now + 0.10; // Re-prime with 100 ms lookahead if underrun occurred
         }
 
         source.start(this.nextAudioTime);
