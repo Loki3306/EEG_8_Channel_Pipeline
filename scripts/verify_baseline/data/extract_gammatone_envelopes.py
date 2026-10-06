@@ -63,26 +63,47 @@ def extract_gammatone_envelopes(wav_path, num_bands=8, low_freq=100, high_freq=7
         
     return np.vstack(bands).astype(np.float32) # shape: (num_bands, Time)
 
-def discover_audio_directory() -> Path:
-    candidates = [
-        Path("/kaggle/input/datasets/lokeshgile/eeg-audio"),
+def discover_audio_directory(custom_audio_dir: str = None) -> Path:
+    if custom_audio_dir:
+        p = Path(custom_audio_dir)
+        if p.exists() and len(list(p.glob("*.wav"))) > 0:
+            return p
+            
+    search_roots = []
+    if Path("/kaggle/input").exists():
+        search_roots.append(Path("/kaggle/input"))
+        try:
+            for entry in os.listdir("/kaggle/input"):
+                search_roots.append(Path("/kaggle/input") / entry)
+        except Exception:
+            pass
+            
+    search_roots.extend([
+        Path("/kaggle/input/EEG_Audio"),
+        Path("/kaggle/input/eeg_audio"),
         Path("/kaggle/input/eeg-audio"),
         REPO_ROOT / "data" / "audio",
-    ]
-    for c in candidates:
-        if c.exists() and len(list(c.glob("*.wav"))) > 0:
-            return c
-    if Path("/kaggle/input").exists():
-        wavs = list(Path("/kaggle/input").rglob("*.wav"))
-        if wavs:
-            return wavs[0].parent
-    return candidates[0]
+        REPO_ROOT / "USCAPES" / "data" / "audio",
+    ])
+    
+    for root_dir in search_roots:
+        if not root_dir.exists():
+            continue
+        try:
+            for root, _, files in os.walk(str(root_dir), followlinks=True):
+                for f in files:
+                    if f.lower().endswith(".wav"):
+                        return Path(root)
+        except Exception:
+            pass
+            
+    return Path("/kaggle/input/EEG_Audio")
 
 def main(audio_dir=None, num_bands=8, output_file=None):
     if audio_dir is None:
         audio_dir = discover_audio_directory()
     else:
-        audio_dir = Path(audio_dir)
+        audio_dir = discover_audio_directory(audio_dir)
         
     out_file = resolve_gammatone_output_file(num_bands=num_bands, custom_path=output_file)
     wav_files = sorted(list(audio_dir.glob("*.wav")))

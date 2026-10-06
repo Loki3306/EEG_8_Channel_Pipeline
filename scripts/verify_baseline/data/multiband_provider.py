@@ -124,7 +124,7 @@ def get_multiband_envelopes(
             
     if auto_extract:
         from data.extract_gammatone_envelopes import main as extract_main, discover_audio_directory
-        audio_dir = Path(custom_audio_dir) if custom_audio_dir else discover_audio_directory()
+        audio_dir = discover_audio_directory(custom_audio_dir)
         if audio_dir.exists() and len(list(audio_dir.glob("*.wav"))) > 0:
             print(f"[DATA PROVIDER] Running self-contained {target_bands}-band Gammatone extraction from {audio_dir}...")
             out_file, envelopes = extract_main(audio_dir, num_bands=target_bands)

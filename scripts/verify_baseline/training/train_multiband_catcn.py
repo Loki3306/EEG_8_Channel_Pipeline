@@ -95,38 +95,57 @@ def evaluate_windows(model, eeg_list, ya_list, yb_list, window_samples, device):
     return std_acc, pol_acc, len(deltas)
 
 def discover_eeg_subjects(custom_eeg_dir: str = None) -> list[Path]:
-    """Discovers all DTU S*_data_preproc.mat files with robust fallback and recursive search."""
-    candidates = []
+    """Discovers all DTU S*_data_preproc.mat files with symlink traversal and case-insensitivity."""
+    found_paths = []
+    search_dirs = []
+    
     if custom_eeg_dir:
-        candidates.append(Path(custom_eeg_dir))
-    candidates.extend([
-        Path("/kaggle/input/datasets/lokeshgile/dataset-eeg"),
+        search_dirs.append(Path(custom_eeg_dir))
+        
+    # Auto-detect common Kaggle / local paths
+    if Path("/kaggle/input").exists():
+        search_dirs.append(Path("/kaggle/input"))
+        try:
+            for entry in os.listdir("/kaggle/input"):
+                search_dirs.append(Path("/kaggle/input") / entry)
+        except Exception:
+            pass
+            
+    search_dirs.extend([
+        Path("/kaggle/input/Dataset_EEG"),
+        Path("/kaggle/input/dataset_eeg"),
         Path("/kaggle/input/dataset-eeg"),
-        Path("/kaggle/input/datasets/lokeshgile/dtu-eeg-raw"),
-        Path("/kaggle/input/dtu-eeg-raw"),
+        Path("/kaggle/input/datasets/lokeshgile/dataset-eeg"),
         Path(r"C:\Users\lokes\Downloads\archive (2)\DATA_preproc"),
+        REPO_ROOT / "data",
+        VERIFY_ROOT / "data",
     ])
     
-    # 1. Check exact candidate directories (direct + recursive)
-    for c in candidates:
-        if c.exists():
-            mats = list(c.glob("*data_preproc*.mat")) + list(c.glob("S*.mat"))
-            if not mats:
-                mats = list(c.rglob("*data_preproc*.mat")) + list(c.rglob("S*.mat"))
-            if mats:
-                unique = {p.resolve(): p for p in mats}.values()
-                return sorted(unique, key=lambda p: p.stem)
-                
-    # 2. Universal fallback scan across all mounted /kaggle/input folders
-    if Path("/kaggle/input").exists():
-        rglobbed = list(Path("/kaggle/input").rglob("*data_preproc*.mat"))
-        if not rglobbed:
-            rglobbed = list(Path("/kaggle/input").rglob("S*.mat"))
-        if rglobbed:
-            unique = {p.resolve(): p for p in rglobbed}.values()
-            return sorted(unique, key=lambda p: p.stem)
+    for d in search_dirs:
+        if not d.exists():
+            continue
+        try:
+            for root, _, files in os.walk(str(d), followlinks=True):
+                for f in files:
+                    f_lower = f.lower()
+                    if f_lower.endswith(".mat") and ("data_preproc" in f_lower or (f_lower.startswith("s") and len(f_lower) > 1 and f_lower[1:2].isdigit())):
+                        found_paths.append(Path(root) / f)
+        except Exception:
+            pass
             
-    return []
+    if not found_paths:
+        return []
+        
+    # Deduplicate by resolved file path
+    unique = {p.resolve(): p for p in found_paths}
+    
+    def sort_key(p: Path):
+        name = p.stem.split("_")[0].upper()
+        if name.startswith("S") and name[1:].isdigit():
+            return (0, int(name[1:]))
+        return (1, p.stem)
+        
+    return sorted(unique.values(), key=sort_key)
 
 def run_multiband_training(args):
     montage_channels = MONTAGES[args.montage]
