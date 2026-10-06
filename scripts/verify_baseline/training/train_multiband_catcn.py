@@ -95,27 +95,36 @@ def evaluate_windows(model, eeg_list, ya_list, yb_list, window_samples, device):
     return std_acc, pol_acc, len(deltas)
 
 def discover_eeg_subjects(custom_eeg_dir: str = None) -> list[Path]:
-    """Discovers all DTU S*_data_preproc.mat files."""
+    """Discovers all DTU S*_data_preproc.mat files with robust fallback and recursive search."""
     candidates = []
     if custom_eeg_dir:
         candidates.append(Path(custom_eeg_dir))
     candidates.extend([
         Path("/kaggle/input/datasets/lokeshgile/dataset-eeg"),
         Path("/kaggle/input/dataset-eeg"),
+        Path("/kaggle/input/datasets/lokeshgile/dtu-eeg-raw"),
+        Path("/kaggle/input/dtu-eeg-raw"),
         Path(r"C:\Users\lokes\Downloads\archive (2)\DATA_preproc"),
     ])
     
+    # 1. Check exact candidate directories (direct + recursive)
     for c in candidates:
         if c.exists():
-            mats = sorted(list(c.glob("S*_data_preproc.mat")), key=lambda p: int(p.stem.split("_")[0][1:]))
+            mats = list(c.glob("*data_preproc*.mat")) + list(c.glob("S*.mat"))
+            if not mats:
+                mats = list(c.rglob("*data_preproc*.mat")) + list(c.rglob("S*.mat"))
             if mats:
-                return mats
+                unique = {p.resolve(): p for p in mats}.values()
+                return sorted(unique, key=lambda p: p.stem)
                 
+    # 2. Universal fallback scan across all mounted /kaggle/input folders
     if Path("/kaggle/input").exists():
-        rglobbed = list(Path("/kaggle/input").rglob("S*_data_preproc.mat"))
+        rglobbed = list(Path("/kaggle/input").rglob("*data_preproc*.mat"))
+        if not rglobbed:
+            rglobbed = list(Path("/kaggle/input").rglob("S*.mat"))
         if rglobbed:
-            by_stem = {p.stem: p for p in rglobbed}
-            return sorted(by_stem.values(), key=lambda path: int(path.stem.split("_")[0][1:]))
+            unique = {p.resolve(): p for p in rglobbed}.values()
+            return sorted(unique, key=lambda p: p.stem)
             
     return []
 
@@ -139,20 +148,31 @@ def run_multiband_training(args):
     
     # 1. Discover Subjects
     all_paths = discover_eeg_subjects(args.eeg_dir)
-    if args.subjects:
+    print(f"[DATA] Discovered {len(all_paths)} total subject file(s) on disk: {[p.name for p in all_paths]}")
+    
+    if args.subjects and args.subjects.lower() != 'all':
         requested = [s.strip().upper() for s in args.subjects.split(",") if s.strip()]
-        all_paths = [p for p in all_paths if p.stem.split("_")[0].upper() in requested]
-        print(f"[DATA] Filtered to {len(all_paths)} requested subjects: {[p.stem for p in all_paths]}")
+        filtered = [p for p in all_paths if p.stem.split("_")[0].upper() in requested]
+        if len(filtered) > 0:
+            all_paths = filtered
+            print(f"[DATA] Filtered to {len(all_paths)} requested subject(s): {[p.stem for p in all_paths]}")
+        else:
+            print(f"[WARNING] None of the requested subjects {requested} were found in the available files on disk.")
+            print(f"[INFO] Available subject files: {[p.name for p in all_paths]}")
+            print(f"[INFO] Automatically proceeding with all {len(all_paths)} discovered subject file(s).")
+            
     if not all_paths:
         if args.smoke_test:
             print("[SMOKE TEST] No real DTU files on disk. Synthesizing 2 mock subjects for pipeline audit...")
             all_paths = [Path("S1_data_preproc.mat"), Path("S2_data_preproc.mat")]
         else:
-            raise FileNotFoundError("No DTU patient files found matching criteria.")
+            raise FileNotFoundError(
+                f"No DTU patient files found matching criteria. Checked custom eeg_dir: '{args.eeg_dir}' and /kaggle/input."
+            )
     elif args.smoke_test and not args.subjects:
         all_paths = all_paths[:2]
         
-    print(f"[DATA] Selected {len(all_paths)} DTU subjects: {[p.stem for p in all_paths]}")
+    print(f"[DATA] Selected {len(all_paths)} DTU subjects for training: {[p.stem for p in all_paths]}")
     
     # 2. Load Mapping and 8-band Envelopes
     mapping = {}
