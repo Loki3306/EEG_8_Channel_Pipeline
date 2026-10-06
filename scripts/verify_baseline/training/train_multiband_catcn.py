@@ -280,23 +280,40 @@ def run_multiband_training(args):
     YA_tr = torch.from_numpy(np.stack(YA_tr_list, axis=0)).float()
     YB_tr = torch.from_numpy(np.stack(YB_tr_list, axis=0)).float()
     
+    # ---------------------------------------------------------
+    # RAM OPTIMIZATION: Free Python list pointers and numpy arrays
+    # ---------------------------------------------------------
+    del X_tr_list, YA_tr_list, YB_tr_list
+    import gc
+    gc.collect()
+    
     if len(X_va_list) > 0:
         X_va = torch.from_numpy(np.stack(X_va_list, axis=0)).float()
         YA_va = torch.from_numpy(np.stack(YA_va_list, axis=0)).float()
         YB_va = torch.from_numpy(np.stack(YB_va_list, axis=0)).float()
+        del X_va_list, YA_va_list, YB_va_list
+        gc.collect()
     else:
         X_va, YA_va, YB_va = X_tr[:min(16, len(X_tr))], YA_tr[:min(16, len(YA_tr))], YB_tr[:min(16, len(YB_tr))]
         
+    # ---------------------------------------------------------
+    # GPU OPTIMIZATION: Pinned memory for async DMA transfers
+    # ---------------------------------------------------------
+    use_cuda = torch.cuda.is_available()
     train_loader = DataLoader(
         TensorDataset(X_tr, YA_tr, YB_tr),
         batch_size=args.batch_size,
         shuffle=True,
-        drop_last=(len(X_tr) > args.batch_size)
+        drop_last=(len(X_tr) > args.batch_size),
+        pin_memory=use_cuda,
+        num_workers=2 if use_cuda else 0
     )
     val_loader = DataLoader(
         TensorDataset(X_va, YA_va, YB_va),
         batch_size=args.batch_size,
-        shuffle=False
+        shuffle=False,
+        pin_memory=use_cuda,
+        num_workers=2 if use_cuda else 0
     )
     
     # 4. Instantiate Multi-Band CA-TCN Model
@@ -315,7 +332,8 @@ def run_multiband_training(args):
     
     optimizer = optim.AdamW(model.parameters(), lr=args.lr, weight_decay=1e-4)
     scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.epochs, eta_min=1e-5)
-    scaler = torch.amp.GradScaler('cuda' if torch.cuda.is_available() else 'cpu')
+    # Fix GradScaler for PyTorch 2.x compatibility on CPU
+    scaler = torch.amp.GradScaler('cuda', enabled=torch.cuda.is_available())
     
     best_val_loss = float('inf')
     best_weights = deepcopy(model.state_dict())
