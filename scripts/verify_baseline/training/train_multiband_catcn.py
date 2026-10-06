@@ -13,6 +13,7 @@ import os
 import json
 import time
 import math
+import glob
 from pathlib import Path
 from copy import deepcopy
 import numpy as np
@@ -95,57 +96,88 @@ def evaluate_windows(model, eeg_list, ya_list, yb_list, window_samples, device):
     return std_acc, pol_acc, len(deltas)
 
 def discover_eeg_subjects(custom_eeg_dir: str = None) -> list[Path]:
-    """Discovers all DTU S*_data_preproc.mat files with symlink traversal and case-insensitivity."""
-    found_paths = []
-    search_dirs = []
+    """Discovers all DTU S*_data_preproc.mat files with exhaustive error-tolerant search."""
+    found_paths = set()
     
+    # Priority 1: If custom_eeg_dir provided directly
     if custom_eeg_dir:
-        search_dirs.append(Path(custom_eeg_dir))
-        
-    # Auto-detect common Kaggle / local paths
-    if Path("/kaggle/input").exists():
-        search_dirs.append(Path("/kaggle/input"))
-        try:
-            for entry in os.listdir("/kaggle/input"):
-                search_dirs.append(Path("/kaggle/input") / entry)
-        except Exception:
-            pass
-            
-    search_dirs.extend([
+        p = Path(custom_eeg_dir)
+        if p.is_file():
+            found_paths.add(p)
+        elif p.is_dir():
+            try:
+                for f in p.iterdir():
+                    if f.suffix.lower() == ".mat":
+                        found_paths.add(f)
+            except Exception:
+                pass
+            try:
+                for f in p.rglob("*.mat"):
+                    found_paths.add(f)
+            except Exception:
+                pass
+                
+    # Priority 2: Standard Kaggle and local candidate paths
+    standard_candidates = [
+        Path("/kaggle/input/datasets/lokeshgile/dataset-eeg"),
+        Path("/kaggle/input/dataset-eeg"),
         Path("/kaggle/input/Dataset_EEG"),
         Path("/kaggle/input/dataset_eeg"),
-        Path("/kaggle/input/dataset-eeg"),
-        Path("/kaggle/input/datasets/lokeshgile/dataset-eeg"),
+        Path("/kaggle/input/datasets/lokeshgile/dtu-eeg-raw"),
+        Path("/kaggle/input/dtu-eeg-raw"),
         Path(r"C:\Users\lokes\Downloads\archive (2)\DATA_preproc"),
         REPO_ROOT / "data",
         VERIFY_ROOT / "data",
-    ])
-    
-    for d in search_dirs:
-        if not d.exists():
-            continue
+    ]
+    for cand in standard_candidates:
+        if cand.exists() and cand.is_dir():
+            try:
+                for f in cand.iterdir():
+                    if f.suffix.lower() == ".mat":
+                        found_paths.add(f)
+            except Exception:
+                pass
+            try:
+                for f in cand.rglob("*.mat"):
+                    found_paths.add(f)
+            except Exception:
+                pass
+
+    # Priority 3: Deep exhaustive search across /kaggle/input using both glob and os.walk with error suppression
+    if Path("/kaggle/input").exists():
         try:
-            for root, _, files in os.walk(str(d), followlinks=True):
-                for f in files:
-                    f_lower = f.lower()
-                    if f_lower.endswith(".mat") and ("data_preproc" in f_lower or (f_lower.startswith("s") and len(f_lower) > 1 and f_lower[1:2].isdigit())):
-                        found_paths.append(Path(root) / f)
+            for m in glob.glob("/kaggle/input/**/*.mat", recursive=True):
+                found_paths.add(Path(m))
         except Exception:
             pass
             
-    if not found_paths:
+        def ignore_err(e):
+            return None
+            
+        for root, _, files in os.walk("/kaggle/input", onerror=ignore_err, followlinks=True):
+            for f in files:
+                if f.lower().endswith(".mat"):
+                    found_paths.add(Path(root) / f)
+
+    # Filter to actual DTU subject .mat files (contain data_preproc or start with S[0-9]+)
+    valid_subjects = []
+    for p in found_paths:
+        name = p.name.lower()
+        if "data_preproc" in name or (name.startswith("s") and len(name) > 1 and name[1:2].isdigit()):
+            valid_subjects.append(p)
+            
+    if not valid_subjects:
         return []
         
-    # Deduplicate by resolved file path
-    unique = {p.resolve(): p for p in found_paths}
-    
     def sort_key(p: Path):
-        name = p.stem.split("_")[0].upper()
-        if name.startswith("S") and name[1:].isdigit():
-            return (0, int(name[1:]))
+        s_part = p.stem.split("_")[0].upper()
+        if s_part.startswith("S") and s_part[1:].isdigit():
+            return (0, int(s_part[1:]))
         return (1, p.stem)
         
-    return sorted(unique.values(), key=sort_key)
+    # Deduplicate by filename stem so identical files from symlinks/aliases don't duplicate
+    by_stem = {p.stem: p for p in valid_subjects}
+    return sorted(by_stem.values(), key=sort_key)
 
 def run_multiband_training(args):
     montage_channels = MONTAGES[args.montage]
