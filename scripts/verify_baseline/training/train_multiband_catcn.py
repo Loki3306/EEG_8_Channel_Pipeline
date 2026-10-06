@@ -37,6 +37,14 @@ from data.multiband_provider import get_multiband_envelopes, get_mapping
 
 FS = 64
 
+# Prior single-band 5.0s CA-TCN benchmarks across all 18 DTU subjects
+BASELINE_5S = {
+    "S1": 66.3, "S2": 67.4, "S3": 60.2, "S4": 64.5, "S5": 65.1,
+    "S6": 54.4, "S7": 76.0, "S8": 72.6, "S9": 61.1, "S10": 63.2,
+    "S11": 57.3, "S12": 66.8, "S13": 69.8, "S14": 66.5, "S15": 78.5,
+    "S16": 60.7, "S17": 64.6, "S18": 66.7
+}
+
 def resolve_output_path(path_str: str) -> Path:
     p = Path(path_str)
     is_kaggle = (os.name != 'nt') and Path("/kaggle").exists()
@@ -131,16 +139,20 @@ def run_multiband_training(args):
     
     # 1. Discover Subjects
     all_paths = discover_eeg_subjects(args.eeg_dir)
+    if args.subjects:
+        requested = [s.strip().upper() for s in args.subjects.split(",") if s.strip()]
+        all_paths = [p for p in all_paths if p.stem.split("_")[0].upper() in requested]
+        print(f"[DATA] Filtered to {len(all_paths)} requested subjects: {[p.stem for p in all_paths]}")
     if not all_paths:
         if args.smoke_test:
             print("[SMOKE TEST] No real DTU files on disk. Synthesizing 2 mock subjects for pipeline audit...")
             all_paths = [Path("S1_data_preproc.mat"), Path("S2_data_preproc.mat")]
         else:
-            raise FileNotFoundError("No DTU patient files found. Please specify --eeg_dir or mount the dataset.")
-    elif args.smoke_test:
+            raise FileNotFoundError("No DTU patient files found matching criteria.")
+    elif args.smoke_test and not args.subjects:
         all_paths = all_paths[:2]
         
-    print(f"[DATA] Discovered {len(all_paths)} DTU subjects: {[p.stem for p in all_paths]}")
+    print(f"[DATA] Selected {len(all_paths)} DTU subjects: {[p.stem for p in all_paths]}")
     
     # 2. Load Mapping and 8-band Envelopes
     mapping = {}
@@ -412,19 +424,27 @@ def run_multiband_training(args):
     subject_results = {}
     cohort_accs = []
     
+    print(f"  {'Subject':<10} | {'Polarity Acc':<14} | {'Std Acc':<10} | {'Baseline (5s)':<14} | {'Gain / Margin':<14} | {'Test Wins':<10}")
+    print("  " + "-" * 84)
     for sub_name, (te_eeg, te_ya, te_yb) in subject_test_data.items():
         std_acc, pol_acc, n_wins = evaluate_windows(model, te_eeg, te_ya, te_yb, win_samples, device)
+        s_key = sub_name.split("_")[0].upper()
+        base_acc = BASELINE_5S.get(s_key, 65.7)
+        gain = pol_acc - base_acc
+        gain_str = f"+{gain:.2f}%" if gain >= 0 else f"{gain:.2f}%"
         subject_results[sub_name] = {
             "standard_acc": round(std_acc, 2),
             "polarity_acc": round(pol_acc, 2),
+            "baseline_5s": round(base_acc, 2),
+            "gain": round(gain, 2),
             "test_windows": n_wins
         }
         cohort_accs.append(pol_acc)
-        print(f"  • {sub_name:20s}: Polarity Acc = {pol_acc:5.1f}% | Std Acc = {std_acc:5.1f}% ({n_wins} windows)")
+        print(f"  {sub_name:<10} | {pol_acc:5.1f}%         | {std_acc:5.1f}%    | {base_acc:5.1f}%         | {gain_str:<14} | {n_wins:<10}")
         
     grand_mean = float(np.mean(cohort_accs)) if cohort_accs else 0.0
     print("-" * 96)
-    print(f"  GRAND COHORT MEAN ACCURACY: {grand_mean:.2f}% across {len(subject_results)} subjects")
+    print(f"  COHORT EVALUATION MEAN ACCURACY: {grand_mean:.2f}% across {len(subject_results)} subjects")
     print("=" * 96)
     
     # Save Metrics JSON
@@ -467,5 +487,6 @@ if __name__ == "__main__":
     parser.add_argument("--output_model", type=str, default="/kaggle/working/multiband_catcn_best.pt")
     parser.add_argument("--output_metrics", type=str, default="/kaggle/working/multiband_catcn_metrics.json")
     parser.add_argument("--smoke_test", action="store_true", help="Run rapid CPU smoke test")
+    parser.add_argument("--subjects", type=str, default=None, help="Comma-separated subjects to run, e.g. S15,S6,S1,S14")
     args = parser.parse_args()
     run_multiband_training(args)
