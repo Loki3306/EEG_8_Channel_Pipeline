@@ -1,0 +1,10 @@
+# USCAPES: Universal Subject-Calibrated Auditory Processing & EEG Steering
+# Runtime Dependencies
+
+torch>=2.0.0
+numpy>=1.22.0
+scipy>=1.8.0
+soundfile>=0.12.1
+fastapi>=0.100.0
+uvicorn>=0.22.0
+psutil>=5.9.0

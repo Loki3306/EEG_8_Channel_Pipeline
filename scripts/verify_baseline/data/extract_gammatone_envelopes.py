@@ -9,7 +9,18 @@ from joblib import Parallel, delayed
 import warnings
 warnings.filterwarnings("ignore")
 
-OUT_FILE = Path(__file__).resolve().parents[1] / "data" / "gammatone_envelopes.pkl"
+REPO_ROOT = Path(__file__).resolve().parents[2]
+
+def resolve_gammatone_output_file(num_bands=8, custom_path=None) -> Path:
+    if custom_path:
+        p = Path(custom_path)
+        p.parent.mkdir(parents=True, exist_ok=True)
+        return p
+    if (os.name != 'nt') and Path("/kaggle/working").exists():
+        return Path(f"/kaggle/working/gammatone_{num_bands}band_envelopes.pkl")
+    out = REPO_ROOT / "data" / f"gammatone_{num_bands}band_envelopes.pkl"
+    out.parent.mkdir(parents=True, exist_ok=True)
+    return out
 
 def erb_space(low_freq, high_freq, num_bands):
     erb_low = 21.4 * np.log10(4.37 * low_freq / 1000 + 1)
@@ -18,30 +29,29 @@ def erb_space(low_freq, high_freq, num_bands):
     cf = (10 ** (erb_points / 21.4) - 1) / 4.37 * 1000
     return cf
 
-def extract_gammatone_envelopes(wav_path, num_bands=28, low_freq=50, high_freq=8000, target_fs=64):
+def extract_gammatone_envelopes(wav_path, num_bands=8, low_freq=100, high_freq=7500, target_fs=64):
     fs, data = wavfile.read(wav_path)
     if len(data.shape) > 1:
         data = np.mean(data, axis=1) # mix to mono
         
     if high_freq >= fs / 2:
-        # Prevent floating point precision exceeding Nyquist
         high_freq = fs / 2 - 1.0
         
     cfs = erb_space(low_freq, high_freq, num_bands)
     
-    # Pre-compute low-pass filter for envelope extraction (8 Hz)
+    # Pre-compute low-pass filter for envelope extraction (8 Hz Butterworth)
     b_lp, a_lp = butter(3, 8 / (fs / 2), btype='low')
     
     audio_float = data.astype(np.float64)
     
-    # Define single band processing function for parallelization
     def process_band(cf):
         b_gt, a_gt = gammatone(cf, 'fir', fs=fs)
         filtered = lfilter(b_gt, a_gt, audio_float)
+        # Cortical power-law compression (0.6)
         compressed = np.abs(filtered) ** 0.6
         env_band = filtfilt(b_lp, a_lp, compressed)
         
-        # Use resample_poly instead of resample for 10x+ speedup on long audio
+        # Polyphase resample for high speed
         g = math.gcd(target_fs, fs)
         up = target_fs // g
         down = fs // g
@@ -51,31 +61,58 @@ def extract_gammatone_envelopes(wav_path, num_bands=28, low_freq=50, high_freq=8
         delayed(process_band)(cf) for cf in cfs
     )
         
-    return np.vstack(bands) # shape: (28, Time)
+    return np.vstack(bands).astype(np.float32) # shape: (num_bands, Time)
 
-def main(audio_dir):
-    OUT_FILE.parent.mkdir(parents=True, exist_ok=True)
-    wav_files = list(audio_dir.glob("*.wav"))
-    print(f"Extracting 28 gammatone sub-band envelopes for {len(wav_files)} files...")
+def discover_audio_directory() -> Path:
+    candidates = [
+        Path("/kaggle/input/datasets/lokeshgile/eeg-audio"),
+        Path("/kaggle/input/eeg-audio"),
+        REPO_ROOT / "data" / "audio",
+    ]
+    for c in candidates:
+        if c.exists() and len(list(c.glob("*.wav"))) > 0:
+            return c
+    if Path("/kaggle/input").exists():
+        wavs = list(Path("/kaggle/input").rglob("*.wav"))
+        if wavs:
+            return wavs[0].parent
+    return candidates[0]
+
+def main(audio_dir=None, num_bands=8, output_file=None):
+    if audio_dir is None:
+        audio_dir = discover_audio_directory()
+    else:
+        audio_dir = Path(audio_dir)
+        
+    out_file = resolve_gammatone_output_file(num_bands=num_bands, custom_path=output_file)
+    wav_files = sorted(list(audio_dir.glob("*.wav")))
+    if not wav_files:
+        raise FileNotFoundError(f"No WAV files found in {audio_dir}")
+        
+    print(f"Extracting {num_bands} Gammatone sub-band envelopes for {len(wav_files)} files from {audio_dir}...")
     
     results = {}
     for i, w in enumerate(wav_files):
-        if (i+1) % 10 == 0:
-            print(f"[{i+1}/{len(wav_files)}] Processing...")
+        if (i+1) % 10 == 0 or (i+1) == len(wav_files):
+            print(f"  [{i+1}/{len(wav_files)}] Extracted: {w.name}")
         try:
-            env = extract_gammatone_envelopes(w)
+            env = extract_gammatone_envelopes(w, num_bands=num_bands)
             results[w.name] = env
         except Exception as e:
             print(f"Failed {w.name}: {e}")
             
-    with open(OUT_FILE, "wb") as f:
+    with open(out_file, "wb") as f:
         pickle.dump(results, f)
         
-    print(f"Done. Saved to {OUT_FILE}")
+    print(f"Extraction Complete. Saved {len(results)} envelopes to {out_file}")
+    return out_file, results
 
 if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser()
-    parser.add_argument("--audio_dir", type=str, default="/kaggle/input/datasets/lokeshgile/eeg-audio", help="Path to raw WAV files")
+    parser.add_argument("--audio_dir", type=str, default=None, help="Path to raw WAV directory")
+    parser.add_argument("--num_bands", type=int, default=8, help="Number of cochlear Gammatone subbands (default: 8)")
+    parser.add_argument("--output_file", type=str, default=None, help="Custom output pickle path")
     args = parser.parse_args()
-    main(Path(args.audio_dir))
+    main(args.audio_dir, args.num_bands, args.output_file)
+

@@ -67,5 +67,9 @@ MONTAGES = {
     "bilateral_central": TIER2_BILATERAL_CENTRAL,
     "near_ear_strict": TIER3_NEAR_EAR_STRICT,
     "near_ear_expanded": TIER3_NEAR_EAR_EXPANDED,
-    "near_ear_temporal": TIER3_NEAR_EAR_TEMPORAL
+    "near_ear_temporal": TIER3_NEAR_EAR_TEMPORAL,
+    "dtu_8ch": TIER3_NEAR_EAR_STRICT,
+    "dtu_near_ear": TIER3_NEAR_EAR_STRICT,
+    "dtu_64ch": list(range(64))
 }
+

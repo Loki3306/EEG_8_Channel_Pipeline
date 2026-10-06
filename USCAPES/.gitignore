@@ -1,0 +1,28 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Environments
+.venv/
+venv/
+env/
+
+# Large Datasets & Raw Lab Files
+data/raw_eeg/*.mat
+data/raw_audio/*.wav
+*.mat
+*.wav
+*.zip
+*.tar.gz
+
+# Keep metadata & folder structures
+!data/audio_mapping.json
+!data/raw_eeg/.gitkeep
+!data/raw_audio/.gitkeep
+
+# Logs and Caches
+logs/
+.cache/
+.pytest_cache/
+.DS_Store
